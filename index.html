@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 1</title>
+<title>Slayers — Phase 2</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -36,7 +36,9 @@
     color: #888;
     letter-spacing: 1px;
     display: flex;
-    gap: 20px;
+    gap: 18px;
+    flex-wrap: wrap;
+    justify-content: center;
   }
   #hud .label { color: #5a5a66; }
   #hud .value { color: #eee; }
@@ -48,8 +50,9 @@
   <div id="hud">
     <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
     <div><span class="label">MOVE:</span> <span class="value">WASD / Stick</span></div>
-    <div><span class="label">LVL UP:</span> <span class="value">1 / 2 / 3 or click or A/B/X</span></div>
-    <div><span class="label">RESTART:</span> <span class="value">R or click or A</span></div>
+    <div><span class="label">INVENTORY:</span> <span class="value">Tab / I</span></div>
+    <div><span class="label">LVL UP:</span> <span class="value">1 / 2 / 3</span></div>
+    <div><span class="label">RESTART:</span> <span class="value">R</span></div>
   </div>
 
 <script>
@@ -62,14 +65,14 @@
   ctx.imageSmoothingEnabled = false;
   const W = canvas.width;
   const H = canvas.height;
-
   const $device = document.getElementById('device');
 
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4 };
   let state = STATE.PLAYING;
+  let prevState = STATE.PLAYING; // for restoring after inventory closes
   let levelUpChoices = [];
   let intermissionTimer = 0;
   let waveTimer = 0;
@@ -77,27 +80,24 @@
   let spawnTimer = 0;
   let shake = 0;
   let levelUpFlashTimer = 0;
+  let lootFlashTimer = 0;
+  let lastLootName = '';
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
 
-  // World entities (initialized in resetWorld)
+  // World entities
   let player;
   let enemies = [];
   let projectiles = [];
   let xpGems = [];
+  let itemDrops = [];
   let particles = [];
 
   // ============================================================
-  // INPUT ABSTRACTION LAYER
+  // INPUT
   // ============================================================
-  const Actions = {
-    moveX: 0, moveY: 0,
-    ability1: false, ability2: false, ability3: false, ability4: false,
-    classAction: false, pause: false, inventory: false,
-  };
-
-  // Just-pressed tracking (single-frame edge events)
+  const Actions = { moveX: 0, moveY: 0 };
   const keys = new Set();
   const keyJustPressed = new Set();
   const gpButtonsLast = new Map();
@@ -109,7 +109,7 @@
     const k = e.key.toLowerCase();
     if (!keys.has(k)) keyJustPressed.add(k);
     keys.add(k);
-    const blocked = ['arrowup','arrowdown','arrowleft','arrowright',' ','tab'];
+    const blocked = ['arrowup','arrowdown','arrowleft','arrowright',' ','tab','i'];
     if (blocked.includes(k)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -124,7 +124,6 @@
 
   window.addEventListener('gamepadconnected', (e) => {
     detectedGamepadType = detectGamepadType(e.gamepad.id);
-    console.log('Gamepad connected:', e.gamepad.id, '→', detectedGamepadType);
   });
   window.addEventListener('gamepaddisconnected', () => {});
 
@@ -132,8 +131,7 @@
     const lower = id.toLowerCase();
     if (lower.includes('xbox') || lower.includes('xinput')) return 'xbox';
     if (lower.includes('dualshock') || lower.includes('dualsense')
-        || lower.includes('playstation') || lower.includes('054c'))
-      return 'playstation';
+        || lower.includes('playstation') || lower.includes('054c')) return 'playstation';
     return 'generic';
   }
 
@@ -145,8 +143,7 @@
     if (keys.has('s') || keys.has('arrowdown'))  ky += 1;
     if (kx !== 0 || ky !== 0) {
       const len = Math.hypot(kx, ky);
-      Actions.moveX = kx / len;
-      Actions.moveY = ky / len;
+      Actions.moveX = kx / len; Actions.moveY = ky / len;
       activeDevice = 'keyboard';
       return true;
     }
@@ -156,56 +153,42 @@
   function pollGamepad() {
     gpJustPressed.clear();
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
-    let movedFromStick = false;
+    let moved = false;
     for (const gp of gps) {
       if (!gp) continue;
       if (!detectedGamepadType) detectedGamepadType = detectGamepadType(gp.id);
-
-      // Track button edges
       for (let i = 0; i < gp.buttons.length; i++) {
-        const wasPressed = gpButtonsLast.get(i) || false;
-        const isPressed = gp.buttons[i] && gp.buttons[i].pressed;
-        if (isPressed && !wasPressed) gpJustPressed.add(i);
-        gpButtonsLast.set(i, isPressed);
+        const wasP = gpButtonsLast.get(i) || false;
+        const isP = gp.buttons[i] && gp.buttons[i].pressed;
+        if (isP && !wasP) gpJustPressed.add(i);
+        gpButtonsLast.set(i, isP);
       }
-
-      // Left stick with radial deadzone
       const dz = 0.18;
       let gx = gp.axes[0] || 0;
       let gy = gp.axes[1] || 0;
       const mag = Math.hypot(gx, gy);
       if (mag < dz) { gx = 0; gy = 0; }
-      else {
-        const scaled = (mag - dz) / (1 - dz);
-        gx = (gx / mag) * scaled;
-        gy = (gy / mag) * scaled;
-      }
-
-      // D-pad fallback
+      else { const s = (mag - dz) / (1 - dz); gx = (gx / mag) * s; gy = (gy / mag) * s; }
       const btn = (i) => gp.buttons[i] && gp.buttons[i].pressed;
       if (btn(14)) gx = -1;
       if (btn(15)) gx =  1;
       if (btn(12)) gy = -1;
       if (btn(13)) gy =  1;
-
       if (gx !== 0 || gy !== 0) {
         const m = Math.hypot(gx, gy);
         if (m > 1) { gx /= m; gy /= m; }
-        Actions.moveX = gx;
-        Actions.moveY = gy;
+        Actions.moveX = gx; Actions.moveY = gy;
         activeDevice = 'gamepad';
-        movedFromStick = true;
+        moved = true;
       }
     }
-    return movedFromStick;
+    return moved;
   }
 
   function updateInput() {
-    Actions.moveX = 0;
-    Actions.moveY = 0;
+    Actions.moveX = 0; Actions.moveY = 0;
     const gpInput = pollGamepad();
     if (!gpInput) pollKeyboard();
-
     let label = 'keyboard';
     if (activeDevice === 'gamepad') {
       label = detectedGamepadType === 'playstation' ? 'PS5 controller'
@@ -216,20 +199,104 @@
   }
 
   // ============================================================
+  // ITEM SYSTEM — rarities, slots, bases, affixes
+  // ============================================================
+  const SLOT = {
+    HELM: 'helm', CHEST: 'chest', GLOVES: 'gloves', BOOTS: 'boots', BELT: 'belt',
+    AMULET: 'amulet', RING1: 'ring1', RING2: 'ring2', WEAPON: 'weapon', OFFHAND: 'offhand',
+  };
+  const SLOT_ORDER = ['helm', 'amulet', 'chest', 'offhand', 'gloves', 'belt', 'boots', 'ring1', 'ring2', 'weapon'];
+  const SLOT_LABEL = {
+    helm: 'HELM', chest: 'CHEST', gloves: 'GLOVES', boots: 'BOOTS', belt: 'BELT',
+    amulet: 'AMULET', ring1: 'RING I', ring2: 'RING II', weapon: 'WEAPON', offhand: 'OFFHAND',
+  };
+
+  const RARITY = {
+    WHITE:  { id: 'white',     name: 'Common',    color: '#cccccc', glow: 'rgba(204,204,204,0.35)', affixMin: 0, affixMax: 1, weight: 60 },
+    BLUE:   { id: 'blue',      name: 'Magic',     color: '#5599ff', glow: 'rgba(85,153,255,0.45)',  affixMin: 2, affixMax: 3, weight: 25 },
+    YELLOW: { id: 'yellow',    name: 'Rare',      color: '#ffcc33', glow: 'rgba(255,204,51,0.5)',   affixMin: 4, affixMax: 4, weight: 10 },
+    ORANGE: { id: 'orange',    name: 'Legendary', color: '#ff8000', glow: 'rgba(255,128,0,0.55)',   affixMin: 4, affixMax: 4, weight: 4 },
+    GREEN:  { id: 'green',     name: 'Set',       color: '#33cc55', glow: 'rgba(51,204,85,0.55)',   affixMin: 4, affixMax: 4, weight: 1 },
+  };
+  const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
+
+  const ITEM_BASES = [
+    { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H' },
+    { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C' },
+    { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G' },
+    { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F' },
+    { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L' },
+    { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
+    { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
+    { id: 'wand',   name: 'Twig Wand',      slot: 'weapon',  letter: 'W' },
+    { id: 'orb',    name: 'Glass Orb',      slot: 'offhand', letter: 'O' },
+  ];
+
+  // Affix definitions. fmt(v) -> display string. apply(player, value) -> mutate player bonus stats.
+  const AFFIX_POOL = [
+    { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },
+    { id: 'dmg_pct',      min: 5,  max: 18, fmt: (v) => `+${v}% Damage`,        apply: (p, v) => { p.bonusDmgPct += v; } },
+    { id: 'firerate_pct', min: 5,  max: 18, fmt: (v) => `+${v}% Attack Speed`,  apply: (p, v) => { p.bonusFireRatePct += v; } },
+    { id: 'regen',        min: 1,  max: 3,  fmt: (v) => `+${v} HP/sec Regen`,   apply: (p, v) => { p.bonusRegen += v; } },
+    { id: 'pickup',       min: 5,  max: 15, fmt: (v) => `+${v} Pickup Range`,   apply: (p, v) => { p.bonusPickupRange += v; } },
+    { id: 'movespeed',    min: 5,  max: 15, fmt: (v) => `+${v} Move Speed`,     apply: (p, v) => { p.bonusMoveSpeed += v; } },
+    { id: 'armor',        min: 1,  max: 5,  fmt: (v) => `+${v} Armor`,          apply: (p, v) => { p.bonusArmor += v; } },
+    { id: 'crit_chance',  min: 2,  max: 9,  fmt: (v) => `+${v}% Crit Chance`,   apply: (p, v) => { p.bonusCritChance += v; } },
+  ];
+
+  function rngInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+  function rngPick(arr) { return arr[rngInt(0, arr.length - 1)]; }
+
+  function pickWeightedRarity() {
+    const total = RARITY_LIST.reduce((s, r) => s + r.weight, 0);
+    let roll = Math.random() * total;
+    for (const r of RARITY_LIST) {
+      roll -= r.weight;
+      if (roll <= 0) return r;
+    }
+    return RARITY.WHITE;
+  }
+
+  function rollAffixes(count) {
+    const pool = AFFIX_POOL.slice();
+    const out = [];
+    for (let i = 0; i < count && pool.length > 0; i++) {
+      const idx = rngInt(0, pool.length - 1);
+      const def = pool.splice(idx, 1)[0];
+      const value = rngInt(def.min, def.max);
+      out.push({ def, value });
+    }
+    return out;
+  }
+
+  let nextItemId = 1;
+  function generateItem() {
+    const rarity = pickWeightedRarity();
+    const base = rngPick(ITEM_BASES);
+    const numAffixes = rngInt(rarity.affixMin, rarity.affixMax);
+    const affixes = rollAffixes(numAffixes);
+    return { id: nextItemId++, base, rarity, affixes };
+  }
+
+  function itemDisplayName(item) {
+    // Prefix rarity word for visibility
+    return `${item.rarity.name} ${item.base.name}`;
+  }
+
+  // ============================================================
   // LEVEL-UP STAT POOL
   // ============================================================
   const STAT_POOL = [
-    { id: 'maxhp',    name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 20); } },
-    { id: 'damage',   name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.dmgMult *= 1.15; } },
-    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.fireRateMult *= 1.2; } },
-    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet XP further',     color: '#9b59ff', apply: (p) => { p.pickupRange += 10; } },
-    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.speed += 15; } },
-    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.regen += 1; } },
+    { id: 'maxhp',    name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
+    { id: 'damage',   name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
+    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2;  p.recomputeStats(); } },
+    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10;    p.recomputeStats(); } },
+    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15;          p.recomputeStats(); } },
+    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1;           p.recomputeStats(); } },
   ];
 
   function rollLevelUpChoices() {
-    const shuffled = [...STAT_POOL].sort(() => Math.random() - 0.5);
-    return shuffled.slice(0, 3);
+    return [...STAT_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
   }
 
   // ============================================================
@@ -237,53 +304,116 @@
   // ============================================================
   function waveConfig(w) {
     return {
-      duration:        Math.min(20 + (w - 1) * 3, 50),
-      spawnInterval:   Math.max(0.7 - (w - 1) * 0.04, 0.18),
-      enemyHpMult:     1 + (w - 1) * 0.18,
-      enemySpeedMult:  1 + (w - 1) * 0.04,
-      enemyDmgMult:    1 + (w - 1) * 0.08,
+      duration:       Math.min(20 + (w - 1) * 3, 50),
+      spawnInterval:  Math.max(0.7 - (w - 1) * 0.04, 0.18),
+      enemyHpMult:    1 + (w - 1) * 0.18,
+      enemySpeedMult: 1 + (w - 1) * 0.04,
+      enemyDmgMult:   1 + (w - 1) * 0.08,
     };
   }
 
   // ============================================================
-  // ENTITY: Player
+  // ENTITY: Player (with base + bonus stat split)
   // ============================================================
   class Player {
     constructor(x, y) {
-      this.x = x;
-      this.y = y;
+      this.x = x; this.y = y;
       this.r = 5;
       this.facing = 1;
 
-      this.maxHp = 100;
-      this.hp = 100;
+      // BASE STATS (level-up only)
+      this.baseMaxHp = 100;
+      this.baseDmgMult = 1.0;
+      this.baseFireRateMult = 1.0;
+      this.basePickupRange = 30;
+      this.baseSpeed = 95;
+      this.baseRegen = 0;
+      this.baseArmor = 0;
+      this.baseCritChance = 0;
+
+      // EQUIPPED BONUSES (recomputed from items)
+      this.bonusMaxHp = 0;
+      this.bonusDmgPct = 0;
+      this.bonusFireRatePct = 0;
+      this.bonusPickupRange = 0;
+      this.bonusMoveSpeed = 0;
+      this.bonusRegen = 0;
+      this.bonusArmor = 0;
+      this.bonusCritChance = 0;
+
+      // FINAL STATS (computed)
+      this.maxHp = this.baseMaxHp;
+      this.hp = this.maxHp;
+      this.dmgMult = 1.0;
+      this.fireRateMult = 1.0;
+      this.pickupRange = this.basePickupRange;
+      this.speed = this.baseSpeed;
       this.regen = 0;
+      this.armor = 0;
+      this.critChance = 0;
+
       this.iframeTimer = 0;
       this.IFRAME = 0.5;
       this.hitFlash = 0;
 
-      this.speed = 95;
       this.level = 1;
       this.xp = 0;
       this.xpToNext = 5;
       this.pendingLevelUps = 0;
       this.kills = 0;
 
-      // Stat multipliers (boosted by level-up picks)
-      this.dmgMult = 1.0;
-      this.fireRateMult = 1.0;
-      this.pickupRange = 30;
-
-      // Weapon (single auto-firing weapon for Phase 1)
+      // Weapon (Phase 1 starter, modified by stats)
       this.weaponDamage = 4;
-      this.weaponFireRate = 2;     // shots/sec base
+      this.weaponFireRate = 2;
       this.weaponRange = 200;
       this.weaponProjSpeed = 280;
       this.fireTimer = 0;
+
+      // Equipment + inventory
+      this.equipped = {
+        helm: null, chest: null, gloves: null, boots: null, belt: null,
+        amulet: null, ring1: null, ring2: null, weapon: null, offhand: null,
+      };
+      this.inventory = [];
+      this.INVENTORY_CAP = 24;
+    }
+
+    recomputeStats() {
+      this.bonusMaxHp = 0;
+      this.bonusDmgPct = 0;
+      this.bonusFireRatePct = 0;
+      this.bonusPickupRange = 0;
+      this.bonusMoveSpeed = 0;
+      this.bonusRegen = 0;
+      this.bonusArmor = 0;
+      this.bonusCritChance = 0;
+
+      for (const k in this.equipped) {
+        const it = this.equipped[k];
+        if (!it) continue;
+        for (const aff of it.affixes) aff.def.apply(this, aff.value);
+      }
+
+      const oldMax = this.maxHp;
+      const ratio = oldMax > 0 ? this.hp / oldMax : 1;
+
+      this.maxHp = this.baseMaxHp + this.bonusMaxHp;
+      this.dmgMult = this.baseDmgMult * (1 + this.bonusDmgPct / 100);
+      this.fireRateMult = this.baseFireRateMult * (1 + this.bonusFireRatePct / 100);
+      this.pickupRange = this.basePickupRange + this.bonusPickupRange;
+      this.speed = this.baseSpeed + this.bonusMoveSpeed;
+      this.regen = this.baseRegen + this.bonusRegen;
+      this.armor = this.baseArmor + this.bonusArmor;
+      this.critChance = this.baseCritChance + this.bonusCritChance;
+
+      if (this.maxHp !== oldMax) {
+        this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
+      } else {
+        this.hp = Math.min(this.hp, this.maxHp);
+      }
     }
 
     update(dt) {
-      // Movement
       this.x += Actions.moveX * this.speed * dt;
       this.y += Actions.moveY * this.speed * dt;
       this.x = Math.max(this.r, Math.min(W - this.r, this.x));
@@ -291,16 +421,10 @@
       if (Actions.moveX >  0.1) this.facing =  1;
       else if (Actions.moveX < -0.1) this.facing = -1;
 
-      // Timers
       if (this.iframeTimer > 0) this.iframeTimer -= dt;
       if (this.hitFlash > 0) this.hitFlash -= dt;
+      if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
 
-      // Regen
-      if (this.regen > 0 && this.hp < this.maxHp) {
-        this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
-      }
-
-      // Weapon auto-fire
       if (this.fireTimer > 0) this.fireTimer -= dt;
       if (this.fireTimer <= 0) {
         const target = findNearestEnemy(this.x, this.y, this.weaponRange);
@@ -313,14 +437,12 @@
 
     takeDamage(amount) {
       if (this.iframeTimer > 0) return false;
-      this.hp -= amount;
+      const actual = Math.max(1, amount - this.armor);
+      this.hp -= actual;
       this.iframeTimer = this.IFRAME;
       this.hitFlash = 0.25;
       shake = Math.min(shake + 3, 6);
-      if (this.hp <= 0) {
-        this.hp = 0;
-        return true; // died
-      }
+      if (this.hp <= 0) { this.hp = 0; return true; }
       return false;
     }
 
@@ -339,28 +461,21 @@
       const px = Math.floor(this.x);
       const py = Math.floor(this.y);
       const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
-
-      // Body (green tunic)
       ctx.fillStyle = flash ? '#ff4444' : '#7ad96b';
       ctx.fillRect(px - 4, py - 2, 8, 7);
-      // Belt
       ctx.fillStyle = '#3a4a2a';
       ctx.fillRect(px - 4, py + 2, 8, 1);
-      // Legs
       ctx.fillStyle = '#4a3a2a';
       ctx.fillRect(px - 3, py + 5, 2, 2);
       ctx.fillRect(px + 1, py + 5, 2, 2);
-      // Head
       ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0';
       ctx.fillRect(px - 3, py - 7, 6, 5);
-      // Hair
       ctx.fillStyle = '#5a3a2a';
       ctx.fillRect(px - 3, py - 8, 6, 2);
-      // Eyes
       ctx.fillStyle = '#000';
-      const eyeOffset = this.facing === 1 ? 0 : -1;
-      ctx.fillRect(px - 2 + eyeOffset, py - 5, 1, 1);
-      ctx.fillRect(px + 1 + eyeOffset, py - 5, 1, 1);
+      const eo = this.facing === 1 ? 0 : -1;
+      ctx.fillRect(px - 2 + eo, py - 5, 1, 1);
+      ctx.fillRect(px + 1 + eo, py - 5, 1, 1);
     }
   }
 
@@ -369,8 +484,7 @@
   // ============================================================
   class Skeleton {
     constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x;
-      this.y = y;
+      this.x = x; this.y = y;
       this.r = 4;
       this.maxHp = Math.round(8 * hpMult);
       this.hp = this.maxHp;
@@ -380,7 +494,6 @@
       this.bobPhase = Math.random() * Math.PI * 2;
       this.hitFlash = 0;
     }
-
     update(dt, target) {
       const dx = target.x - this.x;
       const dy = target.y - this.y;
@@ -392,36 +505,25 @@
       this.bobPhase += dt * 8;
       if (this.hitFlash > 0) this.hitFlash -= dt;
     }
-
     takeDamage(amount) {
       this.hp -= amount;
       this.hitFlash = 0.1;
-      if (this.hp <= 0) {
-        this.alive = false;
-        return true;
-      }
+      if (this.hp <= 0) { this.alive = false; return true; }
       return false;
     }
-
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
-      const flash = this.hitFlash > 0;
-
-      // Body bones
-      ctx.fillStyle = flash ? '#ffffff' : '#e8e8d8';
+      const f = this.hitFlash > 0;
+      ctx.fillStyle = f ? '#ffffff' : '#e8e8d8';
       ctx.fillRect(px - 3, py - 1, 6, 4);
-      // Ribcage line
-      ctx.fillStyle = flash ? '#dddddd' : '#b0b0a0';
+      ctx.fillStyle = f ? '#dddddd' : '#b0b0a0';
       ctx.fillRect(px - 2, py + 1, 4, 1);
-      // Legs
-      ctx.fillStyle = flash ? '#eeeeee' : '#d0d0c0';
+      ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
       ctx.fillRect(px - 2, py + 3, 1, 2);
       ctx.fillRect(px + 1, py + 3, 1, 2);
-      // Skull
-      ctx.fillStyle = flash ? '#ffffff' : '#f0f0e0';
+      ctx.fillStyle = f ? '#ffffff' : '#f0f0e0';
       ctx.fillRect(px - 2, py - 5, 4, 4);
-      // Eye sockets
       ctx.fillStyle = '#1a0a0a';
       ctx.fillRect(px - 1, py - 4, 1, 1);
       ctx.fillRect(px + 1, py - 4, 1, 1);
@@ -429,34 +531,36 @@
   }
 
   // ============================================================
-  // ENTITY: Projectile
+  // ENTITY: Projectile (with crit support)
   // ============================================================
   class Projectile {
-    constructor(x, y, vx, vy, damage, life) {
-      this.x = x;
-      this.y = y;
-      this.vx = vx;
-      this.vy = vy;
-      this.r = 2;
+    constructor(x, y, vx, vy, damage, life, isCrit) {
+      this.x = x; this.y = y;
+      this.vx = vx; this.vy = vy;
+      this.r = isCrit ? 3 : 2;
       this.damage = damage;
       this.life = life;
       this.dead = false;
+      this.isCrit = !!isCrit;
     }
-
     update(dt) {
       this.x += this.vx * dt;
       this.y += this.vy * dt;
       this.life -= dt;
-      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) {
-        this.dead = true;
-      }
+      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
-
     draw(ctx) {
-      ctx.fillStyle = '#fff7a0';
-      ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-      ctx.fillStyle = '#ffe040';
-      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
+      if (this.isCrit) {
+        ctx.fillStyle = '#ff8800';
+        ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
+        ctx.fillStyle = '#ffe080';
+        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+      } else {
+        ctx.fillStyle = '#fff7a0';
+        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+        ctx.fillStyle = '#ffe040';
+        ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
+      }
     }
   }
 
@@ -465,8 +569,7 @@
   // ============================================================
   class XPGem {
     constructor(x, y, value) {
-      this.x = x;
-      this.y = y;
+      this.x = x; this.y = y;
       this.vx = (Math.random() - 0.5) * 40;
       this.vy = (Math.random() - 0.5) * 40 - 20;
       this.r = 3;
@@ -475,38 +578,22 @@
       this.magnetized = false;
       this.bobPhase = Math.random() * Math.PI * 2;
     }
-
     update(dt, player) {
       this.bobPhase += dt * 5;
-
       if (!this.magnetized) {
-        this.vx *= 0.92;
-        this.vy *= 0.92;
-        this.x += this.vx * dt;
-        this.y += this.vy * dt;
+        this.vx *= 0.92; this.vy *= 0.92;
+        this.x += this.vx * dt; this.y += this.vy * dt;
       }
-
       const dx = player.x - this.x;
       const dy = player.y - this.y;
       const d = Math.hypot(dx, dy);
-
-      if (!this.magnetized && d < player.pickupRange) {
-        this.magnetized = true;
-      }
-
+      if (!this.magnetized && d < player.pickupRange) this.magnetized = true;
       if (this.magnetized) {
-        const pullSpeed = 200 + (1 - Math.min(d / 100, 1)) * 250;
-        if (d > 0.01) {
-          this.x += (dx / d) * pullSpeed * dt;
-          this.y += (dy / d) * pullSpeed * dt;
-        }
-        if (d < player.r + this.r) {
-          player.addXp(this.value);
-          this.dead = true;
-        }
+        const sp = 200 + (1 - Math.min(d / 100, 1)) * 250;
+        if (d > 0.01) { this.x += (dx / d) * sp * dt; this.y += (dy / d) * sp * dt; }
+        if (d < player.r + this.r) { player.addXp(this.value); this.dead = true; }
       }
     }
-
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
@@ -519,22 +606,86 @@
   }
 
   // ============================================================
-  // ENTITY: Particle (juice)
+  // ENTITY: ItemDrop (loot on the ground)
+  // ============================================================
+  class ItemDrop {
+    constructor(x, y, item) {
+      this.x = x; this.y = y;
+      this.vx = (Math.random() - 0.5) * 30;
+      this.vy = (Math.random() - 0.5) * 30 - 25;
+      this.r = 5;
+      this.item = item;
+      this.dead = false;
+      this.settled = false;
+      this.bobPhase = Math.random() * Math.PI * 2;
+      this.glowPhase = Math.random() * Math.PI * 2;
+      this.age = 0;
+    }
+    update(dt, player) {
+      this.age += dt;
+      this.bobPhase += dt * 3;
+      this.glowPhase += dt * 4;
+      if (!this.settled) {
+        this.vx *= 0.85; this.vy *= 0.85;
+        this.x += this.vx * dt; this.y += this.vy * dt;
+        if (Math.abs(this.vx) + Math.abs(this.vy) < 5) this.settled = true;
+      }
+      // Pickup on touch
+      const dx = player.x - this.x;
+      const dy = player.y - this.y;
+      const rr = player.r + this.r;
+      if (dx * dx + dy * dy < rr * rr) {
+        // Inventory capacity check
+        if (player.inventory.length < player.INVENTORY_CAP) {
+          player.inventory.push(this.item);
+          this.dead = true;
+          spawnBurst(this.x, this.y, [this.item.rarity.color, '#ffffff'], 8);
+          lootFlashTimer = 2.0;
+          lastLootName = itemDisplayName(this.item);
+        }
+        // If inventory full, leave on ground (no pickup)
+      }
+    }
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
+      const glow = 0.4 + 0.2 * Math.sin(this.glowPhase);
+      // Rarity glow
+      ctx.globalAlpha = glow;
+      ctx.fillStyle = this.item.rarity.color;
+      ctx.fillRect(px - 6, py - 6, 12, 12);
+      ctx.globalAlpha = 1;
+      // Outer ring (rarity color)
+      ctx.fillStyle = this.item.rarity.color;
+      ctx.fillRect(px - 4, py - 4, 8, 8);
+      // Inner dark
+      ctx.fillStyle = '#1a1a22';
+      ctx.fillRect(px - 3, py - 3, 6, 6);
+      // Slot letter
+      ctx.fillStyle = this.item.rarity.color;
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.item.base.letter, px, py + 1);
+      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ============================================================
+  // ENTITY: Particle
   // ============================================================
   class Particle {
     constructor(x, y, vx, vy, color, life, size) {
       this.x = x; this.y = y;
       this.vx = vx; this.vy = vy;
       this.color = color;
-      this.life = life;
-      this.maxLife = life;
+      this.life = life; this.maxLife = life;
       this.size = size || 2;
     }
     update(dt) {
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
-      this.vx *= 0.90;
-      this.vy *= 0.90;
+      this.x += this.vx * dt; this.y += this.vy * dt;
+      this.vx *= 0.90; this.vy *= 0.90;
       this.life -= dt;
     }
     draw(ctx) {
@@ -546,7 +697,6 @@
     }
     get dead() { return this.life <= 0; }
   }
-
   function spawnBurst(x, y, palette, count) {
     palette = palette || ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'];
     count = count || 8;
@@ -563,18 +713,16 @@
   // ============================================================
   function spawnEnemy(cfg) {
     const edge = Math.floor(Math.random() * 4);
-    const pad = 12;
-    let x, y;
-    if (edge === 0)      { x = Math.random() * W; y = -pad; }
-    else if (edge === 1) { x = W + pad;           y = Math.random() * H; }
+    const pad = 12; let x, y;
+    if (edge === 0) { x = Math.random() * W; y = -pad; }
+    else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
-    else                 { x = -pad;              y = Math.random() * H; }
+    else { x = -pad; y = Math.random() * H; }
     enemies.push(new Skeleton(x, y, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
   }
 
   function findNearestEnemy(x, y, maxRange) {
-    let best = null;
-    let bestD = maxRange;
+    let best = null; let bestD = maxRange;
     for (const e of enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - x, e.y - y);
@@ -590,36 +738,35 @@
     if (d < 0.01) return;
     const sp = shooter.weaponProjSpeed;
     const life = shooter.weaponRange / sp + 0.05;
-    const dmg = shooter.weaponDamage * shooter.dmgMult;
-    projectiles.push(new Projectile(
-      shooter.x, shooter.y,
-      (dx / d) * sp,
-      (dy / d) * sp,
-      dmg,
-      life
-    ));
+    let dmg = shooter.weaponDamage * shooter.dmgMult;
+    const isCrit = Math.random() * 100 < shooter.critChance;
+    if (isCrit) dmg *= 2;
+    projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
   }
 
   // ============================================================
   // COLLISIONS
   // ============================================================
   function checkCollisions() {
-    // Projectile vs enemy
     for (const proj of projectiles) {
       if (proj.dead) continue;
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
         const dx = enemy.x - proj.x;
         const dy = enemy.y - proj.y;
-        const rr = (enemy.r + proj.r);
+        const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = enemy.takeDamage(proj.damage);
           proj.dead = true;
-          spawnBurst(proj.x, proj.y, ['#fff7a0', '#ffd040'], 4);
+          spawnBurst(proj.x, proj.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
           if (died) {
             player.kills++;
             spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
             xpGems.push(new XPGem(enemy.x, enemy.y, 1));
+            // Item drop chance — Phase 2 starting drop rate ~18%
+            if (Math.random() < 0.18) {
+              itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
+            }
             shake = Math.min(shake + 1, 3);
           }
           break;
@@ -627,7 +774,6 @@
       }
     }
 
-    // Enemy vs player (contact damage)
     if (player.iframeTimer <= 0) {
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
@@ -636,9 +782,7 @@
         const rr = enemy.r + player.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = player.takeDamage(enemy.contactDmg);
-          if (died) {
-            state = STATE.DEAD;
-          }
+          if (died) state = STATE.DEAD;
           break;
         }
       }
@@ -651,32 +795,18 @@
   function endWave() {
     state = STATE.INTERMISSION;
     intermissionTimer = 0;
-    // Clear stragglers off-screen (none should remain, but be safe)
     enemies = [];
-    if (player.pendingLevelUps > 0) {
-      enterLevelUp();
-    } else {
-      intermissionTimer = 3;
-    }
+    if (player.pendingLevelUps > 0) enterLevelUp();
+    else intermissionTimer = 3;
   }
-
-  function enterLevelUp() {
-    state = STATE.LEVELUP;
-    levelUpChoices = rollLevelUpChoices();
-  }
-
+  function enterLevelUp() { state = STATE.LEVELUP; levelUpChoices = rollLevelUpChoices(); }
   function pickLevelUp(idx) {
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
-    if (player.pendingLevelUps > 0) {
-      enterLevelUp();
-    } else {
-      state = STATE.INTERMISSION;
-      intermissionTimer = 3;
-    }
+    if (player.pendingLevelUps > 0) enterLevelUp();
+    else { state = STATE.INTERMISSION; intermissionTimer = 3; }
   }
-
   function startNextWave() {
     currentWave += 1;
     state = STATE.PLAYING;
@@ -684,26 +814,53 @@
     waveTimer = cfg.duration;
     spawnTimer = 0;
   }
-
+  function toggleInventory() {
+    if (state === STATE.INVENTORY) {
+      state = prevState;
+    } else if (state === STATE.PLAYING || state === STATE.INTERMISSION) {
+      prevState = state;
+      state = STATE.INVENTORY;
+    }
+  }
   function resetWorld() {
     player = new Player(W / 2, H / 2);
-    enemies = [];
-    projectiles = [];
-    xpGems = [];
-    particles = [];
+    enemies = []; projectiles = []; xpGems = []; itemDrops = []; particles = [];
     shake = 0;
     state = STATE.PLAYING;
-    currentWave = 1;
-    spawnTimer = 0;
-    intermissionTimer = 0;
-    levelUpChoices = [];
-    levelUpFlashTimer = 0;
+    currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
+    levelUpChoices = []; levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
   }
 
   // ============================================================
-  // RENDER
+  // EQUIP / UNEQUIP
+  // ============================================================
+  function equipFromInventory(idx) {
+    const item = player.inventory[idx];
+    if (!item) return;
+    let targetSlot = item.base.slot;
+    if (targetSlot === 'ring') {
+      if (!player.equipped.ring1) targetSlot = 'ring1';
+      else if (!player.equipped.ring2) targetSlot = 'ring2';
+      else targetSlot = 'ring1'; // replace
+    }
+    player.inventory.splice(idx, 1);
+    if (player.equipped[targetSlot]) player.inventory.push(player.equipped[targetSlot]);
+    player.equipped[targetSlot] = item;
+    player.recomputeStats();
+  }
+  function unequipSlot(slotKey) {
+    const item = player.equipped[slotKey];
+    if (!item) return;
+    if (player.inventory.length >= player.INVENTORY_CAP) return; // can't, full
+    player.equipped[slotKey] = null;
+    player.inventory.push(item);
+    player.recomputeStats();
+  }
+
+  // ============================================================
+  // RENDER — background, HUD, level-up, death, inventory
   // ============================================================
   function drawBackground() {
     ctx.fillStyle = '#1f1f24';
@@ -711,9 +868,7 @@
     ctx.fillStyle = '#26262c';
     for (let gx = 0; gx < W; gx += 16) {
       for (let gy = 0; gy < H; gy += 16) {
-        if (((gx / 16) + (gy / 16)) % 2 === 0) {
-          ctx.fillRect(gx, gy, 16, 16);
-        }
+        if (((gx / 16) + (gy / 16)) % 2 === 0) ctx.fillRect(gx, gy, 16, 16);
       }
     }
   }
@@ -721,138 +876,274 @@
   function drawHud() {
     // HP bar
     const hpx = 8, hpy = 8;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
-    ctx.fillStyle = '#3a2020';
-    ctx.fillRect(hpx, hpy, 120, 6);
+    ctx.fillStyle = '#000'; ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
+    ctx.fillStyle = '#3a2020'; ctx.fillRect(hpx, hpy, 120, 6);
     const hpRatio = Math.max(0, player.hp / player.maxHp);
     ctx.fillStyle = hpRatio > 0.5 ? '#ff5050' : hpRatio > 0.25 ? '#ff8030' : '#ff3030';
     ctx.fillRect(hpx, hpy, 120 * hpRatio, 6);
-    ctx.fillStyle = '#fff';
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
     ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 2, hpy + 5);
 
     // XP bar
     const xpx = 8, xpy = 20;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
-    ctx.fillStyle = '#1a2030';
-    ctx.fillRect(xpx, xpy, 120, 3);
+    ctx.fillStyle = '#000'; ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
+    ctx.fillStyle = '#1a2030'; ctx.fillRect(xpx, xpy, 120, 3);
     const xpRatio = player.xp / player.xpToNext;
-    ctx.fillStyle = '#9b59ff';
-    ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
-    ctx.fillStyle = '#c89aff';
-    ctx.font = '8px monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(`LV ${player.level}`, xpx + 1, xpy + 13);
+    ctx.fillStyle = '#9b59ff'; ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
+    ctx.fillStyle = '#c89aff'; ctx.fillText(`LV ${player.level}`, xpx + 1, xpy + 13);
 
-    // Wave + time / intermission countdown
+    // Wave / intermission
     ctx.textAlign = 'center';
     if (state === STATE.PLAYING) {
-      ctx.fillStyle = '#fff';
-      ctx.font = '10px monospace';
+      ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
       ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
-      ctx.fillStyle = '#999';
-      ctx.font = '8px monospace';
+      ctx.fillStyle = '#999'; ctx.font = '8px monospace';
       ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
     } else if (state === STATE.INTERMISSION) {
-      ctx.fillStyle = '#fff';
-      ctx.font = '10px monospace';
+      ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
       ctx.fillText(`WAVE ${currentWave + 1} INCOMING`, W / 2, 12);
-      ctx.fillStyle = '#7ad96b';
-      ctx.font = '14px monospace';
+      ctx.fillStyle = '#7ad96b'; ctx.font = '14px monospace';
       ctx.fillText(`${Math.ceil(intermissionTimer)}`, W / 2, 28);
     }
 
-    // Kills + enemies count
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = 'right';
-    ctx.font = '8px monospace';
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
     ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
     ctx.fillStyle = '#aaa';
     ctx.fillText(`ENEMIES  ${enemies.filter(e => e.alive).length}`, W - 8, 22);
+    ctx.fillText(`BAG  ${player.inventory.length}/${player.INVENTORY_CAP}`, W - 8, 32);
 
-    // Level-up flash
     if (levelUpFlashTimer > 0) {
-      const alpha = Math.min(1, levelUpFlashTimer / 1.5);
-      ctx.fillStyle = `rgba(255, 208, 64, ${alpha})`;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(`+ LEVEL UP  (${player.pendingLevelUps} queued)`, W / 2, 42);
+      const a = Math.min(1, levelUpFlashTimer / 1.5);
+      ctx.fillStyle = `rgba(255,208,64,${a})`;
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`+ LEVEL UP  (${player.pendingLevelUps} queued)`, W / 2, 44);
     }
-
+    if (lootFlashTimer > 0 && lastLootName) {
+      const a = Math.min(1, lootFlashTimer / 2.0);
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
+      ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`+ ${lastLootName}`, W / 2, H - 12);
+    }
     ctx.textAlign = 'left';
   }
 
   function drawLevelUpScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.72)';
     ctx.fillRect(0, 0, W, H);
-
     ctx.fillStyle = '#ffd040';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
     ctx.fillText('LEVEL UP', W / 2, 56);
-
-    ctx.fillStyle = '#888';
-    ctx.font = '8px monospace';
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
     ctx.fillText('Pick one: 1 / 2 / 3, click, or face button', W / 2, 72);
-
     const cardW = 130, cardH = 140, gap = 18;
     const totalW = cardW * 3 + gap * 2;
     const startX = (W - totalW) / 2;
     const cardY = (H - cardH) / 2 + 10;
-
     for (let i = 0; i < levelUpChoices.length; i++) {
       const choice = levelUpChoices[i];
-      const cx = startX + i * (cardW + gap);
-      const cy = cardY;
+      const cx = startX + i * (cardW + gap); const cy = cardY;
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
-
       ctx.fillStyle = hovered ? '#3a3a45' : '#2a2a35';
       ctx.fillRect(cx, cy, cardW, cardH);
-
-      ctx.strokeStyle = choice.color;
-      ctx.lineWidth = hovered ? 3 : 2;
+      ctx.strokeStyle = choice.color; ctx.lineWidth = hovered ? 3 : 2;
       ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
       ctx.lineWidth = 1;
-
-      ctx.fillStyle = '#666';
-      ctx.font = 'bold 10px monospace';
-      ctx.textAlign = 'left';
+      ctx.fillStyle = '#666'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`[${i + 1}]`, cx + 6, cy + 14);
-
-      ctx.fillStyle = choice.color;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
+      ctx.fillStyle = choice.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
       ctx.fillText(choice.name, cx + cardW / 2, cy + 64);
-
-      ctx.fillStyle = '#aaa';
-      ctx.font = '8px monospace';
+      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
       ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);
     }
-
     ctx.textAlign = 'left';
   }
 
   function drawDeathScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.fillStyle = '#ff4040';
-    ctx.textAlign = 'center';
-    ctx.font = 'bold 26px monospace';
+    ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff4040'; ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
-
-    ctx.fillStyle = '#fff';
-    ctx.font = '10px monospace';
+    ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
     ctx.fillText(`Wave ${currentWave}  -  Level ${player.level}  -  Kills ${player.kills}`, W / 2, H / 2);
-
-    ctx.fillStyle = '#aaa';
-    ctx.font = '9px monospace';
+    ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
-
     ctx.textAlign = 'left';
+  }
+
+  // ============================================================
+  // INVENTORY UI — paper-doll + grid + tooltip
+  // ============================================================
+  // Layout positions
+  const EQ_LAYOUT = {
+    helm:    { x: 70,  y: 50  },
+    amulet:  { x: 100, y: 50  },
+    chest:   { x: 70,  y: 84  },
+    offhand: { x: 100, y: 84  },
+    gloves:  { x: 40,  y: 84  },
+    belt:    { x: 70,  y: 118 },
+    boots:   { x: 70,  y: 152 },
+    ring1:   { x: 40,  y: 152 },
+    ring2:   { x: 100, y: 152 },
+    weapon:  { x: 70,  y: 186 },
+  };
+  const EQ_SLOT_SIZE = 26;
+  const INV_START_X = 200;
+  const INV_START_Y = 50;
+  const INV_COLS = 6;
+  const INV_ROWS = 4;
+  const INV_SLOT_SIZE = 28;
+  const INV_GAP = 4;
+
+  // Returns slot key under mouse or null
+  function getEquippedSlotAtMouse() {
+    for (const k in EQ_LAYOUT) {
+      const p = EQ_LAYOUT[k];
+      if (mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= p.y && mouseY < p.y + EQ_SLOT_SIZE) return k;
+    }
+    return null;
+  }
+  function getInventoryIdxAtMouse() {
+    for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+      const col = i % INV_COLS;
+      const row = Math.floor(i / INV_COLS);
+      const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+      const y = INV_START_Y + row * (INV_SLOT_SIZE + INV_GAP);
+      if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) return i;
+    }
+    return -1;
+  }
+
+  function drawItemInBox(item, x, y, size) {
+    if (!item) return;
+    // Rarity border
+    ctx.strokeStyle = item.rarity.color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
+    ctx.lineWidth = 1;
+    // Slot letter
+    ctx.fillStyle = item.rarity.color;
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.base.letter, x + size / 2, y + size / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+  }
+
+  function drawInventoryScreen() {
+    // Dim background
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    // Title
+    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
+    ctx.fillText('INVENTORY', W / 2, 20);
+    ctx.fillStyle = '#666'; ctx.font = '8px monospace';
+    ctx.fillText('Click inventory item to equip - click equipped to unequip - Tab/I/Esc to close', W / 2, 32);
+
+    // === EQUIPPED SIDE ===
+    ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
+    ctx.fillText('EQUIPPED', 30, 44);
+    for (const k of SLOT_ORDER) {
+      const p = EQ_LAYOUT[k];
+      const item = player.equipped[k];
+      // Slot box
+      const hovered = mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= p.y && mouseY < p.y + EQ_SLOT_SIZE;
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
+      ctx.fillRect(p.x, p.y, EQ_SLOT_SIZE, EQ_SLOT_SIZE);
+      ctx.strokeStyle = '#444'; ctx.strokeRect(p.x + 0.5, p.y + 0.5, EQ_SLOT_SIZE - 1, EQ_SLOT_SIZE - 1);
+      if (item) {
+        drawItemInBox(item, p.x, p.y, EQ_SLOT_SIZE);
+      } else {
+        // Empty slot label
+        ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(SLOT_LABEL[k], p.x + EQ_SLOT_SIZE / 2, p.y + EQ_SLOT_SIZE / 2 + 2);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // === STATS BLOCK ===
+    const sx = 30, sy = 220;
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
+    ctx.fillText('STATS', sx, sy);
+    ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
+    const lines = [
+      `HP        ${Math.ceil(player.hp)} / ${player.maxHp}`,
+      `DAMAGE    x${player.dmgMult.toFixed(2)}`,
+      `ATKSPD    x${player.fireRateMult.toFixed(2)}`,
+      `ARMOR     ${player.armor}`,
+      `CRIT      ${player.critChance.toFixed(0)}%`,
+      `REGEN     ${player.regen}/s`,
+      `SPEED     ${player.speed.toFixed(0)}`,
+      `PICKUP    ${player.pickupRange.toFixed(0)}`,
+    ];
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], sx, sy + 12 + i * 10);
+
+    // === INVENTORY GRID ===
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
+    ctx.fillText(`INVENTORY (${player.inventory.length}/${player.INVENTORY_CAP})`, INV_START_X, 44);
+    for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+      const col = i % INV_COLS;
+      const row = Math.floor(i / INV_COLS);
+      const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+      const y = INV_START_Y + row * (INV_SLOT_SIZE + INV_GAP);
+      const item = player.inventory[i];
+      const hovered = mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE;
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
+      ctx.fillRect(x, y, INV_SLOT_SIZE, INV_SLOT_SIZE);
+      ctx.strokeStyle = '#444'; ctx.strokeRect(x + 0.5, y + 0.5, INV_SLOT_SIZE - 1, INV_SLOT_SIZE - 1);
+      if (item) drawItemInBox(item, x, y, INV_SLOT_SIZE);
+    }
+
+    // === TOOLTIP ===
+    // Determine hovered item (equipped takes priority)
+    let tooltipItem = null;
+    let tooltipSource = '';
+    const eqSlot = getEquippedSlotAtMouse();
+    if (eqSlot && player.equipped[eqSlot]) {
+      tooltipItem = player.equipped[eqSlot];
+      tooltipSource = `EQUIPPED - ${SLOT_LABEL[eqSlot]}`;
+    } else {
+      const invIdx = getInventoryIdxAtMouse();
+      if (invIdx >= 0 && player.inventory[invIdx]) {
+        tooltipItem = player.inventory[invIdx];
+        tooltipSource = `INVENTORY [click to equip]`;
+      }
+    }
+
+    // Tooltip box at bottom
+    const tx = 30, ty = H - 80, tw = W - 60, th = 70;
+    ctx.fillStyle = '#1a1a22';
+    ctx.fillRect(tx, ty, tw, th);
+    ctx.strokeStyle = tooltipItem ? tooltipItem.rarity.color : '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2);
+    ctx.lineWidth = 1;
+
+    if (tooltipItem) {
+      ctx.fillStyle = tooltipItem.rarity.color;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 14);
+      ctx.fillStyle = '#666';
+      ctx.font = '7px monospace';
+      ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}`, tx + 8, ty + 25);
+      ctx.fillStyle = '#ddd';
+      ctx.font = '8px monospace';
+      if (tooltipItem.affixes.length === 0) {
+        ctx.fillStyle = '#888';
+        ctx.fillText('(no affixes)', tx + 8, ty + 40);
+      } else {
+        for (let i = 0; i < tooltipItem.affixes.length; i++) {
+          const aff = tooltipItem.affixes[i];
+          ctx.fillText(aff.def.fmt(aff.value), tx + 8, ty + 40 + i * 9);
+        }
+      }
+    } else {
+      ctx.fillStyle = '#555';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Hover an item to inspect', W / 2, ty + th / 2 + 3);
+      ctx.textAlign = 'left';
+    }
   }
 
   // ============================================================
@@ -867,42 +1158,44 @@
 
     updateInput();
 
+    // Tab/I to toggle inventory (only outside death/levelup)
+    if ((keyJustPressed.has('tab') || keyJustPressed.has('i')) &&
+        (state === STATE.PLAYING || state === STATE.INTERMISSION || state === STATE.INVENTORY)) {
+      toggleInventory();
+    } else if (keyJustPressed.has('escape') && state === STATE.INVENTORY) {
+      toggleInventory();
+    }
+
     if (state === STATE.PLAYING) {
       const cfg = waveConfig(currentWave);
       waveTimer -= dt;
-
-      // Spawn while wave timer running
       if (waveTimer > 0) {
         spawnTimer += dt;
-        while (spawnTimer >= cfg.spawnInterval) {
-          spawnTimer -= cfg.spawnInterval;
-          spawnEnemy(cfg);
-        }
+        while (spawnTimer >= cfg.spawnInterval) { spawnTimer -= cfg.spawnInterval; spawnEnemy(cfg); }
       }
-
       player.update(dt);
       for (const e of enemies) if (e.alive) e.update(dt, player);
       for (const p of projectiles) if (!p.dead) p.update(dt);
       for (const g of xpGems) if (!g.dead) g.update(dt, player);
+      for (const d of itemDrops) if (!d.dead) d.update(dt, player);
 
       checkCollisions();
 
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
       xpGems = xpGems.filter(g => !g.dead);
+      itemDrops = itemDrops.filter(d => !d.dead);
 
-      if (waveTimer <= 0 && enemies.length === 0) {
-        endWave();
-      }
+      if (waveTimer <= 0 && enemies.length === 0) endWave();
     }
     else if (state === STATE.LEVELUP) {
       let picked = -1;
       if (keyJustPressed.has('1')) picked = 0;
       else if (keyJustPressed.has('2')) picked = 1;
       else if (keyJustPressed.has('3')) picked = 2;
-      else if (gpJustPressed.has(0)) picked = 0;  // A / Cross
-      else if (gpJustPressed.has(1)) picked = 1;  // B / Circle
-      else if (gpJustPressed.has(2)) picked = 2;  // X / Square
+      else if (gpJustPressed.has(0)) picked = 0;
+      else if (gpJustPressed.has(1)) picked = 1;
+      else if (gpJustPressed.has(2)) picked = 2;
       else if (mouseClicked) {
         const cardW = 130, cardH = 140, gap = 18;
         const totalW = cardW * 3 + gap * 2;
@@ -910,44 +1203,51 @@
         const cardY = (H - cardH) / 2 + 10;
         for (let i = 0; i < levelUpChoices.length; i++) {
           const cx = startX + i * (cardW + gap);
-          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
-            picked = i;
-            break;
-          }
+          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) { picked = i; break; }
         }
       }
       if (picked >= 0) pickLevelUp(picked);
     }
     else if (state === STATE.INTERMISSION) {
       intermissionTimer -= dt;
-      if (intermissionTimer <= 0) {
-        startNextWave();
-      }
+      if (intermissionTimer <= 0) startNextWave();
     }
     else if (state === STATE.DEAD) {
-      const anyGpFace = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
-      if (keyJustPressed.has('r') || mouseClicked || anyGpFace) {
-        resetWorld();
+      const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
+      if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
+    }
+    else if (state === STATE.INVENTORY) {
+      // Click handling: equipped → unequip, inventory → equip
+      if (mouseClicked) {
+        const eqSlot = getEquippedSlotAtMouse();
+        if (eqSlot && player.equipped[eqSlot]) {
+          unequipSlot(eqSlot);
+        } else {
+          const idx = getInventoryIdxAtMouse();
+          if (idx >= 0 && player.inventory[idx]) {
+            equipFromInventory(idx);
+          }
+        }
       }
     }
 
-    // Particles + flash timer always update
+    // Particles + flash timers always tick
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
-
-    shake *= 0.85;
-    if (shake < 0.05) shake = 0;
+    if (lootFlashTimer > 0) lootFlashTimer -= dt;
+    shake *= 0.85; if (shake < 0.05) shake = 0;
 
     // === RENDER ===
     ctx.save();
-    if (shake > 0) {
+    if (shake > 0 && state !== STATE.INVENTORY) {
       const sx = (Math.random() - 0.5) * shake * 2;
       const sy = (Math.random() - 0.5) * shake * 2;
       ctx.translate(sx, sy);
     }
 
     drawBackground();
+    for (const d of itemDrops) d.draw(ctx);
     for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
     for (const e of enemies) e.draw(ctx);
@@ -959,11 +1259,10 @@
     drawHud();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
+    else if (state === STATE.INVENTORY) drawInventoryScreen();
 
-    // Clear single-frame inputs
     keyJustPressed.clear();
     mouseClicked = false;
-
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
