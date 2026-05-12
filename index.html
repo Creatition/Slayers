@@ -1415,6 +1415,17 @@
       }
     }
   }
+  // Handle a non-boss enemy death (XP gem, gold, loot drop). Boss deaths are inlined in collisions.
+  function handleEnemyDeath(enemy) {
+    player.kills++;
+    spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
+    xpGems.push(new XPGem(enemy.x, enemy.y, 1));
+    const goldAmt = rngInt(1, 3);
+    player.gold += goldAmt;
+    goldFlashTimer = 0.8;
+    if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
+    shake = Math.min(shake + 1, 3);
+  }
   // Trigger an AoE explosion at a position (used by explosive projectiles)
   function explodeAt(x, y, radius, damage) {
     for (const e of enemies) {
