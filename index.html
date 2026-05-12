@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 8</title>
+<title>Slayers — Phase 9 (split)</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -44,30 +44,15 @@
     <div><span class="label">RESTART:</span> <span class="value">R</span></div>
   </div>
 
+<script src="src/data.js"></script>
+<script src="src/entities.js"></script>
 <script>
 // =============================================================================
-// SLAYERS — Phase 6 — 4 biomes / 4 bosses / 9 enemy types / Victory at wave 20
-// TOC:
-//   - CANVAS + DOM
-//   - GAME STATE / GLOBAL VARS
-//   - INPUT ABSTRACTION
-//   - BIOME
-//   - ITEM SYSTEM (rarity, slots, bases, affixes, gen)
-//   - ECONOMY (prices, salvage, reroll, gold, mats)
-//   - CLASS SYSTEM
-//   - ABILITIES
-//   - LEVEL-UP STAT POOL
-//   - WAVE / BOSS LOGIC
-//   - ENEMY TYPES
-//   - ENTITIES (Player, Enemy, BoneLord, Projectile, BoneProjectile, XPGem, ItemDrop, Particle)
-//   - WORLD HELPERS (spawn, findNearestEnemy, fireProjectile)
-//   - COLLISIONS
-//   - STATE TRANSITIONS (endWave, enterLevelUp, enterShop, enterAbilityDraft)
-//   - EQUIP / UNEQUIP / SALVAGE / REROLL
-//   - RENDER (background, HUD, ability bar, level-up, ability draft, death, inventory, shop)
-//   - MAIN LOOP
+// SLAYERS — index.html inline script
+// Glue: state vars + input + world helpers + render + main loop.
+// Constants live in src/data.js; entity classes in src/entities.js.
+// All declarations here are globals (no IIFE) so the cross-file references work.
 // =============================================================================
-(() => {
   // ============================================================
   // CANVAS + DOM
   // ============================================================
@@ -81,7 +66,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -114,6 +99,14 @@
   let pendingBank = null; // { source: 'inv'|'eq', key: idxNumber|slotName }
   const SAVE_KEY = 'slayers-save';
   const SAVE_VERSION = 1;
+  // Slayer Trials (Phase 9)
+  let runMode = 'standard';  // 'standard' or 'trial'
+  let trialTier = 1;
+  let unlockedTrialTier = 1; // highest tier the player can attempt
+  const TRIAL_MAX_TIER = 5;
+  const TRIAL_MULT = { 1: 1.5, 2: 2.0, 3: 2.7, 4: 3.6, 5: 5.0 };
+  // Loadout state — slot -> stashIndex (which stash item to pre-equip per slot)
+  let loadout = {};
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -279,152 +272,8 @@
     ctx.fillRect(cx, cy, 1, 1);
   }
 
-  // ============================================================
-  // BIOME
-  // ============================================================
-  const BIOME = {
-    CRYPT:      { id: 'crypt',      name: 'The Crypt',        bg: '#15181a', grid: '#1d2220', decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44', '#557755'] },
-    FROSTSPIRE: { id: 'frostspire', name: 'Frostspire Peaks', bg: '#1a2030', grid: '#232c3c', decoColors: ['#5a7090', '#3a4a60', '#88aabb', '#aaccff'] },
-    INFERNO:    { id: 'inferno',    name: 'Infernal Depths',  bg: '#1a0e0a', grid: '#2a1410', decoColors: ['#5a2010', '#7a3020', '#aa4020', '#ff8040'] },
-    VOID:       { id: 'void',       name: 'The Void Throne',  bg: '#10081a', grid: '#180c28', decoColors: ['#4a2a6a', '#3a1a5a', '#aa66ff', '#dd99ff'] },
-  };
-  function biomeFor(w) {
-    if (w <= 5)  return BIOME.CRYPT;
-    if (w <= 10) return BIOME.FROSTSPIRE;
-    if (w <= 15) return BIOME.INFERNO;
-    return BIOME.VOID;
-  }
-  function currentBiome() { return biomeFor(currentWave); }
-
-  // ============================================================
-  // ITEM SYSTEM
-  // ============================================================
-  const SLOT_ORDER = ['helm', 'amulet', 'chest', 'offhand', 'gloves', 'belt', 'boots', 'ring1', 'ring2', 'weapon'];
-  const SLOT_LABEL = {
-    helm: 'HELM', chest: 'CHEST', gloves: 'GLOVES', boots: 'BOOTS', belt: 'BELT',
-    amulet: 'AMULET', ring1: 'RING I', ring2: 'RING II', weapon: 'WEAPON', offhand: 'OFFHAND',
-  };
-  const RARITY = {
-    WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 60, dmgMult: 1.00 },
-    BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 25, dmgMult: 1.15 },
-    YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 10, dmgMult: 1.30 },
-    ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 4,  dmgMult: 1.50 },
-    GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1,  dmgMult: 1.40 },
-  };
-  const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
-
-  const ITEM_BASES = [
-    { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H' },
-    { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C' },
-    { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G' },
-    { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F' },
-    { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L' },
-    { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
-    { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
-    { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W' },
-    { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
-  ];
-  const AFFIX_POOL = [
-    { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },
-    { id: 'dmg_pct',      min: 5,  max: 18, fmt: (v) => `+${v}% Damage`,        apply: (p, v) => { p.bonusDmgPct += v; } },
-    { id: 'firerate_pct', min: 5,  max: 18, fmt: (v) => `+${v}% Attack Speed`,  apply: (p, v) => { p.bonusFireRatePct += v; } },
-    { id: 'regen',        min: 1,  max: 3,  fmt: (v) => `+${v} HP/sec Regen`,   apply: (p, v) => { p.bonusRegen += v; } },
-    { id: 'pickup',       min: 5,  max: 15, fmt: (v) => `+${v} Pickup Range`,   apply: (p, v) => { p.bonusPickupRange += v; } },
-    { id: 'movespeed',    min: 5,  max: 15, fmt: (v) => `+${v} Move Speed`,     apply: (p, v) => { p.bonusMoveSpeed += v; } },
-    { id: 'armor',        min: 1,  max: 5,  fmt: (v) => `+${v} Armor`,          apply: (p, v) => { p.bonusArmor += v; } },
-    { id: 'crit_chance',  min: 2,  max: 9,  fmt: (v) => `+${v}% Crit Chance`,   apply: (p, v) => { p.bonusCritChance += v; } },
-    { id: 'max_focus',    min: 5,  max: 25, fmt: (v) => `+${v} Max Focus`,      apply: (p, v) => { p.bonusMaxResource += v; } },
-    { id: 'focus_regen',  min: 1,  max: 5,  fmt: (v) => `+${v} Focus/sec`,      apply: (p, v) => { p.bonusResourceRegen += v; } },
-  ];
-
-  function rngInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-  function rngPick(arr) { return arr[rngInt(0, arr.length - 1)]; }
-  function pickWeightedRarity() {
-    const total = RARITY_LIST.reduce((s, r) => s + r.weight, 0);
-    let roll = Math.random() * total;
-    for (const r of RARITY_LIST) { roll -= r.weight; if (roll <= 0) return r; }
-    return RARITY.WHITE;
-  }
-  function rollAffixes(count) {
-    const pool = AFFIX_POOL.slice();
-    const out = [];
-    for (let i = 0; i < count && pool.length > 0; i++) {
-      const idx = rngInt(0, pool.length - 1);
-      const def = pool.splice(idx, 1)[0];
-      out.push({ def, value: rngInt(def.min, def.max) });
-    }
-    return out;
-  }
-  let nextItemId = 1;
-  function generateItem() {
-    const rarity = pickWeightedRarity();
-    const base = rngPick(ITEM_BASES);
-    return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
-  }
-  function itemDisplayName(item) { return `${item.rarity.name} ${item.base.name}`; }
-
-  // ============================================================
-  // ECONOMY
-  // ============================================================
-  const RARITY_PRICE = { white: 12, blue: 30, yellow: 80, orange: 200, green: 250 };
-  const RARITY_MAT   = { white: 'bone', blue: 'arcane', yellow: 'essence', orange: 'fragment', green: 'fragment' };
-  const RARITY_REROLL = {
-    white:  { gold: 5,   mat: 'bone',     count: 1 },
-    blue:   { gold: 15,  mat: 'arcane',   count: 1 },
-    yellow: { gold: 40,  mat: 'essence',  count: 1 },
-    orange: { gold: 100, mat: 'fragment', count: 1 },
-    green:  { gold: 80,  mat: 'fragment', count: 1 },
-  };
-  const MAT_LABELS = { bone: 'BONE', arcane: 'ARCANE', essence: 'ESSENCE', fragment: 'FRAGMENT' };
-  const MAT_COLORS = { bone: '#d0d0c0', arcane: '#5599ff', essence: '#ffcc33', fragment: '#ff8000' };
-  function itemPrice(item) { return RARITY_PRICE[item.rarity.id] || 10; }
-  function rerollSpec(item) { return RARITY_REROLL[item.rarity.id]; }
-  function salvageGold(item) { return Math.floor(itemPrice(item) * 0.5); }
-
-  // ============================================================
-  // CLASS SYSTEM
-  // ============================================================
-  const CLASS = {
-    ARCHER: {
-      id: 'archer', name: 'Archer', color: '#7ad96b',
-      desc: 'Fast and crit-heavy. Auto-fires arrows. Crits refund Focus.',
-      baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
-      weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
-      resourceName: 'FOCUS', resourceColor: '#ffd23f',
-      baseMaxResource: 100, baseResourceRegen: 15, critResourceGain: 18,
-      signature: 'multishot',
-    },
-    WIZARD: {
-      id: 'wizard', name: 'Wizard', color: '#5599ff',
-      desc: 'Glass cannon. Slow heavy spells. Bigger Mana pool, slower regen.',
-      baseMaxHp: 60, baseSpeed: 95, baseCritChance: 3,
-      weaponDamage: 7, weaponFireRate: 1.4, weaponRange: 240, weaponProjSpeed: 240,
-      resourceName: 'MANA', resourceColor: '#5599ff',
-      baseMaxResource: 140, baseResourceRegen: 8, critResourceGain: 0,
-      signature: 'fireball',
-    },
-    WARRIOR: {
-      id: 'warrior', name: 'Warrior', color: '#cc4040',
-      desc: 'Tanky melee cleaver. Rage builds from dealing and taking hits.',
-      baseMaxHp: 140, baseSpeed: 90, baseCritChance: 4,
-      weaponDamage: 11, weaponFireRate: 1.6, weaponRange: 52, weaponProjSpeed: 1,
-      meleeRange: 52,
-      rageOnHit: 5, rageOnTake: 12,
-      resourceName: 'RAGE', resourceColor: '#ff6060',
-      baseMaxResource: 150, baseResourceRegen: 0, critResourceGain: 0,
-      signature: 'whirlwind',
-    },
-  };
-  function getClassById(id) {
-    if (id === 'wizard') return CLASS.WIZARD;
-    if (id === 'warrior') return CLASS.WARRIOR;
-    return CLASS.ARCHER;
-  }
-
-  // ============================================================
-  // ABILITIES
-  // ============================================================
-  const ABILITIES = {
+  // [all constants/abilities/stat-pool/wave-config/enemy-types live in src/data.js]
+  const _ABILITIES_DEAD = {
     multishot: {
       id: 'multishot', name: 'Multishot', letter: 'M', classOf: 'archer',
       desc: '3 arrows in spread (+20% dmg)',
@@ -829,7 +678,7 @@
       },
     },
   };
-  const ABILITY_LIST = Object.values(ABILITIES);
+  const _ABILITY_LIST_DEAD = Object.values(_ABILITIES_DEAD);
   function classAbilities(classId) {
     return ABILITY_LIST.filter(a => !a.classOf || a.classOf === classId);
   }
@@ -850,7 +699,7 @@
   // ============================================================
   // LEVEL-UP STAT POOL
   // ============================================================
-  const STAT_POOL = [
+  const _STAT_POOL_DEAD = [
     { id: 'maxhp',       name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
     { id: 'damage',      name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
     { id: 'firerate',    name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
@@ -867,20 +716,26 @@
   // ============================================================
   function isBossWave(w) { return w > 0 && w % 5 === 0; }
   function isFinalWave(w) { return w === 20; }
+  function trialMultiplier() {
+    if (runMode !== 'trial') return 1;
+    return TRIAL_MULT[trialTier] || 1;
+  }
   function waveConfig(w) {
+    const tm = trialMultiplier();
+    const speedTm = 1 + (tm - 1) * 0.4; // softer scaling on speed
     return {
       duration:       isBossWave(w) ? 999 : Math.min(20 + (w - 1) * 3, 50),
-      spawnInterval:  Math.max(0.7 - (w - 1) * 0.04, 0.18),
-      enemyHpMult:    1 + (w - 1) * 0.18,
-      enemySpeedMult: 1 + (w - 1) * 0.04,
-      enemyDmgMult:   1 + (w - 1) * 0.08,
+      spawnInterval:  Math.max(0.7 - (w - 1) * 0.04, 0.18) / Math.sqrt(tm),
+      enemyHpMult:    (1 + (w - 1) * 0.18) * tm,
+      enemySpeedMult: (1 + (w - 1) * 0.04) * speedTm,
+      enemyDmgMult:   (1 + (w - 1) * 0.08) * tm,
     };
   }
 
   // ============================================================
   // ENEMY TYPES
   // ============================================================
-  const ENEMY_TYPES = {
+  const _ENEMY_TYPES_DEAD = {
     skeleton:   { hp: 8,  speedRange: [38, 56],  dmg: 5,  r: 4, name: 'Skeleton' },
     zombie:     { hp: 18, speedRange: [22, 32],  dmg: 8,  r: 5, name: 'Zombie' },
     rat:        { hp: 3,  speedRange: [78, 100], dmg: 3,  r: 3, name: 'Crypt Rat' },
@@ -921,7 +776,7 @@
   // ============================================================
   // ENTITY: Player
   // ============================================================
-  class Player {
+  const _Player_Dead = class {
     constructor(x, y, classId) {
       this.x = x; this.y = y;
       this.r = 5; this.facing = 1;
@@ -1128,7 +983,7 @@
   // ============================================================
   // ENTITY: Enemy
   // ============================================================
-  class Enemy {
+  const _Enemy_Dead = class {
     constructor(x, y, type, hpMult, speedMult, dmgMult) {
       const t = ENEMY_TYPES[type];
       this.type = type;
@@ -1262,7 +1117,7 @@
   // ============================================================
   // ENTITY: BoneLord (Act I boss)
   // ============================================================
-  class BoneLord {
+  const _BoneLord_Dead = class {
     constructor(x, y, hpMult, speedMult, dmgMult) {
       this.x = x; this.y = y; this.r = 10;
       this.maxHp = Math.round(280 * hpMult); this.hp = this.maxHp;
@@ -1336,7 +1191,7 @@
   // ============================================================
   // BOSS: IceGiant (Wave 10)
   // ============================================================
-  class IceGiant {
+  const _IceGiant_Dead = class {
     constructor(x, y, hpMult, speedMult, dmgMult) {
       this.x = x; this.y = y; this.r = 14;
       this.maxHp = Math.round(500 * hpMult); this.hp = this.maxHp;
@@ -1414,7 +1269,7 @@
   // ============================================================
   // BOSS: Pyromancer (Wave 15)
   // ============================================================
-  class Pyromancer {
+  const _Pyromancer_Dead = class {
     constructor(x, y, hpMult, speedMult, dmgMult) {
       this.x = x; this.y = y; this.r = 8;
       this.maxHp = Math.round(420 * hpMult); this.hp = this.maxHp;
@@ -1497,7 +1352,7 @@
   // ============================================================
   // BOSS: Slayer-Killer (Wave 20, final)
   // ============================================================
-  class SlayerKiller {
+  const _SlayerKiller_Dead = class {
     constructor(x, y, hpMult, speedMult, dmgMult) {
       this.x = x; this.y = y; this.r = 11;
       this.maxHp = Math.round(800 * hpMult); this.hp = this.maxHp;
@@ -1590,13 +1445,13 @@
   // ============================================================
   // ENTITY: Projectile
   // ============================================================
-  const PROJ_THEMES = {
+  const _PROJ_THEMES_DEAD = {
     fire:   { outer: '#ff5520', inner: '#ffdd00' },
     frost:  { outer: '#aaccff', inner: '#ffffff' },
     arcane: { outer: '#aa66ff', inner: '#dd99ff' },
     light:  { outer: '#ffff80', inner: '#ffffff' },
   };
-  class Projectile {
+  const _Projectile_Dead = class {
     constructor(x, y, vx, vy, damage, life, isCrit) {
       this.x = x; this.y = y; this.vx = vx; this.vy = vy;
       this.r = isCrit ? 3 : 2;
@@ -1682,13 +1537,13 @@
   // ============================================================
   // ENTITY: BoneProjectile
   // ============================================================
-  const ENEMY_SHOT_THEMES = {
+  const _ENEMY_SHOT_THEMES_DEAD = {
     bone: { outer: '#d8d8c0', inner: '#a0a090', spark: '#e8e8d0' },
     ice:  { outer: '#aaccff', inner: '#5599ff', spark: '#ddeeff' },
     fire: { outer: '#ff8800', inner: '#ffdd00', spark: '#ffaa44' },
     void: { outer: '#aa66ff', inner: '#5533aa', spark: '#dd99ff' },
   };
-  class BoneProjectile {
+  const _BoneProjectile_Dead = class {
     constructor(x, y, vx, vy, damage, theme) {
       this.x = x; this.y = y; this.vx = vx; this.vy = vy;
       this.r = 3; this.damage = damage;
@@ -1714,7 +1569,7 @@
   // ============================================================
   // ENTITY: XP Gem
   // ============================================================
-  class XPGem {
+  const _XPGem_Dead = class {
     constructor(x, y, value) {
       this.x = x; this.y = y;
       this.vx = (Math.random() - 0.5) * 40;
@@ -1749,7 +1604,7 @@
   // ============================================================
   // ENTITY: ItemDrop
   // ============================================================
-  class ItemDrop {
+  const _ItemDrop_Dead = class {
     constructor(x, y, item) {
       this.x = x; this.y = y;
       this.vx = (Math.random() - 0.5) * 30;
@@ -1797,7 +1652,7 @@
   // ============================================================
   // ENTITY: Particle
   // ============================================================
-  class Particle {
+  const _Particle_Dead = class {
     constructor(x, y, vx, vy, color, life, size) {
       this.x = x; this.y = y; this.vx = vx; this.vy = vy;
       this.color = color; this.life = life; this.maxLife = life;
@@ -2072,10 +1927,45 @@
   }
   function pickClass(classId) {
     selectedClassId = classId;
-    resetWorld();
-    state = STATE.PLAYING;
+    if (runMode === 'trial') {
+      // Go to loadout screen first
+      resetWorld();          // sets up empty player
+      state = STATE.TRIAL_LOADOUT;
+      loadout = {};
+    } else {
+      resetWorld();
+      state = STATE.PLAYING;
+    }
   }
   function returnToClassSelect() { state = STATE.CLASS_SELECT; }
+  function startTrialRun() {
+    // Apply loadout: equip stash items into player slots
+    for (const slot in loadout) {
+      const stashIdx = loadout[slot];
+      const item = stash[stashIdx];
+      if (item) player.equipped[slot] = item;
+    }
+    player.recomputeStats();
+    state = STATE.PLAYING;
+  }
+  function endTrial(victory) {
+    if (victory && trialTier < TRIAL_MAX_TIER) {
+      unlockedTrialTier = Math.max(unlockedTrialTier, trialTier + 1);
+    }
+    saveData();
+    loadout = {};
+    runMode = 'standard';
+    state = STATE.CLASS_SELECT;
+  }
+  function cycleMode() {
+    if (runMode === 'standard') {
+      runMode = 'trial';
+      trialTier = 1;
+    } else {
+      if (trialTier < unlockedTrialTier) trialTier++;
+      else { runMode = 'standard'; trialTier = 1; }
+    }
+  }
   function generateFloorDecorations() {
     floorDecorations = [];
     const biome = currentBiome();
@@ -2113,6 +2003,7 @@
       if (data.version !== SAVE_VERSION) return;
       stash = (data.stash || []).map(deserializeItem);
       stashSize = data.stashSize || STASH_SIZE_INIT;
+      unlockedTrialTier = data.unlockedTrialTier || 1;
     } catch (e) { console.warn('load save failed:', e); }
   }
   function saveData() {
@@ -2121,6 +2012,7 @@
         version: SAVE_VERSION,
         stash: stash.map(serializeItem),
         stashSize,
+        unlockedTrialTier,
       }));
     } catch (e) { console.warn('save failed:', e); }
   }
@@ -2335,6 +2227,10 @@
     const gFlash = goldFlashTimer > 0 ? 'bold 9px monospace' : 'bold 8px monospace';
     ctx.fillStyle = '#ffd23f'; ctx.font = gFlash;
     ctx.fillText(`GOLD  ${player.gold}`, W - 8, 44);
+    if (runMode === 'trial') {
+      ctx.fillStyle = '#ff4080'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(`TRIAL T${trialTier} (x${TRIAL_MULT[trialTier].toFixed(1)})`, W - 8, 54);
+    }
 
     if (levelUpFlashTimer > 0) {
       const a = Math.min(1, levelUpFlashTimer / 1.5);
@@ -2514,8 +2410,12 @@
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
     ctx.fillText(`Wave ${currentWave}/20  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
+    if (runMode === 'trial') {
+      ctx.fillStyle = '#ff4080'; ctx.font = 'bold 9px monospace';
+      ctx.fillText(`Slayer Trial T${trialTier} FAILED — no loot retained`, W / 2, H / 2 + 16);
+    }
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
-    ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
+    ctx.fillText('Press R, click, or face button to continue', W / 2, H / 2 + 38);
     ctx.textAlign = 'left';
   }
   function drawStashBankingScreen() {
@@ -2612,13 +2512,145 @@
     drawButton(W - 280, H - 30, 130, 24, doneLabel, !(pendingBank && stashFull), '#7ad96b');
     drawButton(W - 140, H - 30, 120, 24, 'SKIP', true, '#888');
   }
+  // ============================================================
+  // TRIAL LOADOUT — pre-run gear equip screen
+  // ============================================================
+  const LOADOUT_EQ_LAYOUT = {
+    helm:    { x: 60,  y: 70  },
+    amulet:  { x: 95,  y: 70  },
+    chest:   { x: 60,  y: 110 },
+    offhand: { x: 95,  y: 110 },
+    gloves:  { x: 25,  y: 110 },
+    belt:    { x: 60,  y: 150 },
+    boots:   { x: 60,  y: 190 },
+    ring1:   { x: 25,  y: 190 },
+    ring2:   { x: 95,  y: 190 },
+    weapon:  { x: 60,  y: 230 },
+  };
+  const LOADOUT_EQ_SIZE = 30;
+  function getLoadoutSlotAtMouse() {
+    for (const k in LOADOUT_EQ_LAYOUT) {
+      const p = LOADOUT_EQ_LAYOUT[k];
+      if (mouseX >= p.x && mouseX < p.x + LOADOUT_EQ_SIZE && mouseY >= p.y && mouseY < p.y + LOADOUT_EQ_SIZE) return k;
+    }
+    return null;
+  }
+  function getLoadoutStashIdxAtMouse() {
+    const cols = 5, slotSize = 30, gap = 4, sx = 230, sy = 70;
+    for (let i = 0; i < stashSize; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = sx + col * (slotSize + gap), y = sy + row * (slotSize + gap);
+      if (mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize) return i;
+    }
+    return -1;
+  }
+  function getCurrentEquippedForSlot(slot) {
+    // What's currently in player.equipped for this slot, based on loadout
+    const stashIdx = loadout[slot];
+    if (stashIdx === undefined) return null;
+    return stash[stashIdx];
+  }
+  function drawTrialLoadoutScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.92)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff4080'; ctx.textAlign = 'center'; ctx.font = 'bold 16px monospace';
+    ctx.fillText(`SLAYER TRIAL — TIER ${trialTier}  (x${TRIAL_MULT[trialTier].toFixed(1)} difficulty)`, W / 2, 20);
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+    ctx.fillText('Equip stash gear. Click a stash item to slot it; click an equipped slot to remove. START to begin.', W / 2, 34);
+    ctx.fillStyle = '#ff8080'; ctx.font = '8px monospace';
+    ctx.fillText('Defeat = no loot kept. Victory = unlock next tier.', W / 2, 46);
+
+    // Class label
+    ctx.fillStyle = getClassById(selectedClassId).color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`CLASS: ${getClassById(selectedClassId).name.toUpperCase()}`, 22, 60);
+
+    // Paper doll (equipped from loadout)
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
+    ctx.fillText('EQUIPPED', 25, 64);
+    for (const k of SLOT_ORDER) {
+      const p = LOADOUT_EQ_LAYOUT[k];
+      const item = getCurrentEquippedForSlot(k);
+      const hovered = mouseX >= p.x && mouseX < p.x + LOADOUT_EQ_SIZE && mouseY >= p.y && mouseY < p.y + LOADOUT_EQ_SIZE;
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
+      ctx.fillRect(p.x, p.y, LOADOUT_EQ_SIZE, LOADOUT_EQ_SIZE);
+      ctx.strokeStyle = '#555';
+      ctx.strokeRect(p.x + 0.5, p.y + 0.5, LOADOUT_EQ_SIZE - 1, LOADOUT_EQ_SIZE - 1);
+      if (item) drawItemInBox(item, p.x, p.y, LOADOUT_EQ_SIZE);
+      else {
+        ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(SLOT_LABEL[k], p.x + LOADOUT_EQ_SIZE / 2, p.y + LOADOUT_EQ_SIZE / 2 + 2);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // Stash grid (5 cols x 2 rows)
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
+    ctx.fillText(`STASH (${stash.length}/${stashSize})`, 230, 64);
+    const cols = 5, slotSize = 30, gap = 4, sx = 230, sy = 70;
+    const usedStashIdx = new Set(Object.values(loadout));
+    for (let i = 0; i < stashSize; i++) {
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = sx + col * (slotSize + gap), y = sy + row * (slotSize + gap);
+      const item = stash[i];
+      const hovered = mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize;
+      const inUse = usedStashIdx.has(i);
+      ctx.fillStyle = inUse ? '#2a3a2a' : (hovered ? '#33333d' : '#22222a');
+      ctx.fillRect(x, y, slotSize, slotSize);
+      ctx.strokeStyle = inUse ? '#7ad96b' : '#444';
+      ctx.lineWidth = inUse ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+      ctx.lineWidth = 1;
+      if (item) drawItemInBox(item, x, y, slotSize);
+    }
+
+    // Tooltip
+    let tooltipItem = null;
+    const eqSlot = getLoadoutSlotAtMouse();
+    if (eqSlot) tooltipItem = getCurrentEquippedForSlot(eqSlot);
+    if (!tooltipItem) {
+      const si = getLoadoutStashIdxAtMouse();
+      if (si >= 0) tooltipItem = stash[si];
+    }
+    const tx = 410, ty = 70, tw = W - 420, th = 200;
+    ctx.fillStyle = '#1a1a22'; ctx.fillRect(tx, ty, tw, th);
+    ctx.strokeStyle = tooltipItem ? tooltipItem.rarity.color : '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2); ctx.lineWidth = 1;
+    if (tooltipItem) {
+      ctx.fillStyle = tooltipItem.rarity.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 14);
+      ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+      ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})`, tx + 8, ty + 26);
+      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
+      for (let i = 0; i < tooltipItem.affixes.length; i++) {
+        ctx.fillText(tooltipItem.affixes[i].def.fmt(tooltipItem.affixes[i].value), tx + 8, ty + 40 + i * 9);
+      }
+    } else {
+      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('Hover an item to inspect', tx + tw / 2, ty + th / 2 + 3);
+    }
+
+    // Cancel + Start buttons
+    drawButton(W - 280, H - 30, 130, 24, 'BACK', true, '#888');
+    const equippedCount = Object.keys(loadout).length;
+    drawButton(W - 140, H - 30, 120, 24, `START TRIAL`, true, '#ff4080');
+    ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(`${equippedCount} item${equippedCount === 1 ? '' : 's'} equipped`, W - 12, H - 38);
+    ctx.textAlign = 'left';
+  }
   function drawClassSelectScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.92)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 22px monospace';
     ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 40);
     ctx.fillStyle = '#888'; ctx.font = '9px monospace';
-    ctx.fillText('Click a card, press 1 / 2, or A / B button', W / 2, 56);
+    ctx.fillText('Click a card or press 1 / 2 / 3.  Click MODE to toggle Trial.', W / 2, 56);
+    // Mode toggle button (top-left)
+    const modeLabel = runMode === 'standard' ? 'MODE: STANDARD' : `MODE: TRIAL T${trialTier}`;
+    const modeColor = runMode === 'standard' ? '#7ad96b' : '#ff4080';
+    drawButton(12, 12, 160, 22, modeLabel, true, modeColor);
+    ctx.fillStyle = '#666'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`Unlocked tier: ${unlockedTrialTier}/${TRIAL_MAX_TIER}`, 12, 44);
+    ctx.textAlign = 'center';
 
     const classes = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR];
     const cardW = 180, cardH = 230, gap = 18;
@@ -2743,8 +2775,13 @@
     ctx.fillText('The Crypt, Frostspire, Inferno, and Void are yours.', W / 2, H / 2 - 4);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
     ctx.fillText(`Final  -  LV ${player.level}  -  KILLS ${player.kills}  -  ${player.gold}g`, W / 2, H / 2 + 22);
+    if (runMode === 'trial') {
+      ctx.fillStyle = '#ffd040'; ctx.font = 'bold 10px monospace';
+      const unlocked = trialTier < TRIAL_MAX_TIER;
+      ctx.fillText(unlocked ? `Trial T${trialTier} CLEARED — T${trialTier + 1} unlocked!` : `Trial T${trialTier} CLEARED — max tier reached!`, W / 2, H / 2 + 38);
+    }
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
-    ctx.fillText('Press R, click, or face button to start a new run', W / 2, H / 2 + 48);
+    ctx.fillText('Press R, click, or face button to continue', W / 2, H / 2 + 60);
     ctx.textAlign = 'left';
   }
 
@@ -3214,8 +3251,12 @@
     else if (state === STATE.DEAD || state === STATE.VICTORY) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
       if (keyJustPressed.has('r') || mouseClicked || anyGp) {
-        pendingBank = null;
-        state = STATE.STASH_BANKING;
+        if (runMode === 'trial') {
+          endTrial(state === STATE.VICTORY);
+        } else {
+          pendingBank = null;
+          state = STATE.STASH_BANKING;
+        }
       }
     }
     else if (state === STATE.STASH_BANKING) {
@@ -3257,25 +3298,71 @@
     }
     else if (state === STATE.CLASS_SELECT) {
       updateVirtualCursor(dt);
+      // Tab or T key cycles mode
+      if (keyJustPressed.has('t') || gpJustPressed.has(3)) cycleMode();
       let picked = null;
       const classIds = ['archer', 'wizard', 'warrior'];
       if (keyJustPressed.has('1') || gpJustPressed.has(0)) picked = 'archer';
       else if (keyJustPressed.has('2') || gpJustPressed.has(1)) picked = 'wizard';
       else if (keyJustPressed.has('3') || gpJustPressed.has(2)) picked = 'warrior';
       else if (mouseClicked) {
-        const cardW = 180, cardH = 230, gap = 18;
-        const totalW = cardW * 3 + gap * 2;
-        const startX = (W - totalW) / 2;
-        const cardY = 76;
-        for (let i = 0; i < 3; i++) {
-          const cx = startX + i * (cardW + gap);
-          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
-            picked = classIds[i];
-            break;
+        // Mode toggle button (top-left)
+        if (isHovering(12, 12, 160, 22)) {
+          cycleMode();
+        } else {
+          const cardW = 180, cardH = 230, gap = 18;
+          const totalW = cardW * 3 + gap * 2;
+          const startX = (W - totalW) / 2;
+          const cardY = 76;
+          for (let i = 0; i < 3; i++) {
+            const cx = startX + i * (cardW + gap);
+            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
+              picked = classIds[i];
+              break;
+            }
           }
         }
       }
       if (picked) pickClass(picked);
+    }
+    else if (state === STATE.TRIAL_LOADOUT) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (gpJustPressed.has(1)) { loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT; }
+      if (mouseClicked) {
+        // Click equipped slot — unequip
+        const eqSlot = getLoadoutSlotAtMouse();
+        if (eqSlot) {
+          delete loadout[eqSlot];
+        } else {
+          // Click stash item — equip into its slot
+          const si = getLoadoutStashIdxAtMouse();
+          if (si >= 0 && stash[si]) {
+            const item = stash[si];
+            let targetSlot = item.base.slot;
+            if (targetSlot === 'ring') {
+              // Pick first empty ring slot
+              if (loadout.ring1 === undefined) targetSlot = 'ring1';
+              else if (loadout.ring2 === undefined) targetSlot = 'ring2';
+              else targetSlot = 'ring1';
+            }
+            // If this stash item already loaded into another slot, remove from there
+            for (const slot in loadout) {
+              if (loadout[slot] === si) delete loadout[slot];
+            }
+            loadout[targetSlot] = si;
+          } else {
+            // BACK button
+            if (isHovering(W - 280, H - 30, 130, 24)) {
+              loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT;
+            }
+            // START button
+            else if (isHovering(W - 140, H - 30, 120, 24)) {
+              startTrialRun();
+            }
+          }
+        }
+      }
     }
     else if (state === STATE.INVENTORY) {
       updateVirtualCursor(dt);
@@ -3382,9 +3469,10 @@
     else if (state === STATE.SHOP) drawShopScreen();
     else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
     else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
+    else if (state === STATE.TRIAL_LOADOUT) drawTrialLoadoutScreen();
 
     // Virtual cursor draws on top of all UI
-    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT || state === STATE.STASH_BANKING) {
+    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT || state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT) {
       drawVirtualCursor();
     }
 
@@ -3397,7 +3485,6 @@
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
-})();
 </script>
 </body>
 </html>
