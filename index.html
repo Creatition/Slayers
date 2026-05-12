@@ -39,7 +39,8 @@
     <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
     <div><span class="label">MOVE:</span> <span class="value">WASD / Stick</span></div>
     <div><span class="label">ABILITIES:</span> <span class="value">1-4 / Face Btns</span></div>
-    <div><span class="label">INVENTORY:</span> <span class="value">Tab / I</span></div>
+    <div><span class="label">INVENTORY:</span> <span class="value">Tab / I / Select</span></div>
+    <div><span class="label">MENU CURSOR:</span> <span class="value">Stick / D-pad</span></div>
     <div><span class="label">RESTART:</span> <span class="value">R</span></div>
   </div>
 
@@ -130,6 +131,9 @@
   const gpJustPressed = new Set();
   let mouseX = -1, mouseY = -1;
   let mouseClicked = false;
+  let virtualCursor = { x: W / 2, y: H / 2, active: false, idleTimer: 0 };
+  const CURSOR_SPEED = 260; // px/sec
+  let dpadCooldown = 0;
 
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
@@ -214,6 +218,57 @@
             : 'gamepad';
     }
     if ($device && $device.textContent !== label) $device.textContent = label;
+  }
+
+  // Move the virtual cursor (used in UI states: inventory, shop, levelup, ability draft)
+  function updateVirtualCursor(dt) {
+    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    let cdx = 0, cdy = 0;
+    const dz = 0.18;
+    for (const gp of gps) {
+      if (!gp) continue;
+      const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
+      const rx = gp.axes[2] || 0, ry = gp.axes[3] || 0;
+      const lm = Math.hypot(lx, ly);
+      const rm = Math.hypot(rx, ry);
+      if (lm > dz) { const s = (lm - dz) / (1 - dz); cdx += (lx / lm) * s; cdy += (ly / lm) * s; }
+      if (rm > dz) { const s = (rm - dz) / (1 - dz); cdx += (rx / rm) * s; cdy += (ry / rm) * s; }
+      // D-pad nudges cursor
+      const btn = (i) => gp.buttons[i] && gp.buttons[i].pressed;
+      if (btn(14)) cdx -= 1;
+      if (btn(15)) cdx += 1;
+      if (btn(12)) cdy -= 1;
+      if (btn(13)) cdy += 1;
+    }
+    const moved = Math.abs(cdx) > 0.01 || Math.abs(cdy) > 0.01;
+    if (moved) {
+      virtualCursor.x += cdx * CURSOR_SPEED * dt;
+      virtualCursor.y += cdy * CURSOR_SPEED * dt;
+      virtualCursor.x = Math.max(0, Math.min(W, virtualCursor.x));
+      virtualCursor.y = Math.max(0, Math.min(H, virtualCursor.y));
+      virtualCursor.active = true;
+      virtualCursor.idleTimer = 0;
+      // Override mouse pos so existing hover logic works
+      mouseX = virtualCursor.x;
+      mouseY = virtualCursor.y;
+    } else {
+      virtualCursor.idleTimer += dt;
+      // After 5s idle without controller input, hide cursor
+      if (virtualCursor.idleTimer > 5) virtualCursor.active = false;
+    }
+  }
+
+  // Draw the virtual cursor reticle (visible when active in UI state)
+  function drawVirtualCursor() {
+    if (!virtualCursor.active) return;
+    const cx = Math.floor(virtualCursor.x), cy = Math.floor(virtualCursor.y);
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillRect(cx - 1, cy - 5, 2, 4);
+    ctx.fillRect(cx - 1, cy + 1, 2, 4);
+    ctx.fillRect(cx - 5, cy - 1, 4, 2);
+    ctx.fillRect(cx + 1, cy - 1, 4, 2);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(cx, cy, 1, 1);
   }
 
   // ============================================================
@@ -2377,7 +2432,8 @@
     lastTime = now;
     updateInput();
 
-    if ((keyJustPressed.has('tab') || keyJustPressed.has('i')) &&
+    if ((keyJustPressed.has('tab') || keyJustPressed.has('i') ||
+         gpJustPressed.has(8) || gpJustPressed.has(9)) &&
         (state === STATE.PLAYING || state === STATE.INVENTORY)) {
       toggleInventory();
     } else if (keyJustPressed.has('escape') && state === STATE.INVENTORY) {
@@ -2415,6 +2471,7 @@
       if (!isBossWave(currentWave) && waveTimer <= 0 && enemies.length === 0) endWave();
     }
     else if (state === STATE.LEVELUP) {
+      updateVirtualCursor(dt);
       let picked = -1;
       if (keyJustPressed.has('1')) picked = 0;
       else if (keyJustPressed.has('2')) picked = 1;
@@ -2444,6 +2501,7 @@
       if (picked >= 0) pickLevelUp(picked);
     }
     else if (state === STATE.ABILITYDRAFT) {
+      updateVirtualCursor(dt);
       let picked = -1;
       if (keyJustPressed.has('1')) picked = 0;
       else if (keyJustPressed.has('2')) picked = 1;
@@ -2468,6 +2526,11 @@
       if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
     }
     else if (state === STATE.INVENTORY) {
+      updateVirtualCursor(dt);
+      // A button = synthetic click
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      // B button = close
+      if (gpJustPressed.has(1)) toggleInventory();
       if (mouseClicked) {
         const eqSlot = getEquippedSlotAtMouse();
         if (eqSlot && player.equipped[eqSlot]) unequipSlot(eqSlot);
@@ -2478,8 +2541,10 @@
       }
     }
     else if (state === STATE.SHOP) {
-      // Ready advance
-      if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(0)) {
+      updateVirtualCursor(dt);
+      // A button = synthetic click at cursor; B button or Space/Enter = next wave
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(1)) {
         startNextWave(); return finalizeFrame();
       }
       // Refresh shortcut: R key
@@ -2563,6 +2628,11 @@
     else if (state === STATE.VICTORY) drawVictoryScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
     else if (state === STATE.SHOP) drawShopScreen();
+
+    // Virtual cursor draws on top of all UI
+    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT) {
+      drawVirtualCursor();
+    }
 
     finalizeFrame();
   }
