@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 4</title>
+<title>Slayers — Phase 5</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -15,30 +15,18 @@
     user-select: none;
   }
   body {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
   }
   #game {
-    image-rendering: pixelated;
-    image-rendering: crisp-edges;
-    background: #14181a;
-    border: 2px solid #444;
-    width: min(1280px, 96vw);
-    height: min(720px, 54vw);
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    background: #14181a; border: 2px solid #444;
+    width: min(1280px, 96vw); height: min(720px, 54vw);
     box-shadow: 0 0 60px rgba(122, 217, 107, 0.08);
     cursor: crosshair;
   }
   #hud {
-    font-size: 12px;
-    color: #888;
-    letter-spacing: 1px;
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    justify-content: center;
+    font-size: 12px; color: #888; letter-spacing: 1px;
+    display: flex; gap: 16px; flex-wrap: wrap; justify-content: center;
   }
   #hud .label { color: #5a5a66; }
   #hud .value { color: #eee; }
@@ -56,6 +44,28 @@
   </div>
 
 <script>
+// =============================================================================
+// SLAYERS — Phase 5
+// TOC:
+//   - CANVAS + DOM
+//   - GAME STATE / GLOBAL VARS
+//   - INPUT ABSTRACTION
+//   - BIOME
+//   - ITEM SYSTEM (rarity, slots, bases, affixes, gen)
+//   - ECONOMY (prices, salvage, reroll, gold, mats)
+//   - CLASS SYSTEM
+//   - ABILITIES
+//   - LEVEL-UP STAT POOL
+//   - WAVE / BOSS LOGIC
+//   - ENEMY TYPES
+//   - ENTITIES (Player, Enemy, BoneLord, Projectile, BoneProjectile, XPGem, ItemDrop, Particle)
+//   - WORLD HELPERS (spawn, findNearestEnemy, fireProjectile)
+//   - COLLISIONS
+//   - STATE TRANSITIONS (endWave, enterLevelUp, enterShop, enterAbilityDraft)
+//   - EQUIP / UNEQUIP / SALVAGE / REROLL
+//   - RENDER (background, HUD, ability bar, level-up, ability draft, death, inventory, shop)
+//   - MAIN LOOP
+// =============================================================================
 (() => {
   // ============================================================
   // CANVAS + DOM
@@ -70,7 +80,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -85,6 +95,13 @@
   let lastLootName = '';
   let bossBannerTimer = 0;
   let bossDefeatedBannerTimer = 0;
+  let goldFlashTimer = 0;
+
+  // Shop / blacksmith state
+  let shopItems = [];
+  let shopRefreshCost = 5;
+  let selectedInvIdx = -1;
+  let levelUpRerollCost = 1;
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -96,9 +113,7 @@
   let xpGems = [];
   let itemDrops = [];
   let particles = [];
-  let bossRef = null; // direct reference for HP bar
-
-  // Deterministic floor decoration seeds (set in resetWorld)
+  let bossRef = null;
   let floorDecorations = [];
 
   // ============================================================
@@ -121,25 +136,21 @@
   });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
   window.addEventListener('blur', () => keys.clear());
-
   canvas.addEventListener('mousemove', (e) => {
     const rect = canvas.getBoundingClientRect();
     mouseX = (e.clientX - rect.left) * (W / rect.width);
     mouseY = (e.clientY - rect.top) * (H / rect.height);
   });
   canvas.addEventListener('mousedown', () => { mouseClicked = true; });
-
   window.addEventListener('gamepadconnected', (e) => { detectedGamepadType = detectGamepadType(e.gamepad.id); });
   window.addEventListener('gamepaddisconnected', () => {});
 
   function detectGamepadType(id) {
     const lower = id.toLowerCase();
     if (lower.includes('xbox') || lower.includes('xinput')) return 'xbox';
-    if (lower.includes('dualshock') || lower.includes('dualsense')
-        || lower.includes('playstation') || lower.includes('054c')) return 'playstation';
+    if (lower.includes('dualshock') || lower.includes('dualsense') || lower.includes('playstation') || lower.includes('054c')) return 'playstation';
     return 'generic';
   }
-
   function pollKeyboard() {
     let kx = 0, ky = 0;
     if (keys.has('a') || keys.has('arrowleft'))  kx -= 1;
@@ -202,19 +213,13 @@
   }
 
   // ============================================================
-  // BIOME (Phase 4: Crypt only)
+  // BIOME
   // ============================================================
   const BIOME = {
-    CRYPT: {
-      id: 'crypt',
-      name: 'The Crypt',
-      bg: '#15181a',
-      grid: '#1d2220',
-      accent: '#6a7a5a',
-      decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44'],
-    },
+    CRYPT: { id: 'crypt', name: 'The Crypt', bg: '#15181a', grid: '#1d2220', accent: '#6a7a5a',
+            decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44'] },
   };
-  function currentBiome() { return BIOME.CRYPT; } // Phase 4 stub — will branch on act later
+  function currentBiome() { return BIOME.CRYPT; }
 
   // ============================================================
   // ITEM SYSTEM
@@ -244,7 +249,6 @@
     { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W' },
     { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
   ];
-
   const AFFIX_POOL = [
     { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },
     { id: 'dmg_pct',      min: 5,  max: 18, fmt: (v) => `+${v}% Damage`,        apply: (p, v) => { p.bonusDmgPct += v; } },
@@ -285,6 +289,24 @@
   function itemDisplayName(item) { return `${item.rarity.name} ${item.base.name}`; }
 
   // ============================================================
+  // ECONOMY
+  // ============================================================
+  const RARITY_PRICE = { white: 12, blue: 30, yellow: 80, orange: 200, green: 250 };
+  const RARITY_MAT   = { white: 'bone', blue: 'arcane', yellow: 'essence', orange: 'fragment', green: 'fragment' };
+  const RARITY_REROLL = {
+    white:  { gold: 5,   mat: 'bone',     count: 1 },
+    blue:   { gold: 15,  mat: 'arcane',   count: 1 },
+    yellow: { gold: 40,  mat: 'essence',  count: 1 },
+    orange: { gold: 100, mat: 'fragment', count: 1 },
+    green:  { gold: 80,  mat: 'fragment', count: 1 },
+  };
+  const MAT_LABELS = { bone: 'BONE', arcane: 'ARCANE', essence: 'ESSENCE', fragment: 'FRAGMENT' };
+  const MAT_COLORS = { bone: '#d0d0c0', arcane: '#5599ff', essence: '#ffcc33', fragment: '#ff8000' };
+  function itemPrice(item) { return RARITY_PRICE[item.rarity.id] || 10; }
+  function rerollSpec(item) { return RARITY_REROLL[item.rarity.id]; }
+  function salvageGold(item) { return Math.floor(itemPrice(item) * 0.5); }
+
+  // ============================================================
   // CLASS SYSTEM
   // ============================================================
   const CLASS = {
@@ -299,7 +321,7 @@
   };
 
   // ============================================================
-  // ABILITIES — 5 in pool, draftable on boss kill
+  // ABILITIES
   // ============================================================
   const ABILITIES = {
     multishot: {
@@ -311,11 +333,10 @@
         const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
         if (!target) return false;
         const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
-        const spread = 0.35;
-        const arrows = slot && slot.rarity && slot.rarity.id === 'orange' ? 5 : 3; // Legendary: 5 arrows
-        const halfSpread = arrows > 3 ? spread * 1.3 : spread;
+        const arrows = slot && slot.rarity && slot.rarity.id === 'orange' ? 5 : 3;
+        const halfSpread = arrows > 3 ? 0.46 : 0.35;
         for (let i = 0; i < arrows; i++) {
-          const t = arrows === 1 ? 0 : (i / (arrows - 1)) * 2 - 1; // -1 .. 1
+          const t = arrows === 1 ? 0 : (i / (arrows - 1)) * 2 - 1;
           const a = baseAngle + t * halfSpread;
           const sp = player.weaponProjSpeed;
           let dmg = player.weaponDamage * player.dmgMult * 1.20 * rDmg;
@@ -352,10 +373,10 @@
               spawnBurst(e.x, e.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0'], 8);
               xpGems.push(new XPGem(e.x, e.y, 1));
               if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
+              const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
             }
           }
         }
-        // Visual rain
         for (let i = 0; i < 28; i++) {
           const offX = (Math.random() - 0.5) * radius * 2;
           const offY = (Math.random() - 0.5) * radius * 2;
@@ -475,8 +496,6 @@
     zombie:   { hp: 18, speedRange: [22, 32], dmg: 8,  r: 5, name: 'Zombie',    body: '#6a8a4a', head: '#84a060' },
     rat:      { hp: 3,  speedRange: [78, 100],dmg: 3,  r: 3, name: 'Crypt Rat', body: '#6b5034', head: '#7a5d3a' },
   };
-
-  // Mix of enemy types per wave
   function pickEnemyType(w) {
     if (w <= 1) return 'skeleton';
     if (w === 2) return Math.random() < 0.8 ? 'skeleton' : 'rat';
@@ -486,7 +505,6 @@
       if (r < 0.75) return 'rat';
       return 'zombie';
     }
-    // wave 4+ mix
     const r = Math.random();
     if (r < 0.4) return 'skeleton';
     if (r < 0.7) return 'rat';
@@ -499,9 +517,7 @@
   class Player {
     constructor(x, y) {
       this.x = x; this.y = y;
-      this.r = 5;
-      this.facing = 1;
-
+      this.r = 5; this.facing = 1;
       this.class = CLASS.ARCHER;
       this.baseMaxHp = this.class.baseMaxHp;
       this.baseDmgMult = 1.0;
@@ -513,68 +529,45 @@
       this.baseCritChance = this.class.baseCritChance;
       this.baseMaxResource = this.class.baseMaxResource;
       this.baseResourceRegen = this.class.baseResourceRegen;
-
       this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
       this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
       this.bonusArmor = 0; this.bonusCritChance = 0;
       this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
-
-      this.maxHp = this.baseMaxHp;
-      this.hp = this.maxHp;
-      this.dmgMult = 1.0;
-      this.fireRateMult = 1.0;
-      this.pickupRange = this.basePickupRange;
-      this.speed = this.baseSpeed;
-      this.regen = 0;
-      this.armor = 0;
-      this.critChance = this.baseCritChance;
-      this.maxResource = this.baseMaxResource;
-      this.resourceRegen = this.baseResourceRegen;
+      this.maxHp = this.baseMaxHp; this.hp = this.maxHp;
+      this.dmgMult = 1.0; this.fireRateMult = 1.0;
+      this.pickupRange = this.basePickupRange; this.speed = this.baseSpeed;
+      this.regen = 0; this.armor = 0; this.critChance = this.baseCritChance;
+      this.maxResource = this.baseMaxResource; this.resourceRegen = this.baseResourceRegen;
       this.resource = this.maxResource;
-
-      this.iframeTimer = 0;
-      this.IFRAME = 0.5;
-      this.hitFlash = 0;
-      this.hawkEyeTimer = 0; // active buff
-
-      this.level = 1;
-      this.xp = 0;
-      this.xpToNext = 5;
-      this.pendingLevelUps = 0;
-      this.kills = 0;
-
+      this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
+      this.hawkEyeTimer = 0;
+      this.level = 1; this.xp = 0; this.xpToNext = 5;
+      this.pendingLevelUps = 0; this.kills = 0;
       this.weaponDamage = this.class.weaponDamage;
       this.weaponFireRate = this.class.weaponFireRate;
       this.weaponRange = this.class.weaponRange;
       this.weaponProjSpeed = this.class.weaponProjSpeed;
       this.fireTimer = 0;
-
       this.abilities = [null, null, null, null];
       this.abilityCooldowns = [0, 0, 0, 0];
       if (this.class.signature && ABILITIES[this.class.signature]) {
         this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE };
       }
-
       this.equipped = {
         helm: null, chest: null, gloves: null, boots: null, belt: null,
         amulet: null, ring1: null, ring2: null, weapon: null, offhand: null,
       };
-      this.inventory = [];
-      this.INVENTORY_CAP = 24;
+      this.inventory = []; this.INVENTORY_CAP = 24;
+      this.gold = 0;
+      this.mats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
     }
-
     onCrit() {
       if (this.class.critResourceGain) {
         this.resource = Math.min(this.maxResource, this.resource + this.class.critResourceGain);
       }
     }
-    effectiveCritChance() {
-      return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0);
-    }
-    effectiveFireRateMult() {
-      return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0);
-    }
-
+    effectiveCritChance() { return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0); }
+    effectiveFireRateMult() { return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0); }
     recomputeStats() {
       this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
       this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
@@ -604,7 +597,6 @@
       if (this.maxResource !== oldMaxR) this.resource = Math.min(this.maxResource, ratioR * this.maxResource);
       else this.resource = Math.min(this.resource, this.maxResource);
     }
-
     update(dt) {
       this.x += Actions.moveX * this.speed * dt;
       this.y += Actions.moveY * this.speed * dt;
@@ -633,8 +625,7 @@
       if (this.iframeTimer > 0) return false;
       const actual = Math.max(1, amount - this.armor);
       this.hp -= actual;
-      this.iframeTimer = this.IFRAME;
-      this.hitFlash = 0.25;
+      this.iframeTimer = this.IFRAME; this.hitFlash = 0.25;
       shake = Math.min(shake + 3, 6);
       if (this.hp <= 0) { this.hp = 0; return true; }
       return false;
@@ -642,18 +633,14 @@
     addXp(amount) {
       this.xp += amount;
       while (this.xp >= this.xpToNext) {
-        this.xp -= this.xpToNext;
-        this.level += 1;
-        this.pendingLevelUps += 1;
+        this.xp -= this.xpToNext; this.level += 1; this.pendingLevelUps += 1;
         this.xpToNext = 5 + (this.level - 1) * 3;
         levelUpFlashTimer = 1.5;
       }
     }
     draw(ctx) {
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y);
+      const px = Math.floor(this.x), py = Math.floor(this.y);
       const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
-      // Hawk-Eye aura
       if (this.hawkEyeTimer > 0) {
         const pulse = 0.4 + 0.3 * Math.sin(performance.now() * 0.012);
         ctx.globalAlpha = pulse * 0.5;
@@ -663,15 +650,11 @@
       }
       ctx.fillStyle = flash ? '#ff4444' : '#7ad96b';
       ctx.fillRect(px - 4, py - 2, 8, 7);
-      ctx.fillStyle = '#3a4a2a';
-      ctx.fillRect(px - 4, py + 2, 8, 1);
+      ctx.fillStyle = '#3a4a2a'; ctx.fillRect(px - 4, py + 2, 8, 1);
       ctx.fillStyle = '#4a3a2a';
-      ctx.fillRect(px - 3, py + 5, 2, 2);
-      ctx.fillRect(px + 1, py + 5, 2, 2);
-      ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0';
-      ctx.fillRect(px - 3, py - 7, 6, 5);
-      ctx.fillStyle = '#5a3a2a';
-      ctx.fillRect(px - 3, py - 8, 6, 2);
+      ctx.fillRect(px - 3, py + 5, 2, 2); ctx.fillRect(px + 1, py + 5, 2, 2);
+      ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0'; ctx.fillRect(px - 3, py - 7, 6, 5);
+      ctx.fillStyle = '#5a3a2a'; ctx.fillRect(px - 3, py - 8, 6, 2);
       ctx.fillStyle = '#000';
       const eo = this.facing === 1 ? 0 : -1;
       ctx.fillRect(px - 2 + eo, py - 5, 1, 1);
@@ -680,89 +663,60 @@
   }
 
   // ============================================================
-  // ENTITY: Enemy (skeleton, zombie, rat)
+  // ENTITY: Enemy
   // ============================================================
   class Enemy {
     constructor(x, y, type, hpMult, speedMult, dmgMult) {
       const t = ENEMY_TYPES[type];
       this.type = type;
-      this.x = x; this.y = y;
-      this.r = t.r;
-      this.maxHp = Math.round(t.hp * hpMult);
-      this.hp = this.maxHp;
+      this.x = x; this.y = y; this.r = t.r;
+      this.maxHp = Math.round(t.hp * hpMult); this.hp = this.maxHp;
       this.contactDmg = Math.round(t.dmg * dmgMult);
       this.speed = (t.speedRange[0] + Math.random() * (t.speedRange[1] - t.speedRange[0])) * speedMult;
       this.alive = true;
       this.bobPhase = Math.random() * Math.PI * 2;
-      this.hitFlash = 0;
-      this.isBoss = false;
+      this.hitFlash = 0; this.isBoss = false;
     }
     update(dt, target) {
-      const dx = target.x - this.x;
-      const dy = target.y - this.y;
+      const dx = target.x - this.x, dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
       if (d > 0.01) { this.x += (dx / d) * this.speed * dt; this.y += (dy / d) * this.speed * dt; }
       this.bobPhase += dt * (this.type === 'rat' ? 14 : this.type === 'zombie' ? 5 : 8);
       if (this.hitFlash > 0) this.hitFlash -= dt;
     }
     takeDamage(amount) {
-      this.hp -= amount;
-      this.hitFlash = 0.1;
+      this.hp -= amount; this.hitFlash = 0.1;
       if (this.hp <= 0) { this.alive = false; return true; }
       return false;
     }
     draw(ctx) {
       const t = ENEMY_TYPES[this.type];
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
       const f = this.hitFlash > 0;
       if (this.type === 'skeleton') {
-        ctx.fillStyle = f ? '#ffffff' : t.body;
-        ctx.fillRect(px - 3, py - 1, 6, 4);
-        ctx.fillStyle = f ? '#dddddd' : '#b0b0a0';
-        ctx.fillRect(px - 2, py + 1, 4, 1);
+        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 3, py - 1, 6, 4);
+        ctx.fillStyle = f ? '#dddddd' : '#b0b0a0'; ctx.fillRect(px - 2, py + 1, 4, 1);
         ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
-        ctx.fillRect(px - 2, py + 3, 1, 2);
-        ctx.fillRect(px + 1, py + 3, 1, 2);
-        ctx.fillStyle = f ? '#ffffff' : t.head;
-        ctx.fillRect(px - 2, py - 5, 4, 4);
+        ctx.fillRect(px - 2, py + 3, 1, 2); ctx.fillRect(px + 1, py + 3, 1, 2);
+        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 2, py - 5, 4, 4);
         ctx.fillStyle = '#1a0a0a';
-        ctx.fillRect(px - 1, py - 4, 1, 1);
-        ctx.fillRect(px + 1, py - 4, 1, 1);
+        ctx.fillRect(px - 1, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
       } else if (this.type === 'zombie') {
-        // Bulky greenish body
-        ctx.fillStyle = f ? '#ffffff' : t.body;
-        ctx.fillRect(px - 4, py - 2, 8, 6);
-        ctx.fillStyle = f ? '#dddddd' : '#4a6535';
-        ctx.fillRect(px - 4, py + 2, 8, 1);
+        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 4, py - 2, 8, 6);
+        ctx.fillStyle = f ? '#dddddd' : '#4a6535'; ctx.fillRect(px - 4, py + 2, 8, 1);
         ctx.fillStyle = f ? '#dddddd' : '#3a4a25';
-        ctx.fillRect(px - 3, py + 4, 2, 2);
-        ctx.fillRect(px + 1, py + 4, 2, 2);
-        ctx.fillStyle = f ? '#ffffff' : t.head;
-        ctx.fillRect(px - 3, py - 7, 6, 5);
+        ctx.fillRect(px - 3, py + 4, 2, 2); ctx.fillRect(px + 1, py + 4, 2, 2);
+        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 3, py - 7, 6, 5);
         ctx.fillStyle = '#1a0a0a';
-        ctx.fillRect(px - 2, py - 5, 1, 1);
-        ctx.fillRect(px + 1, py - 5, 1, 1);
-        // Drool
-        ctx.fillStyle = '#aabb55';
-        ctx.fillRect(px, py - 3, 1, 1);
+        ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
+        ctx.fillStyle = '#aabb55'; ctx.fillRect(px, py - 3, 1, 1);
       } else if (this.type === 'rat') {
-        // Tiny ratty body
-        ctx.fillStyle = f ? '#ffffff' : t.body;
-        ctx.fillRect(px - 3, py - 1, 5, 3);
-        // Tail
+        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 3, py - 1, 5, 3);
+        ctx.fillStyle = '#4a3a25'; ctx.fillRect(px + 2, py, 2, 1);
+        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 4, py - 3, 3, 3);
+        ctx.fillStyle = '#ff3030'; ctx.fillRect(px - 3, py - 2, 1, 1);
         ctx.fillStyle = '#4a3a25';
-        ctx.fillRect(px + 2, py, 2, 1);
-        // Head
-        ctx.fillStyle = f ? '#ffffff' : t.head;
-        ctx.fillRect(px - 4, py - 3, 3, 3);
-        // Eye
-        ctx.fillStyle = '#ff3030';
-        ctx.fillRect(px - 3, py - 2, 1, 1);
-        // Ears
-        ctx.fillStyle = '#4a3a25';
-        ctx.fillRect(px - 4, py - 4, 1, 1);
-        ctx.fillRect(px - 2, py - 4, 1, 1);
+        ctx.fillRect(px - 4, py - 4, 1, 1); ctx.fillRect(px - 2, py - 4, 1, 1);
       }
     }
   }
@@ -772,39 +726,30 @@
   // ============================================================
   class BoneLord {
     constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x; this.y = y;
-      this.r = 10;
-      this.maxHp = Math.round(280 * hpMult);
-      this.hp = this.maxHp;
+      this.x = x; this.y = y; this.r = 10;
+      this.maxHp = Math.round(280 * hpMult); this.hp = this.maxHp;
       this.contactDmg = Math.round(12 * dmgMult);
       this.speed = 32 * speedMult;
-      this.alive = true;
-      this.isBoss = true;
-      this.bobPhase = 0;
-      this.hitFlash = 0;
-      this.boneThrowTimer = 3.0;
-      this.summonTimer = 8.0;
+      this.alive = true; this.isBoss = true;
+      this.bobPhase = 0; this.hitFlash = 0;
+      this.boneThrowTimer = 3.0; this.summonTimer = 8.0;
       this.preferredDistance = 80;
       this.name = 'Bone Lord';
     }
     update(dt, target) {
-      const dx = target.x - this.x;
-      const dy = target.y - this.y;
+      const dx = target.x - this.x, dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
-      // Keep at preferred distance — close in if far, back off if very close
-      let moveMul = 0;
-      if (d > this.preferredDistance + 20) moveMul = 1;
-      else if (d < this.preferredDistance - 20) moveMul = -0.5;
-      if (d > 0.01 && moveMul !== 0) {
-        this.x += (dx / d) * this.speed * moveMul * dt;
-        this.y += (dy / d) * this.speed * moveMul * dt;
+      let mv = 0;
+      if (d > this.preferredDistance + 20) mv = 1;
+      else if (d < this.preferredDistance - 20) mv = -0.5;
+      if (d > 0.01 && mv !== 0) {
+        this.x += (dx / d) * this.speed * mv * dt;
+        this.y += (dy / d) * this.speed * mv * dt;
       }
       this.x = Math.max(this.r, Math.min(W - this.r, this.x));
       this.y = Math.max(this.r, Math.min(H - this.r, this.y));
       this.bobPhase += dt * 4;
       if (this.hitFlash > 0) this.hitFlash -= dt;
-
-      // Bone throw — 3 projectiles in a spread
       this.boneThrowTimer -= dt;
       if (this.boneThrowTimer <= 0) {
         this.boneThrowTimer = 3.0;
@@ -815,58 +760,38 @@
         }
         spawnBurst(this.x, this.y, ['#e8e8d0', '#a0a090'], 6);
       }
-      // Summon
       this.summonTimer -= dt;
       if (this.summonTimer <= 0) {
         this.summonTimer = 9.0;
         for (let i = 0; i < 3; i++) {
           const ang = (Math.PI * 2) * (i / 3) + Math.random() * 0.5;
-          const dist = 26;
-          const sx = this.x + Math.cos(ang) * dist;
-          const sy = this.y + Math.sin(ang) * dist;
+          const sx = this.x + Math.cos(ang) * 26;
+          const sy = this.y + Math.sin(ang) * 26;
           enemies.push(new Enemy(sx, sy, 'skeleton', 0.8, 1.0, 0.8));
         }
         spawnBurst(this.x, this.y, ['#7755aa', '#aa88cc', '#ddccff'], 16);
       }
     }
     takeDamage(amount) {
-      this.hp -= amount;
-      this.hitFlash = 0.12;
+      this.hp -= amount; this.hitFlash = 0.12;
       if (this.hp <= 0) { this.alive = false; return true; }
       return false;
     }
     draw(ctx) {
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
       const f = this.hitFlash > 0;
-      // Body
-      ctx.fillStyle = f ? '#ffffff' : '#d8d8c0';
-      ctx.fillRect(px - 6, py - 2, 12, 8);
-      // Ribs
+      ctx.fillStyle = f ? '#ffffff' : '#d8d8c0'; ctx.fillRect(px - 6, py - 2, 12, 8);
       ctx.fillStyle = f ? '#dddddd' : '#a0a090';
-      ctx.fillRect(px - 4, py + 1, 8, 1);
-      ctx.fillRect(px - 4, py + 3, 8, 1);
-      // Legs
+      ctx.fillRect(px - 4, py + 1, 8, 1); ctx.fillRect(px - 4, py + 3, 8, 1);
       ctx.fillStyle = f ? '#dddddd' : '#bcbca0';
-      ctx.fillRect(px - 4, py + 6, 2, 4);
-      ctx.fillRect(px + 2, py + 6, 2, 4);
-      // Skull
-      ctx.fillStyle = f ? '#ffffff' : '#e8e8d0';
-      ctx.fillRect(px - 4, py - 10, 8, 8);
-      // Eyes (glowing red)
+      ctx.fillRect(px - 4, py + 6, 2, 4); ctx.fillRect(px + 2, py + 6, 2, 4);
+      ctx.fillStyle = f ? '#ffffff' : '#e8e8d0'; ctx.fillRect(px - 4, py - 10, 8, 8);
       ctx.fillStyle = '#ff2020';
-      ctx.fillRect(px - 2, py - 8, 2, 2);
-      ctx.fillRect(px + 0, py - 8, 2, 2);
-      // Jaw line
-      ctx.fillStyle = '#3a3a30';
-      ctx.fillRect(px - 3, py - 4, 6, 1);
-      // Crown
-      ctx.fillStyle = '#ffd040';
-      ctx.fillRect(px - 5, py - 12, 10, 2);
+      ctx.fillRect(px - 2, py - 8, 2, 2); ctx.fillRect(px + 0, py - 8, 2, 2);
+      ctx.fillStyle = '#3a3a30'; ctx.fillRect(px - 3, py - 4, 6, 1);
+      ctx.fillStyle = '#ffd040'; ctx.fillRect(px - 5, py - 12, 10, 2);
       ctx.fillStyle = '#fff080';
-      ctx.fillRect(px - 4, py - 14, 2, 2);
-      ctx.fillRect(px - 1, py - 14, 2, 2);
-      ctx.fillRect(px + 2, py - 14, 2, 2);
+      ctx.fillRect(px - 4, py - 14, 2, 2); ctx.fillRect(px - 1, py - 14, 2, 2); ctx.fillRect(px + 2, py - 14, 2, 2);
     }
   }
 
@@ -875,74 +800,52 @@
   // ============================================================
   class Projectile {
     constructor(x, y, vx, vy, damage, life, isCrit) {
-      this.x = x; this.y = y;
-      this.vx = vx; this.vy = vy;
+      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
       this.r = isCrit ? 3 : 2;
-      this.damage = damage;
-      this.life = life;
-      this.dead = false;
-      this.isCrit = !!isCrit;
-      this.piercing = false;
-      this.hitSet = null; // for piercing — track hit enemies
+      this.damage = damage; this.life = life;
+      this.dead = false; this.isCrit = !!isCrit;
+      this.piercing = false; this.hitSet = null;
     }
     update(dt) {
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
+      this.x += this.vx * dt; this.y += this.vy * dt;
       this.life -= dt;
       if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
     draw(ctx) {
       if (this.piercing) {
-        ctx.fillStyle = '#5599ff';
-        ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
-        ctx.fillStyle = '#aaccff';
-        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+        ctx.fillStyle = '#5599ff'; ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
+        ctx.fillStyle = '#aaccff'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
       } else if (this.isCrit) {
-        ctx.fillStyle = '#ff8800';
-        ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
-        ctx.fillStyle = '#ffe080';
-        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+        ctx.fillStyle = '#ff8800'; ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
+        ctx.fillStyle = '#ffe080'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
       } else {
-        ctx.fillStyle = '#fff7a0';
-        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-        ctx.fillStyle = '#ffe040';
-        ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
+        ctx.fillStyle = '#fff7a0'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+        ctx.fillStyle = '#ffe040'; ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
       }
     }
   }
 
   // ============================================================
-  // ENTITY: BoneProjectile (enemy projectile)
+  // ENTITY: BoneProjectile
   // ============================================================
   class BoneProjectile {
     constructor(x, y, vx, vy, damage) {
-      this.x = x; this.y = y;
-      this.vx = vx; this.vy = vy;
-      this.r = 3;
-      this.damage = damage;
-      this.life = 3.5;
-      this.dead = false;
-      this.rot = 0;
+      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+      this.r = 3; this.damage = damage;
+      this.life = 3.5; this.dead = false; this.rot = 0;
     }
     update(dt) {
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
-      this.life -= dt;
-      this.rot += dt * 9;
+      this.x += this.vx * dt; this.y += this.vy * dt;
+      this.life -= dt; this.rot += dt * 9;
       if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
     draw(ctx) {
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y);
+      const px = Math.floor(this.x), py = Math.floor(this.y);
       const flicker = Math.floor(this.rot) % 2;
-      ctx.fillStyle = flicker ? '#e8e8d0' : '#d8d8c0';
-      ctx.fillRect(px - 2, py - 2, 4, 4);
-      ctx.fillStyle = '#a0a090';
-      ctx.fillRect(px - 1, py - 1, 2, 2);
-      // Knobby ends
+      ctx.fillStyle = flicker ? '#e8e8d0' : '#d8d8c0'; ctx.fillRect(px - 2, py - 2, 4, 4);
+      ctx.fillStyle = '#a0a090'; ctx.fillRect(px - 1, py - 1, 2, 2);
       ctx.fillStyle = '#e8e8d0';
-      ctx.fillRect(px - 3, py, 1, 1);
-      ctx.fillRect(px + 2, py, 1, 1);
+      ctx.fillRect(px - 3, py, 1, 1); ctx.fillRect(px + 2, py, 1, 1);
     }
   }
 
@@ -954,10 +857,8 @@
       this.x = x; this.y = y;
       this.vx = (Math.random() - 0.5) * 40;
       this.vy = (Math.random() - 0.5) * 40 - 20;
-      this.r = 3;
-      this.value = value;
-      this.dead = false;
-      this.magnetized = false;
+      this.r = 3; this.value = value;
+      this.dead = false; this.magnetized = false;
       this.bobPhase = Math.random() * Math.PI * 2;
     }
     update(dt, player) {
@@ -966,8 +867,7 @@
         this.vx *= 0.92; this.vy *= 0.92;
         this.x += this.vx * dt; this.y += this.vy * dt;
       }
-      const dx = player.x - this.x;
-      const dy = player.y - this.y;
+      const dx = player.x - this.x, dy = player.y - this.y;
       const d = Math.hypot(dx, dy);
       if (!this.magnetized && d < player.pickupRange) this.magnetized = true;
       if (this.magnetized) {
@@ -977,13 +877,10 @@
       }
     }
     draw(ctx) {
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
-      ctx.fillStyle = '#9b59ff';
-      ctx.fillRect(px - 1, py - 2, 3, 4);
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
+      ctx.fillStyle = '#9b59ff'; ctx.fillRect(px - 1, py - 2, 3, 4);
       ctx.fillStyle = '#c89aff';
-      ctx.fillRect(px, py - 1, 1, 1);
-      ctx.fillRect(px - 1, py - 2, 1, 1);
+      ctx.fillRect(px, py - 1, 1, 1); ctx.fillRect(px - 1, py - 2, 1, 1);
     }
   }
 
@@ -995,23 +892,19 @@
       this.x = x; this.y = y;
       this.vx = (Math.random() - 0.5) * 30;
       this.vy = (Math.random() - 0.5) * 30 - 25;
-      this.r = 5;
-      this.item = item;
-      this.dead = false;
-      this.settled = false;
+      this.r = 5; this.item = item;
+      this.dead = false; this.settled = false;
       this.bobPhase = Math.random() * Math.PI * 2;
       this.glowPhase = Math.random() * Math.PI * 2;
     }
     update(dt, player) {
-      this.bobPhase += dt * 3;
-      this.glowPhase += dt * 4;
+      this.bobPhase += dt * 3; this.glowPhase += dt * 4;
       if (!this.settled) {
         this.vx *= 0.85; this.vy *= 0.85;
         this.x += this.vx * dt; this.y += this.vy * dt;
         if (Math.abs(this.vx) + Math.abs(this.vy) < 5) this.settled = true;
       }
-      const dx = player.x - this.x;
-      const dy = player.y - this.y;
+      const dx = player.x - this.x, dy = player.y - this.y;
       const rr = player.r + this.r;
       if (dx * dx + dy * dy < rr * rr) {
         if (player.inventory.length < player.INVENTORY_CAP) {
@@ -1024,24 +917,18 @@
       }
     }
     draw(ctx) {
-      const px = Math.floor(this.x);
-      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
       const glow = 0.4 + 0.2 * Math.sin(this.glowPhase);
       ctx.globalAlpha = glow;
-      ctx.fillStyle = this.item.rarity.color;
-      ctx.fillRect(px - 6, py - 6, 12, 12);
+      ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 6, py - 6, 12, 12);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = this.item.rarity.color;
-      ctx.fillRect(px - 4, py - 4, 8, 8);
-      ctx.fillStyle = '#1a1a22';
-      ctx.fillRect(px - 3, py - 3, 6, 6);
+      ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 4, py - 4, 8, 8);
+      ctx.fillStyle = '#1a1a22'; ctx.fillRect(px - 3, py - 3, 6, 6);
       ctx.fillStyle = this.item.rarity.color;
       ctx.font = 'bold 7px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(this.item.base.letter, px, py + 1);
-      ctx.textBaseline = 'alphabetic';
-      ctx.textAlign = 'left';
+      ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
     }
   }
 
@@ -1050,10 +937,8 @@
   // ============================================================
   class Particle {
     constructor(x, y, vx, vy, color, life, size) {
-      this.x = x; this.y = y;
-      this.vx = vx; this.vy = vy;
-      this.color = color;
-      this.life = life; this.maxLife = life;
+      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+      this.color = color; this.life = life; this.maxLife = life;
       this.size = size || 2;
     }
     update(dt) {
@@ -1063,8 +948,7 @@
     }
     draw(ctx) {
       const a = Math.max(0, this.life / this.maxLife);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = this.color;
+      ctx.globalAlpha = a; ctx.fillStyle = this.color;
       ctx.fillRect(Math.floor(this.x), Math.floor(this.y), this.size, this.size);
       ctx.globalAlpha = 1;
     }
@@ -1091,8 +975,7 @@
     else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
     else { x = -pad; y = Math.random() * H; }
-    const type = pickEnemyType(currentWave);
-    enemies.push(new Enemy(x, y, type, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
+    enemies.push(new Enemy(x, y, pickEnemyType(currentWave), cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
   }
   function spawnBoss(cfg) {
     bossRef = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
@@ -1102,7 +985,7 @@
     spawnBurst(W / 2, 70, ['#7755aa', '#aa88cc', '#ffd040'], 18);
   }
   function findNearestEnemy(x, y, maxRange) {
-    let best = null; let bestD = maxRange;
+    let best = null, bestD = maxRange;
     for (const e of enemies) {
       if (!e.alive) continue;
       const d = Math.hypot(e.x - x, e.y - y);
@@ -1111,8 +994,7 @@
     return best;
   }
   function fireProjectile(shooter, target) {
-    const dx = target.x - shooter.x;
-    const dy = target.y - shooter.y;
+    const dx = target.x - shooter.x, dy = target.y - shooter.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.01) return;
     const sp = shooter.weaponProjSpeed;
@@ -1128,7 +1010,6 @@
   // COLLISIONS
   // ============================================================
   function checkCollisions() {
-    // Player projectile vs enemy
     for (const proj of projectiles) {
       if (proj.dead) continue;
       for (const enemy of enemies) {
@@ -1137,32 +1018,28 @@
           if (!proj.hitSet) proj.hitSet = new Set();
           if (proj.hitSet.has(enemy)) continue;
         }
-        const dx = enemy.x - proj.x;
-        const dy = enemy.y - proj.y;
+        const dx = enemy.x - proj.x, dy = enemy.y - proj.y;
         const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = enemy.takeDamage(proj.damage);
-          if (proj.piercing) {
-            proj.hitSet.add(enemy);
-          } else {
-            proj.dead = true;
-          }
+          if (proj.piercing) proj.hitSet.add(enemy);
+          else proj.dead = true;
           spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
           if (died) {
             player.kills++;
             spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
             xpGems.push(new XPGem(enemy.x, enemy.y, enemy.isBoss ? 8 : 1));
+            // Gold drop
+            const goldAmt = enemy.isBoss ? rngInt(40, 80) : rngInt(1, 3);
+            player.gold += goldAmt;
+            goldFlashTimer = 0.8;
             const dropChance = enemy.isBoss ? 1.0 : 0.18;
             if (Math.random() < dropChance) {
-              // Boss drops a guaranteed magic+ item
               if (enemy.isBoss) {
-                const it = generateItem();
-                // Reroll until at least magic
+                let it = generateItem();
                 let tries = 0;
-                let item = it;
-                while (item.rarity.id === 'white' && tries < 6) { item = generateItem(); tries++; }
-                itemDrops.push(new ItemDrop(enemy.x, enemy.y, item));
-                // Extra guaranteed loot
+                while (it.rarity.id === 'white' && tries < 6) { it = generateItem(); tries++; }
+                itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
                 itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
                 itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
               } else {
@@ -1180,12 +1057,10 @@
         }
       }
     }
-    // Enemy projectile vs player
     if (player.iframeTimer <= 0) {
       for (const ep of enemyProjectiles) {
         if (ep.dead) continue;
-        const dx = ep.x - player.x;
-        const dy = ep.y - player.y;
+        const dx = ep.x - player.x, dy = ep.y - player.y;
         const rr = ep.r + player.r;
         if (dx * dx + dy * dy < rr * rr) {
           ep.dead = true;
@@ -1195,12 +1070,10 @@
         }
       }
     }
-    // Enemy vs player (melee contact)
     if (player.iframeTimer <= 0) {
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
+        const dx = enemy.x - player.x, dy = enemy.y - player.y;
         const rr = enemy.r + player.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = player.takeDamage(enemy.contactDmg);
@@ -1215,24 +1088,23 @@
   // STATE TRANSITIONS
   // ============================================================
   function endWave() {
-    state = STATE.INTERMISSION;
-    intermissionTimer = 0;
-    enemies = [];
-    enemyProjectiles = [];
-    bossRef = null;
+    enemies = []; enemyProjectiles = []; bossRef = null;
     if (player.pendingLevelUps > 0) enterLevelUp();
-    else intermissionTimer = 3;
+    else enterShop();
   }
-  function enterLevelUp() { state = STATE.LEVELUP; levelUpChoices = rollLevelUpChoices(); }
+  function enterLevelUp() {
+    state = STATE.LEVELUP;
+    levelUpChoices = rollLevelUpChoices();
+    levelUpRerollCost = 1;
+  }
   function pickLevelUp(idx) {
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
     if (player.pendingLevelUps > 0) enterLevelUp();
-    else { state = STATE.INTERMISSION; intermissionTimer = 3; }
+    else enterShop();
   }
   function enterAbilityDraft() {
-    // Roll 3 unique abilities with rarity
     const pool = ABILITY_LIST.slice();
     const out = [];
     const seen = new Set();
@@ -1249,16 +1121,21 @@
   function pickAbilityDraft(idx) {
     if (idx < 0 || idx >= abilityDraftChoices.length) return;
     const choice = abilityDraftChoices[idx];
-    // Find first empty slot 1-3 (slot 0 is signature)
     let target = -1;
     for (let i = 1; i < 4; i++) {
       if (!player.abilities[i]) { target = i; break; }
     }
-    if (target < 0) target = 1; // overflow: replace slot 1
+    if (target < 0) target = 1;
     player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity };
-    // After draft, go to intermission
     if (player.pendingLevelUps > 0) enterLevelUp();
-    else { state = STATE.INTERMISSION; intermissionTimer = 3; }
+    else enterShop();
+  }
+  function enterShop() {
+    state = STATE.SHOP;
+    shopRefreshCost = 5;
+    shopItems = [];
+    for (let i = 0; i < 4; i++) shopItems.push(generateItem());
+    selectedInvIdx = -1;
   }
   function startNextWave() {
     currentWave += 1;
@@ -1270,39 +1147,36 @@
   }
   function toggleInventory() {
     if (state === STATE.INVENTORY) state = prevState;
-    else if (state === STATE.PLAYING || state === STATE.INTERMISSION) { prevState = state; state = STATE.INVENTORY; }
+    else if (state === STATE.PLAYING) { prevState = state; state = STATE.INVENTORY; }
   }
-
   function generateFloorDecorations() {
     floorDecorations = [];
     const biome = currentBiome();
     for (let i = 0; i < 30; i++) {
       floorDecorations.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
+        x: Math.random() * W, y: Math.random() * H,
         size: 1 + Math.floor(Math.random() * 2),
         color: biome.decoColors[Math.floor(Math.random() * biome.decoColors.length)],
       });
     }
   }
-
   function resetWorld() {
     player = new Player(W / 2, H / 2);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
-    bossRef = null;
-    shake = 0;
+    bossRef = null; shake = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     levelUpChoices = []; abilityDraftChoices = [];
     levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
-    bossBannerTimer = 0; bossDefeatedBannerTimer = 0;
+    bossBannerTimer = 0; bossDefeatedBannerTimer = 0; goldFlashTimer = 0;
+    shopItems = []; shopRefreshCost = 5; selectedInvIdx = -1; levelUpRerollCost = 1;
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
     generateFloorDecorations();
   }
 
   // ============================================================
-  // EQUIP / UNEQUIP
+  // EQUIP / UNEQUIP / SALVAGE / REROLL
   // ============================================================
   function equipFromInventory(idx) {
     const item = player.inventory[idx];
@@ -1317,6 +1191,8 @@
     if (player.equipped[targetSlot]) player.inventory.push(player.equipped[targetSlot]);
     player.equipped[targetSlot] = item;
     player.recomputeStats();
+    if (selectedInvIdx === idx) selectedInvIdx = -1;
+    else if (selectedInvIdx > idx) selectedInvIdx -= 1;
   }
   function unequipSlot(slotKey) {
     const item = player.equipped[slotKey];
@@ -1326,49 +1202,110 @@
     player.inventory.push(item);
     player.recomputeStats();
   }
+  function buyShopItem(idx) {
+    const item = shopItems[idx];
+    if (!item) return;
+    const price = itemPrice(item);
+    if (player.gold < price) return;
+    if (player.inventory.length >= player.INVENTORY_CAP) return;
+    player.gold -= price;
+    player.inventory.push(item);
+    shopItems[idx] = null;
+    goldFlashTimer = 0.8;
+  }
+  function doRefreshShop() {
+    if (player.gold < shopRefreshCost) return;
+    player.gold -= shopRefreshCost;
+    shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
+    shopItems = [];
+    for (let i = 0; i < 4; i++) shopItems.push(generateItem());
+    goldFlashTimer = 0.8;
+  }
+  function salvageInventoryItem(idx) {
+    const item = player.inventory[idx];
+    if (!item) return;
+    const goldGain = salvageGold(item);
+    const mat = RARITY_MAT[item.rarity.id];
+    player.gold += goldGain;
+    player.mats[mat] = (player.mats[mat] || 0) + 1;
+    player.inventory.splice(idx, 1);
+    if (selectedInvIdx === idx) selectedInvIdx = -1;
+    else if (selectedInvIdx > idx) selectedInvIdx -= 1;
+    goldFlashTimer = 0.8;
+  }
+  function rerollInventoryItem(idx) {
+    const item = player.inventory[idx];
+    if (!item) return;
+    const spec = rerollSpec(item);
+    if (!spec) return;
+    if (player.gold < spec.gold) return;
+    if ((player.mats[spec.mat] || 0) < spec.count) return;
+    player.gold -= spec.gold;
+    player.mats[spec.mat] -= spec.count;
+    item.affixes = rollAffixes(rngInt(item.rarity.affixMin, item.rarity.affixMax));
+    goldFlashTimer = 0.8;
+  }
+  function doRerollLevelUp() {
+    if (player.gold < levelUpRerollCost) return;
+    player.gold -= levelUpRerollCost;
+    levelUpRerollCost = Math.ceil(levelUpRerollCost * 3);
+    levelUpChoices = rollLevelUpChoices();
+    goldFlashTimer = 0.8;
+  }
 
   // ============================================================
-  // RENDER
+  // BUTTON HELPERS
+  // ============================================================
+  function isHovering(x, y, w, h) {
+    return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+  }
+  function drawButton(x, y, w, h, label, enabled, accent) {
+    const hovered = isHovering(x, y, w, h) && enabled;
+    ctx.fillStyle = !enabled ? '#1a1a22' : (hovered ? '#3a3a45' : '#2a2a35');
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = !enabled ? '#333' : (accent || '#888');
+    ctx.lineWidth = hovered ? 2 : 1;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    ctx.lineWidth = 1;
+    ctx.fillStyle = !enabled ? '#555' : (accent || '#eee');
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    return hovered;
+  }
+
+  // ============================================================
+  // RENDER — Background
   // ============================================================
   function drawBackground() {
     const biome = currentBiome();
-    ctx.fillStyle = biome.bg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = biome.bg; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = biome.grid;
     for (let gx = 0; gx < W; gx += 16) {
       for (let gy = 0; gy < H; gy += 16) {
         if (((gx / 16) + (gy / 16)) % 2 === 0) ctx.fillRect(gx, gy, 16, 16);
       }
     }
-    // Floor decorations (bones/dust)
     for (const d of floorDecorations) {
       ctx.fillStyle = d.color;
       ctx.fillRect(Math.floor(d.x), Math.floor(d.y), d.size, d.size);
     }
   }
-
   function drawBossBar() {
     if (!bossRef || !bossRef.alive) return;
     const bw = 360, bh = 8;
-    const bx = (W - bw) / 2;
-    const by = 8;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-    ctx.fillStyle = '#3a1818';
-    ctx.fillRect(bx, by, bw, bh);
+    const bx = (W - bw) / 2, by = 8;
+    ctx.fillStyle = '#000'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+    ctx.fillStyle = '#3a1818'; ctx.fillRect(bx, by, bw, bh);
     const ratio = Math.max(0, bossRef.hp / bossRef.maxHp);
-    const grad = ratio > 0.5 ? '#cc3030' : ratio > 0.25 ? '#dd6020' : '#ff2020';
-    ctx.fillStyle = grad;
+    ctx.fillStyle = ratio > 0.5 ? '#cc3030' : ratio > 0.25 ? '#dd6020' : '#ff2020';
     ctx.fillRect(bx, by, bw * ratio, bh);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px monospace';
-    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
     ctx.fillText(`${bossRef.name.toUpperCase()}  -  ${Math.ceil(bossRef.hp)} / ${bossRef.maxHp}`, W / 2, by + 7);
     ctx.textAlign = 'left';
   }
-
   function drawHud() {
-    // HP bar
     const hpx = 8, hpy = 8;
     ctx.fillStyle = '#000'; ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
     ctx.fillStyle = '#3a2020'; ctx.fillRect(hpx, hpy, 120, 6);
@@ -1378,14 +1315,12 @@
     ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
     ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 2, hpy + 5);
 
-    // XP bar
     const xpx = 8, xpy = 19;
     ctx.fillStyle = '#000'; ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
     ctx.fillStyle = '#1a2030'; ctx.fillRect(xpx, xpy, 120, 3);
     const xpRatio = player.xp / player.xpToNext;
     ctx.fillStyle = '#9b59ff'; ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
 
-    // Focus bar
     const rx = 8, ry = 28;
     ctx.fillStyle = '#000'; ctx.fillRect(rx - 1, ry - 1, 122, 5);
     ctx.fillStyle = '#2a2515'; ctx.fillRect(rx, ry, 120, 3);
@@ -1393,15 +1328,13 @@
     ctx.fillStyle = player.class.resourceColor;
     ctx.fillRect(rx, ry, 120 * resRatio, 3);
 
-    // Labels row
-    ctx.fillStyle = '#c89aff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#c89aff'; ctx.font = '8px monospace';
     ctx.fillText(`LV ${player.level}`, hpx + 1, 42);
     ctx.fillStyle = '#888';
     ctx.fillText(`${player.class.name.toUpperCase()}`, hpx + 36, 42);
     ctx.fillStyle = player.class.resourceColor;
     ctx.fillText(`${player.class.resourceName} ${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`, hpx + 80, 42);
 
-    // Center: wave / intermission / biome
     ctx.textAlign = 'center';
     if (state === STATE.PLAYING) {
       if (!bossRef) {
@@ -1409,25 +1342,20 @@
         ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
         ctx.fillStyle = '#999'; ctx.font = '8px monospace';
         ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
-      } else {
-        // Boss HP bar replaces the simple wave header — drawn separately
       }
-    } else if (state === STATE.INTERMISSION) {
-      ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-      ctx.fillText(`WAVE ${currentWave + 1} INCOMING`, W / 2, 12);
-      ctx.fillStyle = '#7ad96b'; ctx.font = '14px monospace';
-      ctx.fillText(`${Math.ceil(intermissionTimer)}`, W / 2, 28);
     }
-    // Biome label small below
     ctx.fillStyle = '#557755'; ctx.font = '7px monospace';
     ctx.fillText(currentBiome().name.toUpperCase(), W / 2, H - 86);
 
-    // Right side stats
     ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
     ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
     ctx.fillStyle = '#aaa';
     ctx.fillText(`ENEMIES  ${enemies.filter(e => e.alive).length}`, W - 8, 22);
     ctx.fillText(`BAG  ${player.inventory.length}/${player.INVENTORY_CAP}`, W - 8, 32);
+    // Gold
+    const gFlash = goldFlashTimer > 0 ? 'bold 9px monospace' : 'bold 8px monospace';
+    ctx.fillStyle = '#ffd23f'; ctx.font = gFlash;
+    ctx.fillText(`GOLD  ${player.gold}`, W - 8, 44);
 
     if (levelUpFlashTimer > 0) {
       const a = Math.min(1, levelUpFlashTimer / 1.5);
@@ -1454,13 +1382,10 @@
       ctx.fillText('BONE LORD SLAIN', W / 2, H / 2 - 20);
     }
     ctx.textAlign = 'left';
-
     drawBossBar();
   }
-
   function drawAbilityBar() {
-    const slotSize = 30;
-    const gap = 6;
+    const slotSize = 30, gap = 6;
     const totalW = 4 * slotSize + 3 * gap;
     const startX = (W - totalW) / 2;
     const y = H - slotSize - 6;
@@ -1470,10 +1395,8 @@
       const cd = player.abilityCooldowns[i];
       ctx.fillStyle = ability ? '#22222a' : '#13131a';
       ctx.fillRect(x, y, slotSize, slotSize);
-      // Rarity border if ability present
       if (ability) {
-        ctx.strokeStyle = ability.rarity.color;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = ability.rarity.color; ctx.lineWidth = 2;
         ctx.strokeRect(x + 1, y + 1, slotSize - 2, slotSize - 2);
         ctx.lineWidth = 1;
       } else {
@@ -1481,37 +1404,29 @@
         ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
       }
       ctx.fillStyle = ability ? '#888' : '#444';
-      ctx.font = 'bold 7px monospace';
-      ctx.textAlign = 'left';
+      ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`${i + 1}`, x + 3, y + 8);
       if (ability) {
         const canCast = cd <= 0 && player.resource >= ability.def.cost;
         ctx.fillStyle = canCast ? ability.def.color : '#666';
-        ctx.font = 'bold 16px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(ability.def.letter, x + slotSize / 2, y + slotSize / 2 + 1);
         ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = player.resource >= ability.def.cost ? '#ffd23f' : '#664020';
-        ctx.font = '6px monospace';
-        ctx.textAlign = 'right';
+        ctx.font = '6px monospace'; ctx.textAlign = 'right';
         ctx.fillText(`${ability.def.cost}`, x + slotSize - 2, y + slotSize - 2);
         if (cd > 0) {
           const ratio = cd / ability.def.cooldown;
           ctx.fillStyle = 'rgba(0,0,0,0.7)';
           ctx.fillRect(x, y + slotSize * (1 - ratio), slotSize, slotSize * ratio);
-          ctx.fillStyle = '#fff';
-          ctx.font = 'bold 10px monospace';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#fff'; ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(cd.toFixed(1), x + slotSize / 2, y + slotSize / 2);
           ctx.textBaseline = 'alphabetic';
         }
       } else {
-        ctx.fillStyle = '#333';
-        ctx.font = '6px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#333'; ctx.font = '6px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText('LOCKED', x + slotSize / 2, y + slotSize / 2);
         ctx.textBaseline = 'alphabetic';
       }
@@ -1519,13 +1434,15 @@
     ctx.textAlign = 'left';
   }
 
+  // ============================================================
+  // RENDER — Level-up screen (with reroll)
+  // ============================================================
   function drawLevelUpScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#ffd040';
-    ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
-    ctx.fillText('LEVEL UP', W / 2, 56);
+    ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
+    ctx.fillText('LEVEL UP', W / 2, 50);
     ctx.fillStyle = '#888'; ctx.font = '8px monospace';
-    ctx.fillText('Pick one: 1 / 2 / 3, click, or face button', W / 2, 72);
+    ctx.fillText('Pick one: 1 / 2 / 3, click, or face button', W / 2, 66);
     const cardW = 130, cardH = 140, gap = 18;
     const totalW = cardW * 3 + gap * 2;
     const startX = (W - totalW) / 2;
@@ -1534,11 +1451,9 @@
       const choice = levelUpChoices[i];
       const cx = startX + i * (cardW + gap); const cy = cardY;
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
-      ctx.fillStyle = hovered ? '#3a3a45' : '#2a2a35';
-      ctx.fillRect(cx, cy, cardW, cardH);
+      ctx.fillStyle = hovered ? '#3a3a45' : '#2a2a35'; ctx.fillRect(cx, cy, cardW, cardH);
       ctx.strokeStyle = choice.color; ctx.lineWidth = hovered ? 3 : 2;
-      ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
-      ctx.lineWidth = 1;
+      ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2); ctx.lineWidth = 1;
       ctx.fillStyle = '#666'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`[${i + 1}]`, cx + 6, cy + 14);
       ctx.fillStyle = choice.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
@@ -1546,19 +1461,28 @@
       ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
       ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);
     }
+    // Reroll button (escalating cost)
+    const canReroll = player.gold >= levelUpRerollCost;
+    const rerollLabel = `REROLL  ${levelUpRerollCost}g`;
+    const rbW = 120, rbH = 22;
+    const rbX = (W - rbW) / 2, rbY = cardY + cardH + 14;
+    drawButton(rbX, rbY, rbW, rbH, rerollLabel, canReroll, '#ffd23f');
+    ctx.fillStyle = '#666'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(`(gold: ${player.gold})`, W / 2, rbY + rbH + 10);
     ctx.textAlign = 'left';
   }
 
+  // ============================================================
+  // RENDER — Ability Draft screen
+  // ============================================================
   function drawAbilityDraftScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#ffd040';
-    ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
+    ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
     ctx.fillText('ABILITY DRAFT', W / 2, 50);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
-    ctx.fillText('Bone Lord defeated. Choose one ability — rarity rolled at draft.', W / 2, 68);
+    ctx.fillText('Bone Lord defeated. Choose one ability.', W / 2, 68);
     ctx.fillStyle = '#888'; ctx.font = '8px monospace';
     ctx.fillText('Pick: 1 / 2 / 3, click, or face button', W / 2, 82);
-
     const cardW = 150, cardH = 170, gap = 18;
     const totalW = cardW * 3 + gap * 2;
     const startX = (W - totalW) / 2;
@@ -1567,43 +1491,33 @@
       const ch = abilityDraftChoices[i];
       const cx = startX + i * (cardW + gap); const cy = cardY;
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
-      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
-      ctx.fillRect(cx, cy, cardW, cardH);
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a'; ctx.fillRect(cx, cy, cardW, cardH);
       ctx.strokeStyle = ch.rarity.color; ctx.lineWidth = hovered ? 4 : 3;
-      ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4);
-      ctx.lineWidth = 1;
-      // Number key
+      ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4); ctx.lineWidth = 1;
       ctx.fillStyle = '#666'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`[${i + 1}]`, cx + 8, cy + 16);
-      // Rarity
       ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
       ctx.fillText(ch.rarity.name.toUpperCase(), cx + cardW - 8, cy + 16);
-      // Big letter icon
       ctx.fillStyle = ch.def.color; ctx.font = 'bold 36px monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(ch.def.letter, cx + cardW / 2, cy + 50);
       ctx.textBaseline = 'alphabetic';
-      // Name
       ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
       ctx.fillText(ch.def.name, cx + cardW / 2, cy + 90);
-      // Description
       ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
       ctx.fillText(ch.def.desc, cx + cardW / 2, cy + 108);
-      // Stats line
       ctx.fillStyle = '#888'; ctx.font = '7px monospace';
       ctx.fillText(`Cost ${ch.def.cost} - CD ${ch.def.cooldown}s - dmg x${ch.rarity.dmgMult.toFixed(2)}`, cx + cardW / 2, cy + 124);
-      // Legendary flavor
       if (ch.rarity.id === 'orange') {
-        ctx.fillStyle = '#ff8000';
-        ctx.font = 'bold 7px monospace';
+        ctx.fillStyle = '#ff8000'; ctx.font = 'bold 7px monospace';
         ctx.fillText('LEGENDARY MOD', cx + cardW / 2, cy + 140);
         ctx.fillStyle = '#ffaa44'; ctx.font = '7px monospace';
-        const legendDesc = ch.def.id === 'multishot' ? '5 arrows instead of 3' :
-                           ch.def.id === 'rainOfArrows' ? 'Bigger radius' :
-                           ch.def.id === 'hawkEye' ? 'Lasts 8s instead of 5' :
-                           ch.def.id === 'arrowVolley' ? '12 arrows instead of 8' :
-                           '+50% projectile size';
-        ctx.fillText(legendDesc, cx + cardW / 2, cy + 152);
+        const legend = ch.def.id === 'multishot' ? '5 arrows instead of 3' :
+                       ch.def.id === 'rainOfArrows' ? 'Bigger radius' :
+                       ch.def.id === 'hawkEye' ? 'Lasts 8s instead of 5' :
+                       ch.def.id === 'arrowVolley' ? '12 arrows instead of 8' :
+                       '+50% projectile size';
+        ctx.fillText(legend, cx + cardW / 2, cy + 152);
       }
     }
     ctx.textAlign = 'left';
@@ -1614,14 +1528,14 @@
     ctx.fillStyle = '#ff4040'; ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-    ctx.fillText(`Wave ${currentWave}  -  Level ${player.level}  -  Kills ${player.kills}`, W / 2, H / 2);
+    ctx.fillText(`Wave ${currentWave}  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
     ctx.textAlign = 'left';
   }
 
   // ============================================================
-  // INVENTORY UI
+  // INVENTORY UI LAYOUT (shared with shop)
   // ============================================================
   const EQ_LAYOUT = {
     helm:    { x: 70,  y: 50  },
@@ -1659,23 +1573,20 @@
     }
     return -1;
   }
-  function drawItemInBox(item, x, y, size) {
+  function drawItemInBox(item, x, y, size, selected) {
     if (!item) return;
     ctx.strokeStyle = item.rarity.color;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = selected ? 3 : 2;
     ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
     ctx.lineWidth = 1;
     ctx.fillStyle = item.rarity.color;
     ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(item.base.letter, x + size / 2, y + size / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
-    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
   }
   function drawInventoryScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.82)';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
@@ -1689,7 +1600,8 @@
       const hovered = mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= p.y && mouseY < p.y + EQ_SLOT_SIZE;
       ctx.fillStyle = hovered ? '#33333d' : '#22222a';
       ctx.fillRect(p.x, p.y, EQ_SLOT_SIZE, EQ_SLOT_SIZE);
-      ctx.strokeStyle = '#444'; ctx.strokeRect(p.x + 0.5, p.y + 0.5, EQ_SLOT_SIZE - 1, EQ_SLOT_SIZE - 1);
+      ctx.strokeStyle = '#444';
+      ctx.strokeRect(p.x + 0.5, p.y + 0.5, EQ_SLOT_SIZE - 1, EQ_SLOT_SIZE - 1);
       if (item) drawItemInBox(item, p.x, p.y, EQ_SLOT_SIZE);
       else {
         ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
@@ -1725,26 +1637,238 @@
       const hovered = mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE;
       ctx.fillStyle = hovered ? '#33333d' : '#22222a';
       ctx.fillRect(x, y, INV_SLOT_SIZE, INV_SLOT_SIZE);
-      ctx.strokeStyle = '#444'; ctx.strokeRect(x + 0.5, y + 0.5, INV_SLOT_SIZE - 1, INV_SLOT_SIZE - 1);
+      ctx.strokeStyle = '#444';
+      ctx.strokeRect(x + 0.5, y + 0.5, INV_SLOT_SIZE - 1, INV_SLOT_SIZE - 1);
       if (item) drawItemInBox(item, x, y, INV_SLOT_SIZE);
     }
 
-    let tooltipItem = null;
-    let tooltipSource = '';
-    const eqSlot = getEquippedSlotAtMouse();
-    if (eqSlot && player.equipped[eqSlot]) {
-      tooltipItem = player.equipped[eqSlot];
-      tooltipSource = `EQUIPPED - ${SLOT_LABEL[eqSlot]}`;
-    } else {
-      const invIdx = getInventoryIdxAtMouse();
-      if (invIdx >= 0 && player.inventory[invIdx]) {
-        tooltipItem = player.inventory[invIdx];
-        tooltipSource = `INVENTORY [click to equip]`;
+    drawTooltipPanel(false);
+  }
+
+  // ============================================================
+  // RENDER — Shop screen
+  // ============================================================
+  const SHOP_ITEM_W = 60, SHOP_ITEM_H = 50, SHOP_GAP = 10;
+  const SHOP_START_X = 50;
+  const SHOP_Y = 50;
+  function getShopIdxAtMouse() {
+    for (let i = 0; i < 4; i++) {
+      const x = SHOP_START_X + i * (SHOP_ITEM_W + SHOP_GAP);
+      if (mouseX >= x && mouseX < x + SHOP_ITEM_W && mouseY >= SHOP_Y && mouseY < SHOP_Y + SHOP_ITEM_H) return i;
+    }
+    return -1;
+  }
+  function drawShopScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(0, 0, W, H);
+    // Title
+    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
+    ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
+    ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+    ctx.fillText('Click shop item to buy - click inventory item to select - then use action buttons - READY to start next wave', W / 2, 28);
+
+    // Gold + Mats display
+    ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillText(`GOLD  ${player.gold}`, 10, 14);
+    let mx = 10, my = 26;
+    ctx.font = '7px monospace';
+    for (const matId of ['bone', 'arcane', 'essence', 'fragment']) {
+      ctx.fillStyle = MAT_COLORS[matId];
+      ctx.fillText(`${MAT_LABELS[matId]} ${player.mats[matId] || 0}`, mx, my);
+      mx += 60;
+    }
+
+    // Shop items
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('FOR SALE', SHOP_START_X, SHOP_Y - 4);
+    for (let i = 0; i < 4; i++) {
+      const x = SHOP_START_X + i * (SHOP_ITEM_W + SHOP_GAP);
+      const y = SHOP_Y;
+      const item = shopItems[i];
+      const hovered = mouseX >= x && mouseX < x + SHOP_ITEM_W && mouseY >= y && mouseY < y + SHOP_ITEM_H;
+      ctx.fillStyle = hovered && item ? '#33333d' : '#22222a';
+      ctx.fillRect(x, y, SHOP_ITEM_W, SHOP_ITEM_H);
+      ctx.strokeStyle = item ? item.rarity.color : '#444';
+      ctx.lineWidth = hovered && item ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, SHOP_ITEM_W - 1, SHOP_ITEM_H - 1);
+      ctx.lineWidth = 1;
+      if (item) {
+        ctx.fillStyle = item.rarity.color;
+        ctx.font = 'bold 18px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(item.base.letter, x + SHOP_ITEM_W / 2, y + 18);
+        ctx.textBaseline = 'alphabetic';
+        const price = itemPrice(item);
+        const canBuy = player.gold >= price && player.inventory.length < player.INVENTORY_CAP;
+        ctx.fillStyle = canBuy ? '#ffd23f' : '#664020';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText(`${price}g`, x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H - 6);
+      } else {
+        ctx.fillStyle = '#444'; ctx.font = '7px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('SOLD', x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H / 2);
+        ctx.textBaseline = 'alphabetic';
       }
     }
-    const tx = 30, ty = H - 80, tw = W - 60, th = 70;
-    ctx.fillStyle = '#1a1a22';
-    ctx.fillRect(tx, ty, tw, th);
+    // Refresh button
+    const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
+    const refY = SHOP_Y;
+    const canRefresh = player.gold >= shopRefreshCost;
+    drawButton(refX, refY, 90, SHOP_ITEM_H, `REFRESH\n${shopRefreshCost}g`, canRefresh, '#ffd23f');
+    // Newlines in fillText don't work — split manually
+    ctx.fillStyle = canRefresh ? '#eee' : '#555';
+    ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('REFRESH', refX + 45, refY + 22);
+    ctx.fillStyle = canRefresh ? '#ffd23f' : '#664020';
+    ctx.fillText(`${shopRefreshCost}g`, refX + 45, refY + 36);
+
+    // Equipped paper-doll (smaller layout)
+    ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('EQUIPPED', 30, 114);
+    const eqYOffset = 70; // shift down
+    const EQ_SHOP_LAYOUT = {};
+    for (const k in EQ_LAYOUT) {
+      EQ_SHOP_LAYOUT[k] = { x: EQ_LAYOUT[k].x, y: EQ_LAYOUT[k].y + eqYOffset };
+    }
+    for (const k of SLOT_ORDER) {
+      const p = EQ_SHOP_LAYOUT[k];
+      const item = player.equipped[k];
+      const hovered = mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= p.y && mouseY < p.y + EQ_SLOT_SIZE;
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
+      ctx.fillRect(p.x, p.y, EQ_SLOT_SIZE, EQ_SLOT_SIZE);
+      ctx.strokeStyle = '#444';
+      ctx.strokeRect(p.x + 0.5, p.y + 0.5, EQ_SLOT_SIZE - 1, EQ_SLOT_SIZE - 1);
+      if (item) drawItemInBox(item, p.x, p.y, EQ_SLOT_SIZE);
+      else {
+        ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(SLOT_LABEL[k], p.x + EQ_SLOT_SIZE / 2, p.y + EQ_SLOT_SIZE / 2 + 2);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    // Inventory grid (shifted down)
+    const invYOff = 70;
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`INVENTORY (${player.inventory.length}/${player.INVENTORY_CAP})`, INV_START_X, 114);
+    for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+      const col = i % INV_COLS;
+      const row = Math.floor(i / INV_COLS);
+      const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+      const y = INV_START_Y + invYOff + row * (INV_SLOT_SIZE + INV_GAP);
+      const item = player.inventory[i];
+      const hovered = mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE;
+      const isSel = selectedInvIdx === i;
+      ctx.fillStyle = isSel ? '#3a3a45' : (hovered ? '#33333d' : '#22222a');
+      ctx.fillRect(x, y, INV_SLOT_SIZE, INV_SLOT_SIZE);
+      ctx.strokeStyle = isSel ? '#ffd23f' : '#444';
+      ctx.lineWidth = isSel ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, INV_SLOT_SIZE - 1, INV_SLOT_SIZE - 1);
+      ctx.lineWidth = 1;
+      if (item) drawItemInBox(item, x, y, INV_SLOT_SIZE, isSel);
+    }
+
+    // Selected item action buttons
+    if (selectedInvIdx >= 0 && player.inventory[selectedInvIdx]) {
+      const sel = player.inventory[selectedInvIdx];
+      const spec = rerollSpec(sel);
+      const salvageG = salvageGold(sel);
+      const matName = RARITY_MAT[sel.rarity.id];
+      // 3 buttons at right side
+      const btnX = W - 130, btnY = 200, btnW = 120, btnH = 18;
+      const canEquip = true;
+      drawButton(btnX, btnY,         btnW, btnH, 'EQUIP', canEquip, '#7ad96b');
+      const salvageLabel = `SALVAGE  ${salvageG}g + 1 ${MAT_LABELS[matName]}`;
+      drawButton(btnX, btnY + btnH + 4, btnW, btnH, salvageLabel, true, '#ff8030');
+      const canReroll = spec && player.gold >= spec.gold && (player.mats[spec.mat] || 0) >= spec.count;
+      const rerollLabel = spec ? `REROLL  ${spec.gold}g + 1 ${MAT_LABELS[spec.mat]}` : 'REROLL';
+      drawButton(btnX, btnY + (btnH + 4) * 2, btnW, btnH, rerollLabel, canReroll, '#ffd23f');
+    } else {
+      ctx.fillStyle = '#555'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText('Click an inventory item to select', W - 10, 210);
+      ctx.textAlign = 'left';
+    }
+
+    // Tooltip panel at bottom
+    drawTooltipPanel(true);
+
+    // READY button (bottom-right)
+    const rX = W - 130, rY = H - 30, rW = 120, rH = 24;
+    const hov = isHovering(rX, rY, rW, rH);
+    ctx.fillStyle = hov ? '#2a4a2a' : '#1a3a1a';
+    ctx.fillRect(rX, rY, rW, rH);
+    ctx.strokeStyle = '#7ad96b';
+    ctx.lineWidth = hov ? 3 : 2;
+    ctx.strokeRect(rX + 0.5, rY + 0.5, rW - 1, rH - 1);
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#7ad96b'; ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`READY  -  WAVE ${currentWave + 1}  ▶`, rX + rW / 2, rY + rH / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#557755'; ctx.font = '7px monospace'; ctx.textAlign = 'right';
+    ctx.fillText('(Press Space, Enter, or A)', W - 10, rY - 4);
+    ctx.textAlign = 'left';
+  }
+
+  // ============================================================
+  // RENDER — Shared tooltip panel (used by inventory + shop)
+  // ============================================================
+  function drawTooltipPanel(inShop) {
+    let tooltipItem = null;
+    let tooltipSource = '';
+    if (inShop) {
+      // Check shop hover first
+      const shopIdx = getShopIdxAtMouse();
+      if (shopIdx >= 0 && shopItems[shopIdx]) {
+        tooltipItem = shopItems[shopIdx];
+        tooltipSource = `SHOP  ${itemPrice(tooltipItem)}g`;
+      } else {
+        // Equipped (shifted layout)
+        for (const k of SLOT_ORDER) {
+          const p = EQ_LAYOUT[k];
+          const sy = p.y + 70; // matches shop's offset
+          if (mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= sy && mouseY < sy + EQ_SLOT_SIZE && player.equipped[k]) {
+            tooltipItem = player.equipped[k];
+            tooltipSource = `EQUIPPED - ${SLOT_LABEL[k]}`;
+            break;
+          }
+        }
+        // Inventory (shifted)
+        if (!tooltipItem) {
+          for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+            const col = i % INV_COLS;
+            const row = Math.floor(i / INV_COLS);
+            const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+            const y = INV_START_Y + 70 + row * (INV_SLOT_SIZE + INV_GAP);
+            if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) {
+              if (player.inventory[i]) {
+                tooltipItem = player.inventory[i];
+                tooltipSource = `INVENTORY`;
+              }
+              break;
+            }
+          }
+        }
+        // If nothing hovered, show selected if any
+        if (!tooltipItem && selectedInvIdx >= 0 && player.inventory[selectedInvIdx]) {
+          tooltipItem = player.inventory[selectedInvIdx];
+          tooltipSource = `SELECTED`;
+        }
+      }
+    } else {
+      const eqSlot = getEquippedSlotAtMouse();
+      if (eqSlot && player.equipped[eqSlot]) {
+        tooltipItem = player.equipped[eqSlot];
+        tooltipSource = `EQUIPPED - ${SLOT_LABEL[eqSlot]}`;
+      } else {
+        const invIdx = getInventoryIdxAtMouse();
+        if (invIdx >= 0 && player.inventory[invIdx]) {
+          tooltipItem = player.inventory[invIdx];
+          tooltipSource = `INVENTORY [click to equip]`;
+        }
+      }
+    }
+    const tx = 10, ty = H - 80, tw = W - 150, th = 65;
+    ctx.fillStyle = '#1a1a22'; ctx.fillRect(tx, ty, tw, th);
     ctx.strokeStyle = tooltipItem ? tooltipItem.rarity.color : '#333';
     ctx.lineWidth = 2;
     ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2);
@@ -1766,7 +1890,7 @@
       }
     } else {
       ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('Hover an item to inspect', W / 2, ty + th / 2 + 3);
+      ctx.fillText('Hover an item to inspect', tx + tw / 2, ty + th / 2 + 3);
       ctx.textAlign = 'left';
     }
   }
@@ -1775,7 +1899,6 @@
   // MAIN LOOP
   // ============================================================
   resetWorld();
-  // Spawn boss if first wave is a boss wave (won't happen at wave 1 but safe)
   if (isBossWave(currentWave)) spawnBoss(waveConfig(currentWave));
   let lastTime = performance.now();
 
@@ -1785,7 +1908,7 @@
     updateInput();
 
     if ((keyJustPressed.has('tab') || keyJustPressed.has('i')) &&
-        (state === STATE.PLAYING || state === STATE.INTERMISSION || state === STATE.INVENTORY)) {
+        (state === STATE.PLAYING || state === STATE.INVENTORY)) {
       toggleInventory();
     } else if (keyJustPressed.has('escape') && state === STATE.INVENTORY) {
       toggleInventory();
@@ -1799,7 +1922,6 @@
 
       const cfg = waveConfig(currentWave);
       waveTimer -= dt;
-      // Regular waves spawn enemies; boss waves don't
       if (!isBossWave(currentWave) && waveTimer > 0) {
         spawnTimer += dt;
         while (spawnTimer >= cfg.spawnInterval) {
@@ -1813,23 +1935,13 @@
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(dt);
       for (const g of xpGems) if (!g.dead) g.update(dt, player);
       for (const d of itemDrops) if (!d.dead) d.update(dt, player);
-
       checkCollisions();
-
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
       enemyProjectiles = enemyProjectiles.filter(p => !p.dead);
       xpGems = xpGems.filter(g => !g.dead);
       itemDrops = itemDrops.filter(d => !d.dead);
-
-      // Wave end: regular wave timer + no enemies; boss wave only when boss dies
-      if (isBossWave(currentWave)) {
-        if (!bossRef && enemies.length === 0 && state !== STATE.ABILITYDRAFT) {
-          // Boss is dead and ability draft already triggered; we wait for draft pick
-        }
-      } else if (waveTimer <= 0 && enemies.length === 0) {
-        endWave();
-      }
+      if (!isBossWave(currentWave) && waveTimer <= 0 && enemies.length === 0) endWave();
     }
     else if (state === STATE.LEVELUP) {
       let picked = -1;
@@ -1839,14 +1951,23 @@
       else if (gpJustPressed.has(0)) picked = 0;
       else if (gpJustPressed.has(1)) picked = 1;
       else if (gpJustPressed.has(2)) picked = 2;
+      else if (keyJustPressed.has('r')) doRerollLevelUp();
+      else if (gpJustPressed.has(3)) doRerollLevelUp();
       else if (mouseClicked) {
+        // Check reroll button
         const cardW = 130, cardH = 140, gap = 18;
         const totalW = cardW * 3 + gap * 2;
         const startX = (W - totalW) / 2;
         const cardY = (H - cardH) / 2 + 10;
-        for (let i = 0; i < levelUpChoices.length; i++) {
-          const cx = startX + i * (cardW + gap);
-          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) { picked = i; break; }
+        const rbW = 120, rbH = 22;
+        const rbX = (W - rbW) / 2, rbY = cardY + cardH + 14;
+        if (isHovering(rbX, rbY, rbW, rbH)) {
+          doRerollLevelUp();
+        } else {
+          for (let i = 0; i < levelUpChoices.length; i++) {
+            const cx = startX + i * (cardW + gap);
+            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) { picked = i; break; }
+          }
         }
       }
       if (picked >= 0) pickLevelUp(picked);
@@ -1871,10 +1992,6 @@
       }
       if (picked >= 0) pickAbilityDraft(picked);
     }
-    else if (state === STATE.INTERMISSION) {
-      intermissionTimer -= dt;
-      if (intermissionTimer <= 0) startNextWave();
-    }
     else if (state === STATE.DEAD) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
       if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
@@ -1889,6 +2006,56 @@
         }
       }
     }
+    else if (state === STATE.SHOP) {
+      // Ready advance
+      if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(0)) {
+        startNextWave(); return finalizeFrame();
+      }
+      // Refresh shortcut: R key
+      if (keyJustPressed.has('r')) doRefreshShop();
+      if (mouseClicked) {
+        // Shop item buy
+        const shopIdx = getShopIdxAtMouse();
+        if (shopIdx >= 0 && shopItems[shopIdx]) {
+          buyShopItem(shopIdx);
+        } else {
+          // Refresh button
+          const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
+          const refY = SHOP_Y;
+          if (isHovering(refX, refY, 90, SHOP_ITEM_H)) {
+            doRefreshShop();
+          } else {
+            // Inventory click — select
+            let invHit = -1;
+            for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+              const col = i % INV_COLS;
+              const row = Math.floor(i / INV_COLS);
+              const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+              const y = INV_START_Y + 70 + row * (INV_SLOT_SIZE + INV_GAP);
+              if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) { invHit = i; break; }
+            }
+            if (invHit >= 0 && player.inventory[invHit]) {
+              selectedInvIdx = (selectedInvIdx === invHit) ? -1 : invHit;
+            } else {
+              // Action buttons (only when selection)
+              if (selectedInvIdx >= 0 && player.inventory[selectedInvIdx]) {
+                const btnX = W - 130, btnY = 200, btnW = 120, btnH = 18;
+                if (isHovering(btnX, btnY, btnW, btnH)) {
+                  equipFromInventory(selectedInvIdx);
+                } else if (isHovering(btnX, btnY + btnH + 4, btnW, btnH)) {
+                  salvageInventoryItem(selectedInvIdx);
+                } else if (isHovering(btnX, btnY + (btnH + 4) * 2, btnW, btnH)) {
+                  rerollInventoryItem(selectedInvIdx);
+                }
+              }
+              // READY button
+              const rX = W - 130, rY = H - 30, rW = 120, rH = 24;
+              if (isHovering(rX, rY, rW, rH)) startNextWave();
+            }
+          }
+        }
+      }
+    }
 
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
@@ -1896,11 +2063,11 @@
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
     if (bossBannerTimer > 0) bossBannerTimer -= dt;
     if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
+    if (goldFlashTimer > 0) goldFlashTimer -= dt;
     shake *= 0.85; if (shake < 0.05) shake = 0;
 
-    // === RENDER ===
     ctx.save();
-    if (shake > 0 && state !== STATE.INVENTORY) {
+    if (shake > 0 && state !== STATE.INVENTORY && state !== STATE.SHOP) {
       const sx = (Math.random() - 0.5) * shake * 2;
       const sy = (Math.random() - 0.5) * shake * 2;
       ctx.translate(sx, sy);
@@ -1916,12 +2083,17 @@
     ctx.restore();
 
     drawHud();
-    if (state === STATE.PLAYING || state === STATE.INTERMISSION) drawAbilityBar();
+    if (state === STATE.PLAYING) drawAbilityBar();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
+    else if (state === STATE.SHOP) drawShopScreen();
 
+    finalizeFrame();
+  }
+
+  function finalizeFrame() {
     keyJustPressed.clear();
     mouseClicked = false;
     requestAnimationFrame(loop);
