@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 6</title>
+<title>Slayers — Phase 7</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -81,7 +81,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -106,6 +106,7 @@
   let selectedInvIdx = -1;
   let levelUpRerollCost = 1;
   let currentBiomeId = '';
+  let selectedClassId = 'archer';
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -379,20 +380,31 @@
   const CLASS = {
     ARCHER: {
       id: 'archer', name: 'Archer', color: '#7ad96b',
+      desc: 'Fast and crit-heavy. Auto-fires arrows. Crits refund Focus.',
       baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
       weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
       resourceName: 'FOCUS', resourceColor: '#ffd23f',
       baseMaxResource: 100, baseResourceRegen: 15, critResourceGain: 18,
       signature: 'multishot',
     },
+    WIZARD: {
+      id: 'wizard', name: 'Wizard', color: '#5599ff',
+      desc: 'Glass cannon. Slow heavy spells. Bigger Mana pool, slower regen.',
+      baseMaxHp: 60, baseSpeed: 95, baseCritChance: 3,
+      weaponDamage: 7, weaponFireRate: 1.4, weaponRange: 240, weaponProjSpeed: 240,
+      resourceName: 'MANA', resourceColor: '#5599ff',
+      baseMaxResource: 140, baseResourceRegen: 8, critResourceGain: 0,
+      signature: 'fireball',
+    },
   };
+  function getClassById(id) { return id === 'wizard' ? CLASS.WIZARD : CLASS.ARCHER; }
 
   // ============================================================
   // ABILITIES
   // ============================================================
   const ABILITIES = {
     multishot: {
-      id: 'multishot', name: 'Multishot', letter: 'M',
+      id: 'multishot', name: 'Multishot', letter: 'M', classOf: 'archer',
       desc: '3 arrows in spread (+20% dmg)',
       cost: 25, cooldown: 1.8, color: '#ffd23f',
       cast: (player, slot) => {
@@ -417,7 +429,7 @@
       },
     },
     rainOfArrows: {
-      id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R',
+      id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R', classOf: 'archer',
       desc: 'AoE rain on target (3x dmg)',
       cost: 40, cooldown: 4.0, color: '#ffaa44',
       cast: (player, slot) => {
@@ -456,7 +468,7 @@
       },
     },
     piercingShot: {
-      id: 'piercingShot', name: 'Piercing Shot', letter: 'P',
+      id: 'piercingShot', name: 'Piercing Shot', letter: 'P', classOf: 'archer',
       desc: 'Pierces all enemies (+150% dmg)',
       cost: 30, cooldown: 2.5, color: '#5599ff',
       cast: (player, slot) => {
@@ -479,7 +491,7 @@
       },
     },
     hawkEye: {
-      id: 'hawkEye', name: 'Hawk Eye', letter: 'E',
+      id: 'hawkEye', name: 'Hawk Eye', letter: 'E', classOf: 'archer',
       desc: '+30% crit & atk speed (5s)',
       cost: 50, cooldown: 12.0, color: '#33cc55',
       cast: (player, slot) => {
@@ -490,7 +502,7 @@
       },
     },
     arrowVolley: {
-      id: 'arrowVolley', name: 'Arrow Volley', letter: 'V',
+      id: 'arrowVolley', name: 'Arrow Volley', letter: 'V', classOf: 'archer',
       desc: '8 arrows in full circle',
       cost: 35, cooldown: 3.0, color: '#ff8000',
       cast: (player, slot) => {
@@ -510,8 +522,155 @@
         return true;
       },
     },
+    fireball: {
+      id: 'fireball', name: 'Fireball', letter: 'F', classOf: 'wizard',
+      desc: 'Big projectile, explodes on impact', cost: 30, cooldown: 1.5, color: '#ff5520',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.6);
+        if (!target) return false;
+        const dx = target.x - player.x, dy = target.y - player.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 0.01) return false;
+        const sp = player.weaponProjSpeed;
+        let dmg = player.weaponDamage * player.dmgMult * 1.4 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, d / sp + 0.15, isCrit);
+        proj.r = 5;
+        proj.theme = 'fire';
+        proj.explosive = true;
+        proj.explosionRadius = isLegend ? 60 : 40;
+        proj.explosionDamage = dmg * 0.9;
+        projectiles.push(proj);
+        spawnBurst(player.x, player.y, ['#ff5520', '#ffaa00', '#ffdd00'], 8);
+        return true;
+      },
+    },
+    frostNova: {
+      id: 'frostNova', name: 'Frost Nova', letter: 'N', classOf: 'wizard',
+      desc: 'AoE around player, slows enemies', cost: 50, cooldown: 5.0, color: '#aaccff',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const radius = 80;
+        const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+        const slowDur = isLegend ? 4 : 2.5;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - player.x, dy = e.y - player.y;
+          if (dx*dx + dy*dy < radius*radius) {
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            if (isCrit) player.onCrit();
+            e.slowTimer = slowDur;
+            e.slowFactor = 0.4;
+            if (died) handleEnemyDeath(e);
+          }
+        }
+        for (let i = 0; i < 36; i++) {
+          const a = (i / 36) * Math.PI * 2;
+          const r = 30 + Math.random() * radius;
+          spawnBurst(player.x + Math.cos(a) * r * 0.6, player.y + Math.sin(a) * r * 0.6, ['#aaccff', '#5599ff', '#ffffff'], 2);
+        }
+        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.5, maxLife: 0.5, color: '#aaccff', hit: new Set(), target: 'none' });
+        shake = Math.min(shake + 2, 5);
+        return true;
+      },
+    },
+    chainLightning: {
+      id: 'chainLightning', name: 'Chain Lightning', letter: 'L', classOf: 'wizard',
+      desc: 'Hits target, chains to 3 nearby', cost: 40, cooldown: 2.5, color: '#ffff80',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const maxChains = isLegend ? 5 : 3;
+        let target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.4);
+        if (!target) return false;
+        const hit = new Set();
+        let lastX = player.x, lastY = player.y;
+        let dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+        for (let i = 0; i <= maxChains; i++) {
+          if (!target || hit.has(target) || !target.alive) break;
+          hit.add(target);
+          const isCrit = Math.random() * 100 < player.critChance;
+          const finalDmg = isCrit ? dmg * 2 : dmg;
+          const died = target.takeDamage(finalDmg);
+          if (isCrit) player.onCrit();
+          // Lightning visual: particles along path
+          const steps = 8;
+          for (let s = 0; s <= steps; s++) {
+            const lx = lastX + (target.x - lastX) * (s / steps) + (Math.random() - 0.5) * 6;
+            const ly = lastY + (target.y - lastY) * (s / steps) + (Math.random() - 0.5) * 6;
+            particles.push(new Particle(lx, ly, 0, 0, '#ffff80', 0.3, 2));
+          }
+          if (died) handleEnemyDeath(target);
+          lastX = target.x; lastY = target.y;
+          // Find next chain target within 90px
+          let nextBest = null, nextD = 90;
+          for (const e of enemies) {
+            if (!e.alive || hit.has(e)) continue;
+            const d = Math.hypot(e.x - lastX, e.y - lastY);
+            if (d < nextD) { nextD = d; nextBest = e; }
+          }
+          target = nextBest;
+          dmg *= 0.8;
+        }
+        spawnBurst(player.x, player.y, ['#ffff80', '#ffffff'], 6);
+        shake = Math.min(shake + 2, 5);
+        return true;
+      },
+    },
+    arcaneOrb: {
+      id: 'arcaneOrb', name: 'Arcane Orb', letter: 'O', classOf: 'wizard',
+      desc: 'Slow piercing orb, big damage', cost: 45, cooldown: 3.0, color: '#aa66ff',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
+        if (!target) return false;
+        const dx = target.x - player.x, dy = target.y - player.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 0.01) return false;
+        const sp = player.weaponProjSpeed * 0.5;
+        let dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 2.5, isCrit);
+        proj.piercing = true;
+        proj.r = isLegend ? 8 : 6;
+        proj.theme = 'arcane';
+        projectiles.push(proj);
+        spawnBurst(player.x, player.y, ['#aa66ff', '#dd99ff', '#ffffff'], 10);
+        return true;
+      },
+    },
+    meteor: {
+      id: 'meteor', name: 'Meteor', letter: 'T', classOf: 'wizard',
+      desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const target = findNearestEnemy(player.x, player.y, 280);
+        if (!target) return false;
+        const meteors = isLegend ? 2 : 1;
+        const dmg = player.weaponDamage * player.dmgMult * 4.0 * rDmg;
+        for (let i = 0; i < meteors; i++) {
+          const offX = i === 0 ? 0 : (Math.random() - 0.5) * 60;
+          const offY = i === 0 ? 0 : (Math.random() - 0.5) * 60;
+          groundEffects.push({ type: 'meteor', x: target.x + offX, y: target.y + offY, r: 0, maxR: 55, damage: dmg, life: 1.0, maxLife: 1.0, color: '#ff4400', hit: new Set(), exploded: false, target: 'enemy' });
+        }
+        spawnBurst(player.x, player.y, ['#ff4400', '#ff8800', '#ffdd00'], 8);
+        return true;
+      },
+    },
   };
   const ABILITY_LIST = Object.values(ABILITIES);
+  function classAbilities(classId) {
+    return ABILITY_LIST.filter(a => !a.classOf || a.classOf === classId);
+  }
 
   function castAbility(slotIdx) {
     if (slotIdx < 0 || slotIdx > 3) return;
@@ -601,10 +760,10 @@
   // ENTITY: Player
   // ============================================================
   class Player {
-    constructor(x, y) {
+    constructor(x, y, classId) {
       this.x = x; this.y = y;
       this.r = 5; this.facing = 1;
-      this.class = CLASS.ARCHER;
+      this.class = getClassById(classId || 'archer');
       this.baseMaxHp = this.class.baseMaxHp;
       this.baseDmgMult = 1.0;
       this.baseFireRateMult = 1.0;
@@ -763,11 +922,15 @@
       this.bobPhase = Math.random() * Math.PI * 2;
       this.hitFlash = 0; this.isBoss = false;
       this.fireTimer = 1 + Math.random() * 2;
+      this.slowTimer = 0;
+      this.slowFactor = 1.0;
     }
     update(dt, target) {
       const dx = target.x - this.x, dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
-      if (d > 0.01) { this.x += (dx / d) * this.speed * dt; this.y += (dy / d) * this.speed * dt; }
+      if (this.slowTimer > 0) this.slowTimer -= dt;
+      const effSpeed = this.slowTimer > 0 ? this.speed * this.slowFactor : this.speed;
+      if (d > 0.01) { this.x += (dx / d) * effSpeed * dt; this.y += (dy / d) * effSpeed * dt; }
       const bobSpeed = (this.type === 'rat' || this.type === 'frostWolf') ? 14
                      : (this.type === 'zombie' || this.type === 'yeti') ? 5
                      : 8;
@@ -1209,6 +1372,12 @@
   // ============================================================
   // ENTITY: Projectile
   // ============================================================
+  const PROJ_THEMES = {
+    fire:   { outer: '#ff5520', inner: '#ffdd00' },
+    frost:  { outer: '#aaccff', inner: '#ffffff' },
+    arcane: { outer: '#aa66ff', inner: '#dd99ff' },
+    light:  { outer: '#ffff80', inner: '#ffffff' },
+  };
   class Projectile {
     constructor(x, y, vx, vy, damage, life, isCrit) {
       this.x = x; this.y = y; this.vx = vx; this.vy = vy;
@@ -1216,6 +1385,8 @@
       this.damage = damage; this.life = life;
       this.dead = false; this.isCrit = !!isCrit;
       this.piercing = false; this.hitSet = null;
+      this.theme = null;
+      this.explosive = false; this.explosionRadius = 0; this.explosionDamage = 0;
     }
     update(dt) {
       this.x += this.vx * dt; this.y += this.vy * dt;
@@ -1223,6 +1394,15 @@
       if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
     draw(ctx) {
+      if (this.theme && PROJ_THEMES[this.theme]) {
+        const t = PROJ_THEMES[this.theme];
+        const r = this.r || 4;
+        ctx.fillStyle = t.outer;
+        ctx.fillRect(Math.floor(this.x - r), Math.floor(this.y - r), r * 2, r * 2);
+        ctx.fillStyle = t.inner;
+        ctx.fillRect(Math.floor(this.x - r/2), Math.floor(this.y - r/2), Math.max(1, r), Math.max(1, r));
+        return;
+      }
       if (this.piercing) {
         ctx.fillStyle = '#5599ff'; ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
         ctx.fillStyle = '#aaccff'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
@@ -1234,6 +1414,19 @@
         ctx.fillStyle = '#ffe040'; ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
       }
     }
+  }
+  // Trigger an AoE explosion at a position (used by explosive projectiles)
+  function explodeAt(x, y, radius, damage) {
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - x, dy = e.y - y;
+      if (dx*dx + dy*dy < radius*radius) {
+        const died = e.takeDamage(damage);
+        if (died) handleEnemyDeath(e);
+      }
+    }
+    spawnBurst(x, y, ['#ff5520', '#ffaa00', '#ffdd00', '#ffffff'], 18);
+    shake = Math.min(shake + 3, 6);
   }
 
   // ============================================================
@@ -1439,7 +1632,8 @@
       g.life -= dt;
       if (g.type === 'shockwave') {
         g.r += (g.maxR / g.maxLife) * dt;
-        if (g.life > 0 && player.iframeTimer <= 0 && !g.hit.has(player)) {
+        const tgt = g.target || 'player';
+        if (g.life > 0 && tgt === 'player' && player.iframeTimer <= 0 && !g.hit.has(player)) {
           const dx = player.x - g.x, dy = player.y - g.y;
           const d2 = dx*dx + dy*dy;
           if (d2 < g.r * g.r && d2 > (g.r - 25) * (g.r - 25)) {
@@ -1451,7 +1645,17 @@
       } else if (g.type === 'meteor') {
         if (!g.exploded && g.life <= 0.05) {
           g.exploded = true;
-          if (player.iframeTimer <= 0) {
+          const tgt = g.target || 'player';
+          if (tgt === 'enemy') {
+            for (const e of enemies) {
+              if (!e.alive) continue;
+              const dx = e.x - g.x, dy = e.y - g.y;
+              if (dx*dx + dy*dy < g.maxR * g.maxR) {
+                const died = e.takeDamage(g.damage);
+                if (died) handleEnemyDeath(e);
+              }
+            }
+          } else if (player.iframeTimer <= 0) {
             const dx = player.x - g.x, dy = player.y - g.y;
             if (dx*dx + dy*dy < g.maxR * g.maxR) {
               const died = player.takeDamage(g.damage);
@@ -1507,6 +1711,9 @@
           if (proj.piercing) proj.hitSet.add(enemy);
           else proj.dead = true;
           spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
+          if (proj.explosive && !proj.piercing) {
+            explodeAt(proj.x, proj.y, proj.explosionRadius, proj.explosionDamage);
+          }
           if (died) {
             player.kills++;
             spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
@@ -1592,7 +1799,7 @@
     else enterShop();
   }
   function enterAbilityDraft() {
-    const pool = ABILITY_LIST.slice();
+    const pool = classAbilities(player.class.id).slice();
     const out = [];
     const seen = new Set();
     while (out.length < 3 && pool.length > 0) {
@@ -1642,6 +1849,12 @@
     if (state === STATE.INVENTORY) state = prevState;
     else if (state === STATE.PLAYING) { prevState = state; state = STATE.INVENTORY; }
   }
+  function pickClass(classId) {
+    selectedClassId = classId;
+    resetWorld();
+    state = STATE.PLAYING;
+  }
+  function returnToClassSelect() { state = STATE.CLASS_SELECT; }
   function generateFloorDecorations() {
     floorDecorations = [];
     const biome = currentBiome();
@@ -1654,7 +1867,7 @@
     }
   }
   function resetWorld() {
-    player = new Player(W / 2, H / 2);
+    player = new Player(W / 2, H / 2, selectedClassId);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
     groundEffects = []; bossRef = null; shake = 0;
     state = STATE.PLAYING;
@@ -2033,6 +2246,93 @@
     ctx.fillText(`Wave ${currentWave}/20  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
+    ctx.textAlign = 'left';
+  }
+  function drawClassSelectScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.92)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 22px monospace';
+    ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 40);
+    ctx.fillStyle = '#888'; ctx.font = '9px monospace';
+    ctx.fillText('Click a card, press 1 / 2, or A / B button', W / 2, 56);
+
+    const classes = [CLASS.ARCHER, CLASS.WIZARD];
+    const cardW = 240, cardH = 220, gap = 30;
+    const totalW = cardW * 2 + gap;
+    const startX = (W - totalW) / 2;
+    const cardY = 76;
+    for (let i = 0; i < classes.length; i++) {
+      const c = classes[i];
+      const cx = startX + i * (cardW + gap), cy = cardY;
+      const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
+      ctx.fillStyle = hovered ? '#2a2a35' : '#1a1a22';
+      ctx.fillRect(cx, cy, cardW, cardH);
+      ctx.strokeStyle = c.color;
+      ctx.lineWidth = hovered ? 4 : 3;
+      ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4);
+      ctx.lineWidth = 1;
+
+      // Key hint
+      ctx.fillStyle = '#666'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 10, cy + 18);
+
+      // Name
+      ctx.fillStyle = c.color; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 30);
+
+      // Sprite preview (class-colored block at center-top)
+      const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 60);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(sx - 5, sy - 3, 10, 9);
+      ctx.fillStyle = '#3a4a2a'; ctx.fillRect(sx - 5, sy + 2, 10, 1);
+      ctx.fillStyle = '#4a3a2a';
+      ctx.fillRect(sx - 4, sy + 5, 2, 3); ctx.fillRect(sx + 2, sy + 5, 2, 3);
+      ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 8, 8, 6);
+      ctx.fillStyle = c.id === 'wizard' ? '#3366aa' : '#5a3a2a';
+      ctx.fillRect(sx - 4, sy - 9, 8, 2);
+      // Wizard hat
+      if (c.id === 'wizard') {
+        ctx.fillStyle = '#3366aa';
+        ctx.fillRect(sx - 4, sy - 11, 8, 2);
+        ctx.fillRect(sx - 2, sy - 13, 4, 2);
+        ctx.fillRect(sx - 1, sy - 14, 2, 1);
+        ctx.fillStyle = '#ffd040'; ctx.fillRect(sx, sy - 12, 1, 1);
+      }
+      ctx.fillStyle = '#000';
+      ctx.fillRect(sx - 3, sy - 6, 1, 1); ctx.fillRect(sx + 2, sy - 6, 1, 1);
+
+      // Description
+      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+      const words = c.desc.split(' ');
+      const lines = [];
+      let line = '';
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (test.length > 30) { lines.push(line); line = w; }
+        else line = test;
+      }
+      if (line) lines.push(line);
+      for (let li = 0; li < lines.length; li++) {
+        ctx.fillText(lines[li], cx + cardW / 2, cy + 90 + li * 10);
+      }
+
+      // Stats
+      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+      const sy2 = cy + 130;
+      ctx.fillText(`HP:       ${c.baseMaxHp}`, cx + 24, sy2);
+      ctx.fillText(`SPEED:    ${c.baseSpeed}`, cx + 24, sy2 + 10);
+      ctx.fillText(`CRIT:     ${c.baseCritChance}%`, cx + 24, sy2 + 20);
+      ctx.fillText(`WEAPON:   ${c.weaponDamage} dmg @ ${c.weaponFireRate}/s`, cx + 24, sy2 + 30);
+      ctx.fillStyle = c.resourceColor;
+      ctx.fillText(`${c.resourceName}:    ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 24, sy2 + 40);
+
+      // Signature
+      const sig = ABILITIES[c.signature];
+      if (sig) {
+        ctx.fillStyle = sig.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(`SIGNATURE: ${sig.name}`, cx + cardW / 2, cy + cardH - 12);
+      }
+    }
     ctx.textAlign = 'left';
   }
   function drawVictoryScreen() {
@@ -2424,7 +2724,7 @@
   // MAIN LOOP
   // ============================================================
   resetWorld();
-  if (isBossWave(currentWave)) spawnBoss(waveConfig(currentWave));
+  state = STATE.CLASS_SELECT; // start at class picker
   let lastTime = performance.now();
 
   function loop(now) {
@@ -2523,7 +2823,27 @@
     }
     else if (state === STATE.DEAD || state === STATE.VICTORY) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
-      if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
+      if (keyJustPressed.has('r') || mouseClicked || anyGp) returnToClassSelect();
+    }
+    else if (state === STATE.CLASS_SELECT) {
+      updateVirtualCursor(dt);
+      let picked = null;
+      if (keyJustPressed.has('1') || gpJustPressed.has(0)) picked = 'archer';
+      else if (keyJustPressed.has('2') || gpJustPressed.has(1)) picked = 'wizard';
+      else if (mouseClicked) {
+        const cardW = 240, cardH = 220, gap = 30;
+        const totalW = cardW * 2 + gap;
+        const startX = (W - totalW) / 2;
+        const cardY = 76;
+        for (let i = 0; i < 2; i++) {
+          const cx = startX + i * (cardW + gap);
+          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
+            picked = i === 0 ? 'archer' : 'wizard';
+            break;
+          }
+        }
+      }
+      if (picked) pickClass(picked);
     }
     else if (state === STATE.INVENTORY) {
       updateVirtualCursor(dt);
@@ -2628,9 +2948,10 @@
     else if (state === STATE.VICTORY) drawVictoryScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
     else if (state === STATE.SHOP) drawShopScreen();
+    else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
 
     // Virtual cursor draws on top of all UI
-    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT) {
+    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT) {
       drawVirtualCursor();
     }
 
