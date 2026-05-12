@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 3</title>
+<title>Slayers — Phase 4</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -24,7 +24,7 @@
   #game {
     image-rendering: pixelated;
     image-rendering: crisp-edges;
-    background: #1f1f24;
+    background: #14181a;
     border: 2px solid #444;
     width: min(1280px, 96vw);
     height: min(720px, 54vw);
@@ -70,10 +70,11 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
+  let abilityDraftChoices = [];
   let intermissionTimer = 0;
   let waveTimer = 0;
   let currentWave = 1;
@@ -82,6 +83,8 @@
   let levelUpFlashTimer = 0;
   let lootFlashTimer = 0;
   let lastLootName = '';
+  let bossBannerTimer = 0;
+  let bossDefeatedBannerTimer = 0;
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -89,9 +92,14 @@
   let player;
   let enemies = [];
   let projectiles = [];
+  let enemyProjectiles = [];
   let xpGems = [];
   let itemDrops = [];
   let particles = [];
+  let bossRef = null; // direct reference for HP bar
+
+  // Deterministic floor decoration seeds (set in resetWorld)
+  let floorDecorations = [];
 
   // ============================================================
   // INPUT
@@ -121,9 +129,7 @@
   });
   canvas.addEventListener('mousedown', () => { mouseClicked = true; });
 
-  window.addEventListener('gamepadconnected', (e) => {
-    detectedGamepadType = detectGamepadType(e.gamepad.id);
-  });
+  window.addEventListener('gamepadconnected', (e) => { detectedGamepadType = detectGamepadType(e.gamepad.id); });
   window.addEventListener('gamepaddisconnected', () => {});
 
   function detectGamepadType(id) {
@@ -148,7 +154,6 @@
     }
     return false;
   }
-
   function pollGamepad() {
     gpJustPressed.clear();
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -183,7 +188,6 @@
     }
     return moved;
   }
-
   function updateInput() {
     Actions.moveX = 0; Actions.moveY = 0;
     const gpInput = pollGamepad();
@@ -198,6 +202,21 @@
   }
 
   // ============================================================
+  // BIOME (Phase 4: Crypt only)
+  // ============================================================
+  const BIOME = {
+    CRYPT: {
+      id: 'crypt',
+      name: 'The Crypt',
+      bg: '#15181a',
+      grid: '#1d2220',
+      accent: '#6a7a5a',
+      decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44'],
+    },
+  };
+  function currentBiome() { return BIOME.CRYPT; } // Phase 4 stub — will branch on act later
+
+  // ============================================================
   // ITEM SYSTEM
   // ============================================================
   const SLOT_ORDER = ['helm', 'amulet', 'chest', 'offhand', 'gloves', 'belt', 'boots', 'ring1', 'ring2', 'weapon'];
@@ -205,13 +224,12 @@
     helm: 'HELM', chest: 'CHEST', gloves: 'GLOVES', boots: 'BOOTS', belt: 'BELT',
     amulet: 'AMULET', ring1: 'RING I', ring2: 'RING II', weapon: 'WEAPON', offhand: 'OFFHAND',
   };
-
   const RARITY = {
-    WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 60 },
-    BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 25 },
-    YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 10 },
-    ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 4 },
-    GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1 },
+    WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 60, dmgMult: 1.00 },
+    BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 25, dmgMult: 1.15 },
+    YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 10, dmgMult: 1.30 },
+    ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 4,  dmgMult: 1.50 },
+    GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1,  dmgMult: 1.40 },
   };
   const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
 
@@ -242,17 +260,12 @@
 
   function rngInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
   function rngPick(arr) { return arr[rngInt(0, arr.length - 1)]; }
-
   function pickWeightedRarity() {
     const total = RARITY_LIST.reduce((s, r) => s + r.weight, 0);
     let roll = Math.random() * total;
-    for (const r of RARITY_LIST) {
-      roll -= r.weight;
-      if (roll <= 0) return r;
-    }
+    for (const r of RARITY_LIST) { roll -= r.weight; if (roll <= 0) return r; }
     return RARITY.WHITE;
   }
-
   function rollAffixes(count) {
     const pool = AFFIX_POOL.slice();
     const out = [];
@@ -263,84 +276,154 @@
     }
     return out;
   }
-
   let nextItemId = 1;
   function generateItem() {
     const rarity = pickWeightedRarity();
     const base = rngPick(ITEM_BASES);
-    const numAffixes = rngInt(rarity.affixMin, rarity.affixMax);
-    return { id: nextItemId++, base, rarity, affixes: rollAffixes(numAffixes) };
+    return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
   }
-
-  function itemDisplayName(item) {
-    return `${item.rarity.name} ${item.base.name}`;
-  }
+  function itemDisplayName(item) { return `${item.rarity.name} ${item.base.name}`; }
 
   // ============================================================
-  // CLASS SYSTEM (Phase 3: Archer only)
+  // CLASS SYSTEM
   // ============================================================
   const CLASS = {
     ARCHER: {
-      id: 'archer',
-      name: 'Archer',
-      color: '#7ad96b',
-      // Base stats
-      baseMaxHp: 80,
-      baseSpeed: 105,
-      baseCritChance: 5,
-      // Weapon defaults
-      weaponDamage: 4,
-      weaponFireRate: 2.2,
-      weaponRange: 210,
-      weaponProjSpeed: 290,
-      // Resource: Focus — small pool, fast regen, crit refunds
-      resourceName: 'FOCUS',
-      resourceColor: '#ffd23f',
-      baseMaxResource: 100,
-      baseResourceRegen: 15,
-      critResourceGain: 18,
-      // Granted at run start (Phase 3 — no formal draft yet, signature only)
+      id: 'archer', name: 'Archer', color: '#7ad96b',
+      baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
+      weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
+      resourceName: 'FOCUS', resourceColor: '#ffd23f',
+      baseMaxResource: 100, baseResourceRegen: 15, critResourceGain: 18,
       signature: 'multishot',
     },
   };
 
   // ============================================================
-  // ABILITIES
+  // ABILITIES — 5 in pool, draftable on boss kill
   // ============================================================
   const ABILITIES = {
     multishot: {
-      id: 'multishot',
-      name: 'Multishot',
-      letter: 'M',
-      desc: 'Fire 3 arrows in a 40-deg spread (+20% dmg)',
-      cost: 25,
-      cooldown: 1.8,
-      color: '#ffd23f',
-      cast: (player) => {
+      id: 'multishot', name: 'Multishot', letter: 'M',
+      desc: '3 arrows in spread (+20% dmg)',
+      cost: 25, cooldown: 1.8, color: '#ffd23f',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
         const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
         if (!target) return false;
         const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
-        const spread = 0.35; // ~20deg each side
-        for (const off of [-spread, 0, spread]) {
-          const a = baseAngle + off;
+        const spread = 0.35;
+        const arrows = slot && slot.rarity && slot.rarity.id === 'orange' ? 5 : 3; // Legendary: 5 arrows
+        const halfSpread = arrows > 3 ? spread * 1.3 : spread;
+        for (let i = 0; i < arrows; i++) {
+          const t = arrows === 1 ? 0 : (i / (arrows - 1)) * 2 - 1; // -1 .. 1
+          const a = baseAngle + t * halfSpread;
           const sp = player.weaponProjSpeed;
-          let dmg = player.weaponDamage * player.dmgMult * 1.20;
+          let dmg = player.weaponDamage * player.dmgMult * 1.20 * rDmg;
           const isCrit = Math.random() * 100 < player.critChance;
           if (isCrit) { dmg *= 2; player.onCrit(); }
-          projectiles.push(new Projectile(
-            player.x, player.y,
-            Math.cos(a) * sp, Math.sin(a) * sp,
-            dmg,
-            player.weaponRange / sp + 0.15,
-            isCrit
-          ));
+          projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.15, isCrit));
         }
         spawnBurst(player.x, player.y, ['#ffd040', '#fff7a0', '#ffffff'], 8);
         shake = Math.min(shake + 1.5, 5);
         return true;
       },
     },
+    rainOfArrows: {
+      id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R',
+      desc: 'AoE rain on target (3x dmg)',
+      cost: 40, cooldown: 4.0, color: '#ffaa44',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const target = findNearestEnemy(player.x, player.y, 280);
+        if (!target) return false;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const radius = isLegend ? 70 : 50;
+        const dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - target.x, dy = e.y - target.y;
+          if (dx*dx + dy*dy < radius*radius) {
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            if (isCrit) player.onCrit();
+            if (died) {
+              player.kills++;
+              spawnBurst(e.x, e.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0'], 8);
+              xpGems.push(new XPGem(e.x, e.y, 1));
+              if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
+            }
+          }
+        }
+        // Visual rain
+        for (let i = 0; i < 28; i++) {
+          const offX = (Math.random() - 0.5) * radius * 2;
+          const offY = (Math.random() - 0.5) * radius * 2;
+          if (offX*offX + offY*offY < radius*radius) {
+            spawnBurst(target.x + offX, target.y + offY, ['#fff7a0', '#ffd040'], 2);
+          }
+        }
+        shake = Math.min(shake + 3, 6);
+        return true;
+      },
+    },
+    piercingShot: {
+      id: 'piercingShot', name: 'Piercing Shot', letter: 'P',
+      desc: 'Pierces all enemies (+150% dmg)',
+      cost: 30, cooldown: 2.5, color: '#5599ff',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
+        if (!target) return false;
+        const dx = target.x - player.x, dy = target.y - player.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 0.01) return false;
+        const sp = player.weaponProjSpeed * 1.4;
+        let dmg = player.weaponDamage * player.dmgMult * 2.5 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 1.2, isCrit);
+        proj.piercing = true;
+        proj.r = 4;
+        projectiles.push(proj);
+        spawnBurst(player.x, player.y, ['#5599ff', '#aaccff'], 8);
+        return true;
+      },
+    },
+    hawkEye: {
+      id: 'hawkEye', name: 'Hawk Eye', letter: 'E',
+      desc: '+30% crit & atk speed (5s)',
+      cost: 50, cooldown: 12.0, color: '#33cc55',
+      cast: (player, slot) => {
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        player.hawkEyeTimer = isLegend ? 8 : 5;
+        spawnBurst(player.x, player.y, ['#33cc55', '#88ff88', '#ffffff'], 12);
+        return true;
+      },
+    },
+    arrowVolley: {
+      id: 'arrowVolley', name: 'Arrow Volley', letter: 'V',
+      desc: '8 arrows in full circle',
+      cost: 35, cooldown: 3.0, color: '#ff8000',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const arrows = isLegend ? 12 : 8;
+        for (let i = 0; i < arrows; i++) {
+          const a = (i / arrows) * Math.PI * 2;
+          const sp = player.weaponProjSpeed;
+          let dmg = player.weaponDamage * player.dmgMult * 1.0 * rDmg;
+          const isCrit = Math.random() * 100 < player.critChance;
+          if (isCrit) { dmg *= 2; player.onCrit(); }
+          projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.1, isCrit));
+        }
+        spawnBurst(player.x, player.y, ['#ff8000', '#ffaa00', '#ffd040'], 12);
+        shake = Math.min(shake + 2, 5);
+        return true;
+      },
+    },
   };
+  const ABILITY_LIST = Object.values(ABILITIES);
 
   function castAbility(slotIdx) {
     if (slotIdx < 0 || slotIdx > 3) return;
@@ -348,7 +431,7 @@
     if (!slot) return;
     if (player.abilityCooldowns[slotIdx] > 0) return;
     if (player.resource < slot.def.cost) return;
-    const ok = slot.def.cast(player);
+    const ok = slot.def.cast(player, slot);
     if (ok) {
       player.resource -= slot.def.cost;
       player.abilityCooldowns[slotIdx] = slot.def.cooldown;
@@ -359,26 +442,24 @@
   // LEVEL-UP STAT POOL
   // ============================================================
   const STAT_POOL = [
-    { id: 'maxhp',    name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
-    { id: 'damage',   name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
-    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
-    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10; p.recomputeStats(); } },
-    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15; p.recomputeStats(); } },
-    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1; p.recomputeStats(); } },
-    { id: 'focus_regen', name: '+3 Focus/sec',    desc: 'Regen abilities faster',color: '#ffd23f', apply: (p) => { p.baseResourceRegen += 3; p.recomputeStats(); } },
-    { id: 'crit',     name: '+5% Crit Chance',    desc: 'More crits',            color: '#ff8800', apply: (p) => { p.baseCritChance += 5; p.recomputeStats(); } },
+    { id: 'maxhp',       name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
+    { id: 'damage',      name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
+    { id: 'firerate',    name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
+    { id: 'pickup',      name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10; p.recomputeStats(); } },
+    { id: 'speed',       name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15; p.recomputeStats(); } },
+    { id: 'regen',       name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1; p.recomputeStats(); } },
+    { id: 'focus_regen', name: '+3 Focus/sec',       desc: 'Regen abilities faster',color: '#ffd23f', apply: (p) => { p.baseResourceRegen += 3; p.recomputeStats(); } },
+    { id: 'crit',        name: '+5% Crit Chance',    desc: 'More crits',            color: '#ff8800', apply: (p) => { p.baseCritChance += 5; p.recomputeStats(); } },
   ];
-
-  function rollLevelUpChoices() {
-    return [...STAT_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
-  }
+  function rollLevelUpChoices() { return [...STAT_POOL].sort(() => Math.random() - 0.5).slice(0, 3); }
 
   // ============================================================
-  // WAVE CONFIG
+  // WAVE / BOSS LOGIC
   // ============================================================
+  function isBossWave(w) { return w > 0 && w % 5 === 0; }
   function waveConfig(w) {
     return {
-      duration:       Math.min(20 + (w - 1) * 3, 50),
+      duration:       isBossWave(w) ? 999 : Math.min(20 + (w - 1) * 3, 50),
       spawnInterval:  Math.max(0.7 - (w - 1) * 0.04, 0.18),
       enemyHpMult:    1 + (w - 1) * 0.18,
       enemySpeedMult: 1 + (w - 1) * 0.04,
@@ -387,7 +468,33 @@
   }
 
   // ============================================================
-  // ENTITY: Player (with class + resource + abilities)
+  // ENEMY TYPES
+  // ============================================================
+  const ENEMY_TYPES = {
+    skeleton: { hp: 8,  speedRange: [38, 56], dmg: 5,  r: 4, name: 'Skeleton',  body: '#e8e8d8', head: '#f0f0e0' },
+    zombie:   { hp: 18, speedRange: [22, 32], dmg: 8,  r: 5, name: 'Zombie',    body: '#6a8a4a', head: '#84a060' },
+    rat:      { hp: 3,  speedRange: [78, 100],dmg: 3,  r: 3, name: 'Crypt Rat', body: '#6b5034', head: '#7a5d3a' },
+  };
+
+  // Mix of enemy types per wave
+  function pickEnemyType(w) {
+    if (w <= 1) return 'skeleton';
+    if (w === 2) return Math.random() < 0.8 ? 'skeleton' : 'rat';
+    if (w === 3) {
+      const r = Math.random();
+      if (r < 0.5)  return 'skeleton';
+      if (r < 0.75) return 'rat';
+      return 'zombie';
+    }
+    // wave 4+ mix
+    const r = Math.random();
+    if (r < 0.4) return 'skeleton';
+    if (r < 0.7) return 'rat';
+    return 'zombie';
+  }
+
+  // ============================================================
+  // ENTITY: Player
   // ============================================================
   class Player {
     constructor(x, y) {
@@ -395,10 +502,7 @@
       this.r = 5;
       this.facing = 1;
 
-      // === CLASS ===
-      this.class = CLASS.ARCHER; // Phase 3: hardcoded
-
-      // === BASE STATS (level-up only) ===
+      this.class = CLASS.ARCHER;
       this.baseMaxHp = this.class.baseMaxHp;
       this.baseDmgMult = 1.0;
       this.baseFireRateMult = 1.0;
@@ -410,19 +514,11 @@
       this.baseMaxResource = this.class.baseMaxResource;
       this.baseResourceRegen = this.class.baseResourceRegen;
 
-      // === EQUIPPED BONUSES ===
-      this.bonusMaxHp = 0;
-      this.bonusDmgPct = 0;
-      this.bonusFireRatePct = 0;
-      this.bonusPickupRange = 0;
-      this.bonusMoveSpeed = 0;
-      this.bonusRegen = 0;
-      this.bonusArmor = 0;
-      this.bonusCritChance = 0;
-      this.bonusMaxResource = 0;
-      this.bonusResourceRegen = 0;
+      this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
+      this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
+      this.bonusArmor = 0; this.bonusCritChance = 0;
+      this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
 
-      // === FINAL STATS (computed) ===
       this.maxHp = this.baseMaxHp;
       this.hp = this.maxHp;
       this.dmgMult = 1.0;
@@ -439,6 +535,7 @@
       this.iframeTimer = 0;
       this.IFRAME = 0.5;
       this.hitFlash = 0;
+      this.hawkEyeTimer = 0; // active buff
 
       this.level = 1;
       this.xp = 0;
@@ -446,25 +543,18 @@
       this.pendingLevelUps = 0;
       this.kills = 0;
 
-      // Weapon
       this.weaponDamage = this.class.weaponDamage;
       this.weaponFireRate = this.class.weaponFireRate;
       this.weaponRange = this.class.weaponRange;
       this.weaponProjSpeed = this.class.weaponProjSpeed;
       this.fireTimer = 0;
 
-      // Abilities (4 slots; 0 = signature for Phase 3)
       this.abilities = [null, null, null, null];
       this.abilityCooldowns = [0, 0, 0, 0];
       if (this.class.signature && ABILITIES[this.class.signature]) {
-        this.abilities[0] = {
-          id: this.class.signature,
-          def: ABILITIES[this.class.signature],
-          rarity: RARITY.WHITE,
-        };
+        this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE };
       }
 
-      // Equipment + inventory
       this.equipped = {
         helm: null, chest: null, gloves: null, boots: null, belt: null,
         amulet: null, ring1: null, ring2: null, weapon: null, offhand: null,
@@ -474,35 +564,31 @@
     }
 
     onCrit() {
-      // Class-specific crit benefit (Archer: refund Focus)
       if (this.class.critResourceGain) {
         this.resource = Math.min(this.maxResource, this.resource + this.class.critResourceGain);
       }
     }
+    effectiveCritChance() {
+      return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0);
+    }
+    effectiveFireRateMult() {
+      return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0);
+    }
 
     recomputeStats() {
-      this.bonusMaxHp = 0;
-      this.bonusDmgPct = 0;
-      this.bonusFireRatePct = 0;
-      this.bonusPickupRange = 0;
-      this.bonusMoveSpeed = 0;
-      this.bonusRegen = 0;
-      this.bonusArmor = 0;
-      this.bonusCritChance = 0;
-      this.bonusMaxResource = 0;
-      this.bonusResourceRegen = 0;
-
+      this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
+      this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
+      this.bonusArmor = 0; this.bonusCritChance = 0;
+      this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
       for (const k in this.equipped) {
         const it = this.equipped[k];
         if (!it) continue;
         for (const aff of it.affixes) aff.def.apply(this, aff.value);
       }
-
       const oldMax = this.maxHp;
       const ratio = oldMax > 0 ? this.hp / oldMax : 1;
       const oldMaxR = this.maxResource;
       const ratioR = oldMaxR > 0 ? this.resource / oldMaxR : 1;
-
       this.maxHp = this.baseMaxHp + this.bonusMaxHp;
       this.dmgMult = this.baseDmgMult * (1 + this.bonusDmgPct / 100);
       this.fireRateMult = this.baseFireRateMult * (1 + this.bonusFireRatePct / 100);
@@ -513,10 +599,8 @@
       this.critChance = this.baseCritChance + this.bonusCritChance;
       this.maxResource = this.baseMaxResource + this.bonusMaxResource;
       this.resourceRegen = this.baseResourceRegen + this.bonusResourceRegen;
-
       if (this.maxHp !== oldMax) this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
       else this.hp = Math.min(this.hp, this.maxHp);
-
       if (this.maxResource !== oldMaxR) this.resource = Math.min(this.maxResource, ratioR * this.maxResource);
       else this.resource = Math.min(this.resource, this.maxResource);
     }
@@ -528,31 +612,23 @@
       this.y = Math.max(this.r, Math.min(H - this.r, this.y));
       if (Actions.moveX >  0.1) this.facing =  1;
       else if (Actions.moveX < -0.1) this.facing = -1;
-
       if (this.iframeTimer > 0) this.iframeTimer -= dt;
       if (this.hitFlash > 0) this.hitFlash -= dt;
+      if (this.hawkEyeTimer > 0) this.hawkEyeTimer -= dt;
       if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
-
-      // Resource regen
-      if (this.resource < this.maxResource) {
-        this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
-      }
-      // Ability cooldowns
+      if (this.resource < this.maxResource) this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
       for (let i = 0; i < this.abilityCooldowns.length; i++) {
         if (this.abilityCooldowns[i] > 0) this.abilityCooldowns[i] -= dt;
       }
-
-      // Auto-fire weapon
       if (this.fireTimer > 0) this.fireTimer -= dt;
       if (this.fireTimer <= 0) {
         const target = findNearestEnemy(this.x, this.y, this.weaponRange);
         if (target) {
           fireProjectile(this, target);
-          this.fireTimer = 1 / (this.weaponFireRate * this.fireRateMult);
+          this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
         }
       }
     }
-
     takeDamage(amount) {
       if (this.iframeTimer > 0) return false;
       const actual = Math.max(1, amount - this.armor);
@@ -563,7 +639,6 @@
       if (this.hp <= 0) { this.hp = 0; return true; }
       return false;
     }
-
     addXp(amount) {
       this.xp += amount;
       while (this.xp >= this.xpToNext) {
@@ -574,11 +649,18 @@
         levelUpFlashTimer = 1.5;
       }
     }
-
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y);
       const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
+      // Hawk-Eye aura
+      if (this.hawkEyeTimer > 0) {
+        const pulse = 0.4 + 0.3 * Math.sin(performance.now() * 0.012);
+        ctx.globalAlpha = pulse * 0.5;
+        ctx.fillStyle = '#33cc55';
+        ctx.fillRect(px - 8, py - 9, 16, 17);
+        ctx.globalAlpha = 1;
+      }
       ctx.fillStyle = flash ? '#ff4444' : '#7ad96b';
       ctx.fillRect(px - 4, py - 2, 8, 7);
       ctx.fillStyle = '#3a4a2a';
@@ -598,26 +680,29 @@
   }
 
   // ============================================================
-  // ENTITY: Skeleton
+  // ENTITY: Enemy (skeleton, zombie, rat)
   // ============================================================
-  class Skeleton {
-    constructor(x, y, hpMult, speedMult, dmgMult) {
+  class Enemy {
+    constructor(x, y, type, hpMult, speedMult, dmgMult) {
+      const t = ENEMY_TYPES[type];
+      this.type = type;
       this.x = x; this.y = y;
-      this.r = 4;
-      this.maxHp = Math.round(8 * hpMult);
+      this.r = t.r;
+      this.maxHp = Math.round(t.hp * hpMult);
       this.hp = this.maxHp;
-      this.contactDmg = Math.round(5 * dmgMult);
-      this.speed = (38 + Math.random() * 18) * speedMult;
+      this.contactDmg = Math.round(t.dmg * dmgMult);
+      this.speed = (t.speedRange[0] + Math.random() * (t.speedRange[1] - t.speedRange[0])) * speedMult;
       this.alive = true;
       this.bobPhase = Math.random() * Math.PI * 2;
       this.hitFlash = 0;
+      this.isBoss = false;
     }
     update(dt, target) {
       const dx = target.x - this.x;
       const dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
       if (d > 0.01) { this.x += (dx / d) * this.speed * dt; this.y += (dy / d) * this.speed * dt; }
-      this.bobPhase += dt * 8;
+      this.bobPhase += dt * (this.type === 'rat' ? 14 : this.type === 'zombie' ? 5 : 8);
       if (this.hitFlash > 0) this.hitFlash -= dt;
     }
     takeDamage(amount) {
@@ -627,21 +712,161 @@
       return false;
     }
     draw(ctx) {
+      const t = ENEMY_TYPES[this.type];
       const px = Math.floor(this.x);
       const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
       const f = this.hitFlash > 0;
-      ctx.fillStyle = f ? '#ffffff' : '#e8e8d8';
-      ctx.fillRect(px - 3, py - 1, 6, 4);
-      ctx.fillStyle = f ? '#dddddd' : '#b0b0a0';
-      ctx.fillRect(px - 2, py + 1, 4, 1);
-      ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
-      ctx.fillRect(px - 2, py + 3, 1, 2);
-      ctx.fillRect(px + 1, py + 3, 1, 2);
-      ctx.fillStyle = f ? '#ffffff' : '#f0f0e0';
-      ctx.fillRect(px - 2, py - 5, 4, 4);
-      ctx.fillStyle = '#1a0a0a';
-      ctx.fillRect(px - 1, py - 4, 1, 1);
-      ctx.fillRect(px + 1, py - 4, 1, 1);
+      if (this.type === 'skeleton') {
+        ctx.fillStyle = f ? '#ffffff' : t.body;
+        ctx.fillRect(px - 3, py - 1, 6, 4);
+        ctx.fillStyle = f ? '#dddddd' : '#b0b0a0';
+        ctx.fillRect(px - 2, py + 1, 4, 1);
+        ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
+        ctx.fillRect(px - 2, py + 3, 1, 2);
+        ctx.fillRect(px + 1, py + 3, 1, 2);
+        ctx.fillStyle = f ? '#ffffff' : t.head;
+        ctx.fillRect(px - 2, py - 5, 4, 4);
+        ctx.fillStyle = '#1a0a0a';
+        ctx.fillRect(px - 1, py - 4, 1, 1);
+        ctx.fillRect(px + 1, py - 4, 1, 1);
+      } else if (this.type === 'zombie') {
+        // Bulky greenish body
+        ctx.fillStyle = f ? '#ffffff' : t.body;
+        ctx.fillRect(px - 4, py - 2, 8, 6);
+        ctx.fillStyle = f ? '#dddddd' : '#4a6535';
+        ctx.fillRect(px - 4, py + 2, 8, 1);
+        ctx.fillStyle = f ? '#dddddd' : '#3a4a25';
+        ctx.fillRect(px - 3, py + 4, 2, 2);
+        ctx.fillRect(px + 1, py + 4, 2, 2);
+        ctx.fillStyle = f ? '#ffffff' : t.head;
+        ctx.fillRect(px - 3, py - 7, 6, 5);
+        ctx.fillStyle = '#1a0a0a';
+        ctx.fillRect(px - 2, py - 5, 1, 1);
+        ctx.fillRect(px + 1, py - 5, 1, 1);
+        // Drool
+        ctx.fillStyle = '#aabb55';
+        ctx.fillRect(px, py - 3, 1, 1);
+      } else if (this.type === 'rat') {
+        // Tiny ratty body
+        ctx.fillStyle = f ? '#ffffff' : t.body;
+        ctx.fillRect(px - 3, py - 1, 5, 3);
+        // Tail
+        ctx.fillStyle = '#4a3a25';
+        ctx.fillRect(px + 2, py, 2, 1);
+        // Head
+        ctx.fillStyle = f ? '#ffffff' : t.head;
+        ctx.fillRect(px - 4, py - 3, 3, 3);
+        // Eye
+        ctx.fillStyle = '#ff3030';
+        ctx.fillRect(px - 3, py - 2, 1, 1);
+        // Ears
+        ctx.fillStyle = '#4a3a25';
+        ctx.fillRect(px - 4, py - 4, 1, 1);
+        ctx.fillRect(px - 2, py - 4, 1, 1);
+      }
+    }
+  }
+
+  // ============================================================
+  // ENTITY: BoneLord (Act I boss)
+  // ============================================================
+  class BoneLord {
+    constructor(x, y, hpMult, speedMult, dmgMult) {
+      this.x = x; this.y = y;
+      this.r = 10;
+      this.maxHp = Math.round(280 * hpMult);
+      this.hp = this.maxHp;
+      this.contactDmg = Math.round(12 * dmgMult);
+      this.speed = 32 * speedMult;
+      this.alive = true;
+      this.isBoss = true;
+      this.bobPhase = 0;
+      this.hitFlash = 0;
+      this.boneThrowTimer = 3.0;
+      this.summonTimer = 8.0;
+      this.preferredDistance = 80;
+      this.name = 'Bone Lord';
+    }
+    update(dt, target) {
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      // Keep at preferred distance — close in if far, back off if very close
+      let moveMul = 0;
+      if (d > this.preferredDistance + 20) moveMul = 1;
+      else if (d < this.preferredDistance - 20) moveMul = -0.5;
+      if (d > 0.01 && moveMul !== 0) {
+        this.x += (dx / d) * this.speed * moveMul * dt;
+        this.y += (dy / d) * this.speed * moveMul * dt;
+      }
+      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
+      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+      this.bobPhase += dt * 4;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
+
+      // Bone throw — 3 projectiles in a spread
+      this.boneThrowTimer -= dt;
+      if (this.boneThrowTimer <= 0) {
+        this.boneThrowTimer = 3.0;
+        const a0 = Math.atan2(dy, dx);
+        for (const off of [-0.25, 0, 0.25]) {
+          const a = a0 + off;
+          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 130, Math.sin(a) * 130, this.contactDmg));
+        }
+        spawnBurst(this.x, this.y, ['#e8e8d0', '#a0a090'], 6);
+      }
+      // Summon
+      this.summonTimer -= dt;
+      if (this.summonTimer <= 0) {
+        this.summonTimer = 9.0;
+        for (let i = 0; i < 3; i++) {
+          const ang = (Math.PI * 2) * (i / 3) + Math.random() * 0.5;
+          const dist = 26;
+          const sx = this.x + Math.cos(ang) * dist;
+          const sy = this.y + Math.sin(ang) * dist;
+          enemies.push(new Enemy(sx, sy, 'skeleton', 0.8, 1.0, 0.8));
+        }
+        spawnBurst(this.x, this.y, ['#7755aa', '#aa88cc', '#ddccff'], 16);
+      }
+    }
+    takeDamage(amount) {
+      this.hp -= amount;
+      this.hitFlash = 0.12;
+      if (this.hp <= 0) { this.alive = false; return true; }
+      return false;
+    }
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
+      const f = this.hitFlash > 0;
+      // Body
+      ctx.fillStyle = f ? '#ffffff' : '#d8d8c0';
+      ctx.fillRect(px - 6, py - 2, 12, 8);
+      // Ribs
+      ctx.fillStyle = f ? '#dddddd' : '#a0a090';
+      ctx.fillRect(px - 4, py + 1, 8, 1);
+      ctx.fillRect(px - 4, py + 3, 8, 1);
+      // Legs
+      ctx.fillStyle = f ? '#dddddd' : '#bcbca0';
+      ctx.fillRect(px - 4, py + 6, 2, 4);
+      ctx.fillRect(px + 2, py + 6, 2, 4);
+      // Skull
+      ctx.fillStyle = f ? '#ffffff' : '#e8e8d0';
+      ctx.fillRect(px - 4, py - 10, 8, 8);
+      // Eyes (glowing red)
+      ctx.fillStyle = '#ff2020';
+      ctx.fillRect(px - 2, py - 8, 2, 2);
+      ctx.fillRect(px + 0, py - 8, 2, 2);
+      // Jaw line
+      ctx.fillStyle = '#3a3a30';
+      ctx.fillRect(px - 3, py - 4, 6, 1);
+      // Crown
+      ctx.fillStyle = '#ffd040';
+      ctx.fillRect(px - 5, py - 12, 10, 2);
+      ctx.fillStyle = '#fff080';
+      ctx.fillRect(px - 4, py - 14, 2, 2);
+      ctx.fillRect(px - 1, py - 14, 2, 2);
+      ctx.fillRect(px + 2, py - 14, 2, 2);
     }
   }
 
@@ -657,6 +882,8 @@
       this.life = life;
       this.dead = false;
       this.isCrit = !!isCrit;
+      this.piercing = false;
+      this.hitSet = null; // for piercing — track hit enemies
     }
     update(dt) {
       this.x += this.vx * dt;
@@ -665,7 +892,12 @@
       if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
     draw(ctx) {
-      if (this.isCrit) {
+      if (this.piercing) {
+        ctx.fillStyle = '#5599ff';
+        ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
+        ctx.fillStyle = '#aaccff';
+        ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+      } else if (this.isCrit) {
         ctx.fillStyle = '#ff8800';
         ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
         ctx.fillStyle = '#ffe080';
@@ -676,6 +908,41 @@
         ctx.fillStyle = '#ffe040';
         ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
       }
+    }
+  }
+
+  // ============================================================
+  // ENTITY: BoneProjectile (enemy projectile)
+  // ============================================================
+  class BoneProjectile {
+    constructor(x, y, vx, vy, damage) {
+      this.x = x; this.y = y;
+      this.vx = vx; this.vy = vy;
+      this.r = 3;
+      this.damage = damage;
+      this.life = 3.5;
+      this.dead = false;
+      this.rot = 0;
+    }
+    update(dt) {
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.life -= dt;
+      this.rot += dt * 9;
+      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
+    }
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y);
+      const flicker = Math.floor(this.rot) % 2;
+      ctx.fillStyle = flicker ? '#e8e8d0' : '#d8d8c0';
+      ctx.fillRect(px - 2, py - 2, 4, 4);
+      ctx.fillStyle = '#a0a090';
+      ctx.fillRect(px - 1, py - 1, 2, 2);
+      // Knobby ends
+      ctx.fillStyle = '#e8e8d0';
+      ctx.fillRect(px - 3, py, 1, 1);
+      ctx.fillRect(px + 2, py, 1, 1);
     }
   }
 
@@ -734,10 +1001,8 @@
       this.settled = false;
       this.bobPhase = Math.random() * Math.PI * 2;
       this.glowPhase = Math.random() * Math.PI * 2;
-      this.age = 0;
     }
     update(dt, player) {
-      this.age += dt;
       this.bobPhase += dt * 3;
       this.glowPhase += dt * 4;
       if (!this.settled) {
@@ -826,9 +1091,16 @@
     else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
     else { x = -pad; y = Math.random() * H; }
-    enemies.push(new Skeleton(x, y, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
+    const type = pickEnemyType(currentWave);
+    enemies.push(new Enemy(x, y, type, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
   }
-
+  function spawnBoss(cfg) {
+    bossRef = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    enemies.push(bossRef);
+    bossBannerTimer = 2.5;
+    shake = Math.min(shake + 4, 8);
+    spawnBurst(W / 2, 70, ['#7755aa', '#aa88cc', '#ffd040'], 18);
+  }
   function findNearestEnemy(x, y, maxRange) {
     let best = null; let bestD = maxRange;
     for (const e of enemies) {
@@ -838,7 +1110,6 @@
     }
     return best;
   }
-
   function fireProjectile(shooter, target) {
     const dx = target.x - shooter.x;
     const dy = target.y - shooter.y;
@@ -847,7 +1118,8 @@
     const sp = shooter.weaponProjSpeed;
     const life = shooter.weaponRange / sp + 0.05;
     let dmg = shooter.weaponDamage * shooter.dmgMult;
-    const isCrit = Math.random() * 100 < shooter.critChance;
+    const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
+    const isCrit = Math.random() * 100 < crit;
     if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
     projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
   }
@@ -856,28 +1128,74 @@
   // COLLISIONS
   // ============================================================
   function checkCollisions() {
+    // Player projectile vs enemy
     for (const proj of projectiles) {
       if (proj.dead) continue;
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
+        if (proj.piercing) {
+          if (!proj.hitSet) proj.hitSet = new Set();
+          if (proj.hitSet.has(enemy)) continue;
+        }
         const dx = enemy.x - proj.x;
         const dy = enemy.y - proj.y;
         const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = enemy.takeDamage(proj.damage);
-          proj.dead = true;
-          spawnBurst(proj.x, proj.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
+          if (proj.piercing) {
+            proj.hitSet.add(enemy);
+          } else {
+            proj.dead = true;
+          }
+          spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
           if (died) {
             player.kills++;
             spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
-            xpGems.push(new XPGem(enemy.x, enemy.y, 1));
-            if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
-            shake = Math.min(shake + 1, 3);
+            xpGems.push(new XPGem(enemy.x, enemy.y, enemy.isBoss ? 8 : 1));
+            const dropChance = enemy.isBoss ? 1.0 : 0.18;
+            if (Math.random() < dropChance) {
+              // Boss drops a guaranteed magic+ item
+              if (enemy.isBoss) {
+                const it = generateItem();
+                // Reroll until at least magic
+                let tries = 0;
+                let item = it;
+                while (item.rarity.id === 'white' && tries < 6) { item = generateItem(); tries++; }
+                itemDrops.push(new ItemDrop(enemy.x, enemy.y, item));
+                // Extra guaranteed loot
+                itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
+                itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
+              } else {
+                itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
+              }
+            }
+            shake = Math.min(shake + (enemy.isBoss ? 6 : 1), enemy.isBoss ? 10 : 3);
+            if (enemy.isBoss) {
+              bossRef = null;
+              bossDefeatedBannerTimer = 2.0;
+              enterAbilityDraft();
+            }
           }
+          if (!proj.piercing) break;
+        }
+      }
+    }
+    // Enemy projectile vs player
+    if (player.iframeTimer <= 0) {
+      for (const ep of enemyProjectiles) {
+        if (ep.dead) continue;
+        const dx = ep.x - player.x;
+        const dy = ep.y - player.y;
+        const rr = ep.r + player.r;
+        if (dx * dx + dy * dy < rr * rr) {
+          ep.dead = true;
+          const died = player.takeDamage(ep.damage);
+          if (died) state = STATE.DEAD;
           break;
         }
       }
     }
+    // Enemy vs player (melee contact)
     if (player.iframeTimer <= 0) {
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
@@ -900,6 +1218,8 @@
     state = STATE.INTERMISSION;
     intermissionTimer = 0;
     enemies = [];
+    enemyProjectiles = [];
+    bossRef = null;
     if (player.pendingLevelUps > 0) enterLevelUp();
     else intermissionTimer = 3;
   }
@@ -911,26 +1231,74 @@
     if (player.pendingLevelUps > 0) enterLevelUp();
     else { state = STATE.INTERMISSION; intermissionTimer = 3; }
   }
+  function enterAbilityDraft() {
+    // Roll 3 unique abilities with rarity
+    const pool = ABILITY_LIST.slice();
+    const out = [];
+    const seen = new Set();
+    while (out.length < 3 && pool.length > 0) {
+      const idx = rngInt(0, pool.length - 1);
+      const def = pool.splice(idx, 1)[0];
+      if (seen.has(def.id)) continue;
+      seen.add(def.id);
+      out.push({ def, rarity: pickWeightedRarity() });
+    }
+    abilityDraftChoices = out;
+    state = STATE.ABILITYDRAFT;
+  }
+  function pickAbilityDraft(idx) {
+    if (idx < 0 || idx >= abilityDraftChoices.length) return;
+    const choice = abilityDraftChoices[idx];
+    // Find first empty slot 1-3 (slot 0 is signature)
+    let target = -1;
+    for (let i = 1; i < 4; i++) {
+      if (!player.abilities[i]) { target = i; break; }
+    }
+    if (target < 0) target = 1; // overflow: replace slot 1
+    player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity };
+    // After draft, go to intermission
+    if (player.pendingLevelUps > 0) enterLevelUp();
+    else { state = STATE.INTERMISSION; intermissionTimer = 3; }
+  }
   function startNextWave() {
     currentWave += 1;
     state = STATE.PLAYING;
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
     spawnTimer = 0;
+    if (isBossWave(currentWave)) spawnBoss(cfg);
   }
   function toggleInventory() {
     if (state === STATE.INVENTORY) state = prevState;
     else if (state === STATE.PLAYING || state === STATE.INTERMISSION) { prevState = state; state = STATE.INVENTORY; }
   }
+
+  function generateFloorDecorations() {
+    floorDecorations = [];
+    const biome = currentBiome();
+    for (let i = 0; i < 30; i++) {
+      floorDecorations.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1 + Math.floor(Math.random() * 2),
+        color: biome.decoColors[Math.floor(Math.random() * biome.decoColors.length)],
+      });
+    }
+  }
+
   function resetWorld() {
     player = new Player(W / 2, H / 2);
-    enemies = []; projectiles = []; xpGems = []; itemDrops = []; particles = [];
+    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
+    bossRef = null;
     shake = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
-    levelUpChoices = []; levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
+    levelUpChoices = []; abilityDraftChoices = [];
+    levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
+    bossBannerTimer = 0; bossDefeatedBannerTimer = 0;
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
+    generateFloorDecorations();
   }
 
   // ============================================================
@@ -963,14 +1331,40 @@
   // RENDER
   // ============================================================
   function drawBackground() {
-    ctx.fillStyle = '#1f1f24';
+    const biome = currentBiome();
+    ctx.fillStyle = biome.bg;
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#26262c';
+    ctx.fillStyle = biome.grid;
     for (let gx = 0; gx < W; gx += 16) {
       for (let gy = 0; gy < H; gy += 16) {
         if (((gx / 16) + (gy / 16)) % 2 === 0) ctx.fillRect(gx, gy, 16, 16);
       }
     }
+    // Floor decorations (bones/dust)
+    for (const d of floorDecorations) {
+      ctx.fillStyle = d.color;
+      ctx.fillRect(Math.floor(d.x), Math.floor(d.y), d.size, d.size);
+    }
+  }
+
+  function drawBossBar() {
+    if (!bossRef || !bossRef.alive) return;
+    const bw = 360, bh = 8;
+    const bx = (W - bw) / 2;
+    const by = 8;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+    ctx.fillStyle = '#3a1818';
+    ctx.fillRect(bx, by, bw, bh);
+    const ratio = Math.max(0, bossRef.hp / bossRef.maxHp);
+    const grad = ratio > 0.5 ? '#cc3030' : ratio > 0.25 ? '#dd6020' : '#ff2020';
+    ctx.fillStyle = grad;
+    ctx.fillRect(bx, by, bw * ratio, bh);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${bossRef.name.toUpperCase()}  -  ${Math.ceil(bossRef.hp)} / ${bossRef.maxHp}`, W / 2, by + 7);
+    ctx.textAlign = 'left';
   }
 
   function drawHud() {
@@ -991,7 +1385,7 @@
     const xpRatio = player.xp / player.xpToNext;
     ctx.fillStyle = '#9b59ff'; ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
 
-    // Resource bar (Focus)
+    // Focus bar
     const rx = 8, ry = 28;
     ctx.fillStyle = '#000'; ctx.fillRect(rx - 1, ry - 1, 122, 5);
     ctx.fillStyle = '#2a2515'; ctx.fillRect(rx, ry, 120, 3);
@@ -999,7 +1393,7 @@
     ctx.fillStyle = player.class.resourceColor;
     ctx.fillRect(rx, ry, 120 * resRatio, 3);
 
-    // Level + class + focus labels (row beneath)
+    // Labels row
     ctx.fillStyle = '#c89aff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
     ctx.fillText(`LV ${player.level}`, hpx + 1, 42);
     ctx.fillStyle = '#888';
@@ -1007,19 +1401,26 @@
     ctx.fillStyle = player.class.resourceColor;
     ctx.fillText(`${player.class.resourceName} ${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`, hpx + 80, 42);
 
-    // Wave / intermission
+    // Center: wave / intermission / biome
     ctx.textAlign = 'center';
     if (state === STATE.PLAYING) {
-      ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-      ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
-      ctx.fillStyle = '#999'; ctx.font = '8px monospace';
-      ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
+      if (!bossRef) {
+        ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
+        ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
+        ctx.fillStyle = '#999'; ctx.font = '8px monospace';
+        ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
+      } else {
+        // Boss HP bar replaces the simple wave header — drawn separately
+      }
     } else if (state === STATE.INTERMISSION) {
       ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
       ctx.fillText(`WAVE ${currentWave + 1} INCOMING`, W / 2, 12);
       ctx.fillStyle = '#7ad96b'; ctx.font = '14px monospace';
       ctx.fillText(`${Math.ceil(intermissionTimer)}`, W / 2, 28);
     }
+    // Biome label small below
+    ctx.fillStyle = '#557755'; ctx.font = '7px monospace';
+    ctx.fillText(currentBiome().name.toUpperCase(), W / 2, H - 86);
 
     // Right side stats
     ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
@@ -1040,7 +1441,21 @@
       ctx.font = '9px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`+ ${lastLootName}`, W / 2, H - 50);
     }
+    if (bossBannerTimer > 0) {
+      const a = Math.min(1, bossBannerTimer / 2.5);
+      ctx.fillStyle = `rgba(255,80,80,${a})`;
+      ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('THE BONE LORD APPROACHES', W / 2, H / 2 - 20);
+    }
+    if (bossDefeatedBannerTimer > 0) {
+      const a = Math.min(1, bossDefeatedBannerTimer / 2.0);
+      ctx.fillStyle = `rgba(255,208,64,${a})`;
+      ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('BONE LORD SLAIN', W / 2, H / 2 - 20);
+    }
     ctx.textAlign = 'left';
+
+    drawBossBar();
   }
 
   function drawAbilityBar() {
@@ -1053,20 +1468,23 @@
       const x = startX + i * (slotSize + gap);
       const ability = player.abilities[i];
       const cd = player.abilityCooldowns[i];
-
       ctx.fillStyle = ability ? '#22222a' : '#13131a';
       ctx.fillRect(x, y, slotSize, slotSize);
-      ctx.strokeStyle = ability ? '#555' : '#2a2a30';
-      ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
-
-      // Key hint
+      // Rarity border if ability present
+      if (ability) {
+        ctx.strokeStyle = ability.rarity.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 1, y + 1, slotSize - 2, slotSize - 2);
+        ctx.lineWidth = 1;
+      } else {
+        ctx.strokeStyle = '#2a2a30';
+        ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+      }
       ctx.fillStyle = ability ? '#888' : '#444';
       ctx.font = 'bold 7px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(`${i + 1}`, x + 3, y + 8);
-
       if (ability) {
-        // Icon (letter)
         const canCast = cd <= 0 && player.resource >= ability.def.cost;
         ctx.fillStyle = canCast ? ability.def.color : '#666';
         ctx.font = 'bold 16px monospace';
@@ -1074,14 +1492,10 @@
         ctx.textBaseline = 'middle';
         ctx.fillText(ability.def.letter, x + slotSize / 2, y + slotSize / 2 + 1);
         ctx.textBaseline = 'alphabetic';
-
-        // Cost
         ctx.fillStyle = player.resource >= ability.def.cost ? '#ffd23f' : '#664020';
         ctx.font = '6px monospace';
         ctx.textAlign = 'right';
         ctx.fillText(`${ability.def.cost}`, x + slotSize - 2, y + slotSize - 2);
-
-        // Cooldown overlay
         if (cd > 0) {
           const ratio = cd / ability.def.cooldown;
           ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -1106,8 +1520,7 @@
   }
 
   function drawLevelUpScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.72)';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#ffd040';
     ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
     ctx.fillText('LEVEL UP', W / 2, 56);
@@ -1132,6 +1545,66 @@
       ctx.fillText(choice.name, cx + cardW / 2, cy + 64);
       ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
       ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawAbilityDraftScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffd040';
+    ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
+    ctx.fillText('ABILITY DRAFT', W / 2, 50);
+    ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
+    ctx.fillText('Bone Lord defeated. Choose one ability — rarity rolled at draft.', W / 2, 68);
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+    ctx.fillText('Pick: 1 / 2 / 3, click, or face button', W / 2, 82);
+
+    const cardW = 150, cardH = 170, gap = 18;
+    const totalW = cardW * 3 + gap * 2;
+    const startX = (W - totalW) / 2;
+    const cardY = (H - cardH) / 2 + 10;
+    for (let i = 0; i < abilityDraftChoices.length; i++) {
+      const ch = abilityDraftChoices[i];
+      const cx = startX + i * (cardW + gap); const cy = cardY;
+      const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
+      ctx.fillStyle = hovered ? '#33333d' : '#22222a';
+      ctx.fillRect(cx, cy, cardW, cardH);
+      ctx.strokeStyle = ch.rarity.color; ctx.lineWidth = hovered ? 4 : 3;
+      ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4);
+      ctx.lineWidth = 1;
+      // Number key
+      ctx.fillStyle = '#666'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 8, cy + 16);
+      // Rarity
+      ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(ch.rarity.name.toUpperCase(), cx + cardW - 8, cy + 16);
+      // Big letter icon
+      ctx.fillStyle = ch.def.color; ctx.font = 'bold 36px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(ch.def.letter, cx + cardW / 2, cy + 50);
+      ctx.textBaseline = 'alphabetic';
+      // Name
+      ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(ch.def.name, cx + cardW / 2, cy + 90);
+      // Description
+      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+      ctx.fillText(ch.def.desc, cx + cardW / 2, cy + 108);
+      // Stats line
+      ctx.fillStyle = '#888'; ctx.font = '7px monospace';
+      ctx.fillText(`Cost ${ch.def.cost} - CD ${ch.def.cooldown}s - dmg x${ch.rarity.dmgMult.toFixed(2)}`, cx + cardW / 2, cy + 124);
+      // Legendary flavor
+      if (ch.rarity.id === 'orange') {
+        ctx.fillStyle = '#ff8000';
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('LEGENDARY MOD', cx + cardW / 2, cy + 140);
+        ctx.fillStyle = '#ffaa44'; ctx.font = '7px monospace';
+        const legendDesc = ch.def.id === 'multishot' ? '5 arrows instead of 3' :
+                           ch.def.id === 'rainOfArrows' ? 'Bigger radius' :
+                           ch.def.id === 'hawkEye' ? 'Lasts 8s instead of 5' :
+                           ch.def.id === 'arrowVolley' ? '12 arrows instead of 8' :
+                           '+50% projectile size';
+        ctx.fillText(legendDesc, cx + cardW / 2, cy + 152);
+      }
     }
     ctx.textAlign = 'left';
   }
@@ -1169,7 +1642,6 @@
   const INV_ROWS = 4;
   const INV_SLOT_SIZE = 28;
   const INV_GAP = 4;
-
   function getEquippedSlotAtMouse() {
     for (const k in EQ_LAYOUT) {
       const p = EQ_LAYOUT[k];
@@ -1201,7 +1673,6 @@
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
   }
-
   function drawInventoryScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.82)';
     ctx.fillRect(0, 0, W, H);
@@ -1227,7 +1698,6 @@
       }
     }
 
-    // STATS BLOCK
     const sx = 30, sy = 220;
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
     ctx.fillText(`STATS  -  ${player.class.name.toUpperCase()}`, sx, sy);
@@ -1244,7 +1714,6 @@
     ];
     for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], sx, sy + 12 + i * 10);
 
-    // INVENTORY GRID
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
     ctx.fillText(`INVENTORY (${player.inventory.length}/${player.INVENTORY_CAP})`, INV_START_X, 44);
     for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
@@ -1260,7 +1729,6 @@
       if (item) drawItemInBox(item, x, y, INV_SLOT_SIZE);
     }
 
-    // TOOLTIP
     let tooltipItem = null;
     let tooltipSource = '';
     const eqSlot = getEquippedSlotAtMouse();
@@ -1289,8 +1757,7 @@
       ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}`, tx + 8, ty + 25);
       ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
       if (tooltipItem.affixes.length === 0) {
-        ctx.fillStyle = '#888';
-        ctx.fillText('(no affixes)', tx + 8, ty + 40);
+        ctx.fillStyle = '#888'; ctx.fillText('(no affixes)', tx + 8, ty + 40);
       } else {
         for (let i = 0; i < tooltipItem.affixes.length; i++) {
           const aff = tooltipItem.affixes[i];
@@ -1308,12 +1775,13 @@
   // MAIN LOOP
   // ============================================================
   resetWorld();
+  // Spawn boss if first wave is a boss wave (won't happen at wave 1 but safe)
+  if (isBossWave(currentWave)) spawnBoss(waveConfig(currentWave));
   let lastTime = performance.now();
 
   function loop(now) {
     const dt = Math.min((now - lastTime) / 1000, 1 / 30);
     lastTime = now;
-
     updateInput();
 
     if ((keyJustPressed.has('tab') || keyJustPressed.has('i')) &&
@@ -1324,7 +1792,6 @@
     }
 
     if (state === STATE.PLAYING) {
-      // Ability input
       if (keyJustPressed.has('1') || gpJustPressed.has(0)) castAbility(0);
       if (keyJustPressed.has('2') || gpJustPressed.has(1)) castAbility(1);
       if (keyJustPressed.has('3') || gpJustPressed.has(2)) castAbility(2);
@@ -1332,13 +1799,18 @@
 
       const cfg = waveConfig(currentWave);
       waveTimer -= dt;
-      if (waveTimer > 0) {
+      // Regular waves spawn enemies; boss waves don't
+      if (!isBossWave(currentWave) && waveTimer > 0) {
         spawnTimer += dt;
-        while (spawnTimer >= cfg.spawnInterval) { spawnTimer -= cfg.spawnInterval; spawnEnemy(cfg); }
+        while (spawnTimer >= cfg.spawnInterval) {
+          spawnTimer -= cfg.spawnInterval;
+          spawnEnemy(cfg);
+        }
       }
       player.update(dt);
       for (const e of enemies) if (e.alive) e.update(dt, player);
       for (const p of projectiles) if (!p.dead) p.update(dt);
+      for (const ep of enemyProjectiles) if (!ep.dead) ep.update(dt);
       for (const g of xpGems) if (!g.dead) g.update(dt, player);
       for (const d of itemDrops) if (!d.dead) d.update(dt, player);
 
@@ -1346,10 +1818,18 @@
 
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
+      enemyProjectiles = enemyProjectiles.filter(p => !p.dead);
       xpGems = xpGems.filter(g => !g.dead);
       itemDrops = itemDrops.filter(d => !d.dead);
 
-      if (waveTimer <= 0 && enemies.length === 0) endWave();
+      // Wave end: regular wave timer + no enemies; boss wave only when boss dies
+      if (isBossWave(currentWave)) {
+        if (!bossRef && enemies.length === 0 && state !== STATE.ABILITYDRAFT) {
+          // Boss is dead and ability draft already triggered; we wait for draft pick
+        }
+      } else if (waveTimer <= 0 && enemies.length === 0) {
+        endWave();
+      }
     }
     else if (state === STATE.LEVELUP) {
       let picked = -1;
@@ -1370,6 +1850,26 @@
         }
       }
       if (picked >= 0) pickLevelUp(picked);
+    }
+    else if (state === STATE.ABILITYDRAFT) {
+      let picked = -1;
+      if (keyJustPressed.has('1')) picked = 0;
+      else if (keyJustPressed.has('2')) picked = 1;
+      else if (keyJustPressed.has('3')) picked = 2;
+      else if (gpJustPressed.has(0)) picked = 0;
+      else if (gpJustPressed.has(1)) picked = 1;
+      else if (gpJustPressed.has(2)) picked = 2;
+      else if (mouseClicked) {
+        const cardW = 150, cardH = 170, gap = 18;
+        const totalW = cardW * 3 + gap * 2;
+        const startX = (W - totalW) / 2;
+        const cardY = (H - cardH) / 2 + 10;
+        for (let i = 0; i < abilityDraftChoices.length; i++) {
+          const cx = startX + i * (cardW + gap);
+          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) { picked = i; break; }
+        }
+      }
+      if (picked >= 0) pickAbilityDraft(picked);
     }
     else if (state === STATE.INTERMISSION) {
       intermissionTimer -= dt;
@@ -1394,6 +1894,8 @@
     particles = particles.filter(p => !p.dead);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
+    if (bossBannerTimer > 0) bossBannerTimer -= dt;
+    if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
     shake *= 0.85; if (shake < 0.05) shake = 0;
 
     // === RENDER ===
@@ -1403,20 +1905,20 @@
       const sy = (Math.random() - 0.5) * shake * 2;
       ctx.translate(sx, sy);
     }
-
     drawBackground();
     for (const d of itemDrops) d.draw(ctx);
     for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
     for (const e of enemies) e.draw(ctx);
     for (const p of projectiles) p.draw(ctx);
+    for (const ep of enemyProjectiles) ep.draw(ctx);
     if (state !== STATE.DEAD) player.draw(ctx);
-
     ctx.restore();
 
     drawHud();
     if (state === STATE.PLAYING || state === STATE.INTERMISSION) drawAbilityBar();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
+    else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
 
