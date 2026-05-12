@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 0</title>
+<title>Slayers — Phase 1</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -26,43 +26,36 @@
     image-rendering: crisp-edges;
     background: #1f1f24;
     border: 2px solid #444;
-    /* Scale up the low-res internal canvas */
     width: min(1280px, 96vw);
     height: min(720px, 54vw);
     box-shadow: 0 0 60px rgba(122, 217, 107, 0.08);
+    cursor: crosshair;
   }
   #hud {
-    font-size: 13px;
+    font-size: 12px;
     color: #888;
     letter-spacing: 1px;
     display: flex;
-    gap: 24px;
+    gap: 20px;
   }
   #hud .label { color: #5a5a66; }
   #hud .value { color: #eee; }
   #hud .accent { color: #7ad96b; }
-  .title {
-    font-size: 11px;
-    color: #5a5a66;
-    letter-spacing: 4px;
-    margin-bottom: -4px;
-  }
 </style>
 </head>
 <body>
-  <div class="title">SLAYERS — PHASE 0 — FOUNDATION</div>
   <canvas id="game" width="640" height="360"></canvas>
   <div id="hud">
     <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
-    <div><span class="label">KILLS:</span> <span id="kills" class="value">0</span></div>
-    <div><span class="label">ALIVE:</span> <span id="alive" class="value">0</span></div>
-    <div><span class="label">CONTROLS:</span> <span class="value">WASD / Left Stick</span></div>
+    <div><span class="label">MOVE:</span> <span class="value">WASD / Stick</span></div>
+    <div><span class="label">LVL UP:</span> <span class="value">1 / 2 / 3 or click or A/B/X</span></div>
+    <div><span class="label">RESTART:</span> <span class="value">R or click or A</span></div>
   </div>
 
 <script>
 (() => {
   // ============================================================
-  // Canvas + DOM
+  // CANVAS + DOM
   // ============================================================
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -71,67 +64,69 @@
   const H = canvas.height;
 
   const $device = document.getElementById('device');
-  const $kills = document.getElementById('kills');
-  const $alive = document.getElementById('alive');
+
+  // ============================================================
+  // GAME STATE
+  // ============================================================
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3 };
+  let state = STATE.PLAYING;
+  let levelUpChoices = [];
+  let intermissionTimer = 0;
+  let waveTimer = 0;
+  let currentWave = 1;
+  let spawnTimer = 0;
+  let shake = 0;
+  let levelUpFlashTimer = 0;
+
+  let activeDevice = 'keyboard';
+  let detectedGamepadType = null;
+
+  // World entities (initialized in resetWorld)
+  let player;
+  let enemies = [];
+  let projectiles = [];
+  let xpGems = [];
+  let particles = [];
 
   // ============================================================
   // INPUT ABSTRACTION LAYER
-  // Translates keyboard + gamepad into abstract game actions.
-  // Game logic only reads Actions.* — never touches raw input.
   // ============================================================
   const Actions = {
-    moveX: 0,        // -1 to 1
-    moveY: 0,        // -1 to 1
-    ability1: false,
-    ability2: false,
-    ability3: false,
-    ability4: false,
-    classAction: false,
-    pause: false,
-    inventory: false,
+    moveX: 0, moveY: 0,
+    ability1: false, ability2: false, ability3: false, ability4: false,
+    classAction: false, pause: false, inventory: false,
   };
 
-  let activeDevice = 'keyboard';
-  let detectedGamepadType = null; // 'xbox' | 'playstation' | 'generic'
-
-  // --- Keyboard ---
+  // Just-pressed tracking (single-frame edge events)
   const keys = new Set();
+  const keyJustPressed = new Set();
+  const gpButtonsLast = new Map();
+  const gpJustPressed = new Set();
+  let mouseX = -1, mouseY = -1;
+  let mouseClicked = false;
+
   window.addEventListener('keydown', (e) => {
-    keys.add(e.key.toLowerCase());
-    // Prevent default browser actions for game keys
+    const k = e.key.toLowerCase();
+    if (!keys.has(k)) keyJustPressed.add(k);
+    keys.add(k);
     const blocked = ['arrowup','arrowdown','arrowleft','arrowright',' ','tab'];
-    if (blocked.includes(e.key.toLowerCase())) e.preventDefault();
+    if (blocked.includes(k)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-  // Clear keys if focus lost so they don't get stuck
   window.addEventListener('blur', () => keys.clear());
 
-  function pollKeyboard() {
-    let kx = 0, ky = 0;
-    if (keys.has('a') || keys.has('arrowleft'))  kx -= 1;
-    if (keys.has('d') || keys.has('arrowright')) kx += 1;
-    if (keys.has('w') || keys.has('arrowup'))    ky -= 1;
-    if (keys.has('s') || keys.has('arrowdown'))  ky += 1;
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+    mouseY = (e.clientY - rect.top) * (H / rect.height);
+  });
+  canvas.addEventListener('mousedown', () => { mouseClicked = true; });
 
-    if (kx !== 0 || ky !== 0) {
-      // Normalize diagonal so it isn't faster than cardinal
-      const len = Math.hypot(kx, ky);
-      Actions.moveX = kx / len;
-      Actions.moveY = ky / len;
-      activeDevice = 'keyboard';
-      return true;
-    }
-    return false;
-  }
-
-  // --- Gamepad ---
   window.addEventListener('gamepadconnected', (e) => {
     detectedGamepadType = detectGamepadType(e.gamepad.id);
     console.log('Gamepad connected:', e.gamepad.id, '→', detectedGamepadType);
   });
-  window.addEventListener('gamepaddisconnected', (e) => {
-    console.log('Gamepad disconnected:', e.gamepad.id);
-  });
+  window.addEventListener('gamepaddisconnected', () => {});
 
   function detectGamepadType(id) {
     const lower = id.toLowerCase();
@@ -142,13 +137,39 @@
     return 'generic';
   }
 
+  function pollKeyboard() {
+    let kx = 0, ky = 0;
+    if (keys.has('a') || keys.has('arrowleft'))  kx -= 1;
+    if (keys.has('d') || keys.has('arrowright')) kx += 1;
+    if (keys.has('w') || keys.has('arrowup'))    ky -= 1;
+    if (keys.has('s') || keys.has('arrowdown'))  ky += 1;
+    if (kx !== 0 || ky !== 0) {
+      const len = Math.hypot(kx, ky);
+      Actions.moveX = kx / len;
+      Actions.moveY = ky / len;
+      activeDevice = 'keyboard';
+      return true;
+    }
+    return false;
+  }
+
   function pollGamepad() {
+    gpJustPressed.clear();
     const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    let movedFromStick = false;
     for (const gp of gps) {
       if (!gp) continue;
       if (!detectedGamepadType) detectedGamepadType = detectGamepadType(gp.id);
 
-      // Left stick with radial deadzone + rescale
+      // Track button edges
+      for (let i = 0; i < gp.buttons.length; i++) {
+        const wasPressed = gpButtonsLast.get(i) || false;
+        const isPressed = gp.buttons[i] && gp.buttons[i].pressed;
+        if (isPressed && !wasPressed) gpJustPressed.add(i);
+        gpButtonsLast.set(i, isPressed);
+      }
+
+      // Left stick with radial deadzone
       const dz = 0.18;
       let gx = gp.axes[0] || 0;
       let gy = gp.axes[1] || 0;
@@ -160,8 +181,7 @@
         gy = (gy / mag) * scaled;
       }
 
-      // D-pad as fallback / addition (for thumbstick drift)
-      // Standard mapping: D-pad up=12, down=13, left=14, right=15
+      // D-pad fallback
       const btn = (i) => gp.buttons[i] && gp.buttons[i].pressed;
       if (btn(14)) gx = -1;
       if (btn(15)) gx =  1;
@@ -169,22 +189,20 @@
       if (btn(13)) gy =  1;
 
       if (gx !== 0 || gy !== 0) {
-        // Normalize if magnitude > 1 (d-pad + stick combo)
         const m = Math.hypot(gx, gy);
         if (m > 1) { gx /= m; gy /= m; }
         Actions.moveX = gx;
         Actions.moveY = gy;
         activeDevice = 'gamepad';
-        return true;
+        movedFromStick = true;
       }
     }
-    return false;
+    return movedFromStick;
   }
 
   function updateInput() {
     Actions.moveX = 0;
     Actions.moveY = 0;
-    // Gamepad first, then keyboard fallback. Last input wins for active-device display.
     const gpInput = pollGamepad();
     if (!gpInput) pollKeyboard();
 
@@ -194,34 +212,136 @@
             : detectedGamepadType === 'xbox' ? 'Xbox controller'
             : 'gamepad';
     }
-    if ($device.textContent !== label) $device.textContent = label;
+    if ($device && $device.textContent !== label) $device.textContent = label;
   }
 
   // ============================================================
-  // ENTITIES
+  // LEVEL-UP STAT POOL
+  // ============================================================
+  const STAT_POOL = [
+    { id: 'maxhp',    name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.maxHp += 20; p.hp = Math.min(p.maxHp, p.hp + 20); } },
+    { id: 'damage',   name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.dmgMult *= 1.15; } },
+    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.fireRateMult *= 1.2; } },
+    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet XP further',     color: '#9b59ff', apply: (p) => { p.pickupRange += 10; } },
+    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.speed += 15; } },
+    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.regen += 1; } },
+  ];
+
+  function rollLevelUpChoices() {
+    const shuffled = [...STAT_POOL].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 3);
+  }
+
+  // ============================================================
+  // WAVE CONFIG
+  // ============================================================
+  function waveConfig(w) {
+    return {
+      duration:        Math.min(20 + (w - 1) * 3, 50),
+      spawnInterval:   Math.max(0.7 - (w - 1) * 0.04, 0.18),
+      enemyHpMult:     1 + (w - 1) * 0.18,
+      enemySpeedMult:  1 + (w - 1) * 0.04,
+      enemyDmgMult:    1 + (w - 1) * 0.08,
+    };
+  }
+
+  // ============================================================
+  // ENTITY: Player
   // ============================================================
   class Player {
     constructor(x, y) {
       this.x = x;
       this.y = y;
-      this.r = 5;              // collision radius
-      this.speed = 95;         // pixels/sec (internal)
-      this.facing = 1;         // 1 = right, -1 = left
+      this.r = 5;
+      this.facing = 1;
+
+      this.maxHp = 100;
+      this.hp = 100;
+      this.regen = 0;
+      this.iframeTimer = 0;
+      this.IFRAME = 0.5;
+      this.hitFlash = 0;
+
+      this.speed = 95;
+      this.level = 1;
+      this.xp = 0;
+      this.xpToNext = 5;
+      this.pendingLevelUps = 0;
+      this.kills = 0;
+
+      // Stat multipliers (boosted by level-up picks)
+      this.dmgMult = 1.0;
+      this.fireRateMult = 1.0;
+      this.pickupRange = 30;
+
+      // Weapon (single auto-firing weapon for Phase 1)
+      this.weaponDamage = 4;
+      this.weaponFireRate = 2;     // shots/sec base
+      this.weaponRange = 200;
+      this.weaponProjSpeed = 280;
+      this.fireTimer = 0;
     }
+
     update(dt) {
+      // Movement
       this.x += Actions.moveX * this.speed * dt;
       this.y += Actions.moveY * this.speed * dt;
-      // Clamp inside arena
       this.x = Math.max(this.r, Math.min(W - this.r, this.x));
       this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      if (Actions.moveX > 0.1) this.facing = 1;
+      if (Actions.moveX >  0.1) this.facing =  1;
       else if (Actions.moveX < -0.1) this.facing = -1;
+
+      // Timers
+      if (this.iframeTimer > 0) this.iframeTimer -= dt;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
+
+      // Regen
+      if (this.regen > 0 && this.hp < this.maxHp) {
+        this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
+      }
+
+      // Weapon auto-fire
+      if (this.fireTimer > 0) this.fireTimer -= dt;
+      if (this.fireTimer <= 0) {
+        const target = findNearestEnemy(this.x, this.y, this.weaponRange);
+        if (target) {
+          fireProjectile(this, target);
+          this.fireTimer = 1 / (this.weaponFireRate * this.fireRateMult);
+        }
+      }
     }
+
+    takeDamage(amount) {
+      if (this.iframeTimer > 0) return false;
+      this.hp -= amount;
+      this.iframeTimer = this.IFRAME;
+      this.hitFlash = 0.25;
+      shake = Math.min(shake + 3, 6);
+      if (this.hp <= 0) {
+        this.hp = 0;
+        return true; // died
+      }
+      return false;
+    }
+
+    addXp(amount) {
+      this.xp += amount;
+      while (this.xp >= this.xpToNext) {
+        this.xp -= this.xpToNext;
+        this.level += 1;
+        this.pendingLevelUps += 1;
+        this.xpToNext = 5 + (this.level - 1) * 3;
+        levelUpFlashTimer = 1.5;
+      }
+    }
+
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y);
+      const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
+
       // Body (green tunic)
-      ctx.fillStyle = '#7ad96b';
+      ctx.fillStyle = flash ? '#ff4444' : '#7ad96b';
       ctx.fillRect(px - 4, py - 2, 8, 7);
       // Belt
       ctx.fillStyle = '#3a4a2a';
@@ -231,7 +351,7 @@
       ctx.fillRect(px - 3, py + 5, 2, 2);
       ctx.fillRect(px + 1, py + 5, 2, 2);
       // Head
-      ctx.fillStyle = '#ffd5a0';
+      ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0';
       ctx.fillRect(px - 3, py - 7, 6, 5);
       // Hair
       ctx.fillStyle = '#5a3a2a';
@@ -244,15 +364,23 @@
     }
   }
 
+  // ============================================================
+  // ENTITY: Skeleton
+  // ============================================================
   class Skeleton {
-    constructor(x, y) {
+    constructor(x, y, hpMult, speedMult, dmgMult) {
       this.x = x;
       this.y = y;
       this.r = 4;
-      this.speed = 38 + Math.random() * 18;
+      this.maxHp = Math.round(8 * hpMult);
+      this.hp = this.maxHp;
+      this.contactDmg = Math.round(5 * dmgMult);
+      this.speed = (38 + Math.random() * 18) * speedMult;
       this.alive = true;
       this.bobPhase = Math.random() * Math.PI * 2;
+      this.hitFlash = 0;
     }
+
     update(dt, target) {
       const dx = target.x - this.x;
       const dy = target.y - this.y;
@@ -262,22 +390,36 @@
         this.y += (dy / d) * this.speed * dt;
       }
       this.bobPhase += dt * 8;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
     }
+
+    takeDamage(amount) {
+      this.hp -= amount;
+      this.hitFlash = 0.1;
+      if (this.hp <= 0) {
+        this.alive = false;
+        return true;
+      }
+      return false;
+    }
+
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
+      const flash = this.hitFlash > 0;
+
       // Body bones
-      ctx.fillStyle = '#e8e8d8';
+      ctx.fillStyle = flash ? '#ffffff' : '#e8e8d8';
       ctx.fillRect(px - 3, py - 1, 6, 4);
       // Ribcage line
-      ctx.fillStyle = '#b0b0a0';
+      ctx.fillStyle = flash ? '#dddddd' : '#b0b0a0';
       ctx.fillRect(px - 2, py + 1, 4, 1);
       // Legs
-      ctx.fillStyle = '#d0d0c0';
+      ctx.fillStyle = flash ? '#eeeeee' : '#d0d0c0';
       ctx.fillRect(px - 2, py + 3, 1, 2);
       ctx.fillRect(px + 1, py + 3, 1, 2);
       // Skull
-      ctx.fillStyle = '#f0f0e0';
+      ctx.fillStyle = flash ? '#ffffff' : '#f0f0e0';
       ctx.fillRect(px - 2, py - 5, 4, 4);
       // Eye sockets
       ctx.fillStyle = '#1a0a0a';
@@ -287,15 +429,106 @@
   }
 
   // ============================================================
-  // PARTICLES (juice — burst on enemy death)
+  // ENTITY: Projectile
+  // ============================================================
+  class Projectile {
+    constructor(x, y, vx, vy, damage, life) {
+      this.x = x;
+      this.y = y;
+      this.vx = vx;
+      this.vy = vy;
+      this.r = 2;
+      this.damage = damage;
+      this.life = life;
+      this.dead = false;
+    }
+
+    update(dt) {
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.life -= dt;
+      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) {
+        this.dead = true;
+      }
+    }
+
+    draw(ctx) {
+      ctx.fillStyle = '#fff7a0';
+      ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+      ctx.fillStyle = '#ffe040';
+      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
+    }
+  }
+
+  // ============================================================
+  // ENTITY: XP Gem
+  // ============================================================
+  class XPGem {
+    constructor(x, y, value) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() - 0.5) * 40;
+      this.vy = (Math.random() - 0.5) * 40 - 20;
+      this.r = 3;
+      this.value = value;
+      this.dead = false;
+      this.magnetized = false;
+      this.bobPhase = Math.random() * Math.PI * 2;
+    }
+
+    update(dt, player) {
+      this.bobPhase += dt * 5;
+
+      if (!this.magnetized) {
+        this.vx *= 0.92;
+        this.vy *= 0.92;
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+      }
+
+      const dx = player.x - this.x;
+      const dy = player.y - this.y;
+      const d = Math.hypot(dx, dy);
+
+      if (!this.magnetized && d < player.pickupRange) {
+        this.magnetized = true;
+      }
+
+      if (this.magnetized) {
+        const pullSpeed = 200 + (1 - Math.min(d / 100, 1)) * 250;
+        if (d > 0.01) {
+          this.x += (dx / d) * pullSpeed * dt;
+          this.y += (dy / d) * pullSpeed * dt;
+        }
+        if (d < player.r + this.r) {
+          player.addXp(this.value);
+          this.dead = true;
+        }
+      }
+    }
+
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
+      ctx.fillStyle = '#9b59ff';
+      ctx.fillRect(px - 1, py - 2, 3, 4);
+      ctx.fillStyle = '#c89aff';
+      ctx.fillRect(px, py - 1, 1, 1);
+      ctx.fillRect(px - 1, py - 2, 1, 1);
+    }
+  }
+
+  // ============================================================
+  // ENTITY: Particle (juice)
   // ============================================================
   class Particle {
-    constructor(x, y, vx, vy, color, life) {
+    constructor(x, y, vx, vy, color, life, size) {
       this.x = x; this.y = y;
       this.vx = vx; this.vy = vy;
       this.color = color;
       this.life = life;
       this.maxLife = life;
+      this.size = size || 2;
     }
     update(dt) {
       this.x += this.vx * dt;
@@ -308,69 +541,173 @@
       const a = Math.max(0, this.life / this.maxLife);
       ctx.globalAlpha = a;
       ctx.fillStyle = this.color;
-      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 2, 2);
+      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), this.size, this.size);
       ctx.globalAlpha = 1;
     }
     get dead() { return this.life <= 0; }
   }
 
-  function spawnBurst(x, y, count = 8) {
-    const palette = ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'];
+  function spawnBurst(x, y, palette, count) {
+    palette = palette || ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'];
+    count = count || 8;
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = 40 + Math.random() * 70;
       const c = palette[Math.floor(Math.random() * palette.length)];
-      particles.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s, c, 0.35 + Math.random() * 0.2));
+      particles.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s, c, 0.35 + Math.random() * 0.25));
     }
   }
 
   // ============================================================
-  // WORLD
+  // WORLD HELPERS
   // ============================================================
-  const player = new Player(W / 2, H / 2);
-  const enemies = [];
-  const particles = [];
-  let kills = 0;
-  let spawnTimer = 0;
-  let spawnInterval = 0.7; // seconds; will tighten as we go
-
-  function spawnEnemy() {
-    // Pick a random edge so they come from all sides
+  function spawnEnemy(cfg) {
     const edge = Math.floor(Math.random() * 4);
-    let x, y;
     const pad = 12;
-    if (edge === 0) { x = Math.random() * W; y = -pad; }
-    else if (edge === 1) { x = W + pad; y = Math.random() * H; }
+    let x, y;
+    if (edge === 0)      { x = Math.random() * W; y = -pad; }
+    else if (edge === 1) { x = W + pad;           y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
-    else { x = -pad; y = Math.random() * H; }
-    enemies.push(new Skeleton(x, y));
+    else                 { x = -pad;              y = Math.random() * H; }
+    enemies.push(new Skeleton(x, y, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
   }
 
+  function findNearestEnemy(x, y, maxRange) {
+    let best = null;
+    let bestD = maxRange;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const d = Math.hypot(e.x - x, e.y - y);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    return best;
+  }
+
+  function fireProjectile(shooter, target) {
+    const dx = target.x - shooter.x;
+    const dy = target.y - shooter.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.01) return;
+    const sp = shooter.weaponProjSpeed;
+    const life = shooter.weaponRange / sp + 0.05;
+    const dmg = shooter.weaponDamage * shooter.dmgMult;
+    projectiles.push(new Projectile(
+      shooter.x, shooter.y,
+      (dx / d) * sp,
+      (dy / d) * sp,
+      dmg,
+      life
+    ));
+  }
+
+  // ============================================================
+  // COLLISIONS
+  // ============================================================
   function checkCollisions() {
-    for (const enemy of enemies) {
-      if (!enemy.alive) continue;
-      const dx = enemy.x - player.x;
-      const dy = enemy.y - player.y;
-      if (dx * dx + dy * dy < (enemy.r + player.r) ** 2) {
-        enemy.alive = false;
-        kills++;
-        spawnBurst(enemy.x, enemy.y);
-        // Light screen shake on kill
-        shake = Math.min(shake + 1.5, 3);
+    // Projectile vs enemy
+    for (const proj of projectiles) {
+      if (proj.dead) continue;
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        const dx = enemy.x - proj.x;
+        const dy = enemy.y - proj.y;
+        const rr = (enemy.r + proj.r);
+        if (dx * dx + dy * dy < rr * rr) {
+          const died = enemy.takeDamage(proj.damage);
+          proj.dead = true;
+          spawnBurst(proj.x, proj.y, ['#fff7a0', '#ffd040'], 4);
+          if (died) {
+            player.kills++;
+            spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
+            xpGems.push(new XPGem(enemy.x, enemy.y, 1));
+            shake = Math.min(shake + 1, 3);
+          }
+          break;
+        }
+      }
+    }
+
+    // Enemy vs player (contact damage)
+    if (player.iframeTimer <= 0) {
+      for (const enemy of enemies) {
+        if (!enemy.alive) continue;
+        const dx = enemy.x - player.x;
+        const dy = enemy.y - player.y;
+        const rr = enemy.r + player.r;
+        if (dx * dx + dy * dy < rr * rr) {
+          const died = player.takeDamage(enemy.contactDmg);
+          if (died) {
+            state = STATE.DEAD;
+          }
+          break;
+        }
       }
     }
   }
 
   // ============================================================
-  // RENDER HELPERS
+  // STATE TRANSITIONS
   // ============================================================
-  let shake = 0;
+  function endWave() {
+    state = STATE.INTERMISSION;
+    intermissionTimer = 0;
+    // Clear stragglers off-screen (none should remain, but be safe)
+    enemies = [];
+    if (player.pendingLevelUps > 0) {
+      enterLevelUp();
+    } else {
+      intermissionTimer = 3;
+    }
+  }
 
+  function enterLevelUp() {
+    state = STATE.LEVELUP;
+    levelUpChoices = rollLevelUpChoices();
+  }
+
+  function pickLevelUp(idx) {
+    if (idx < 0 || idx >= levelUpChoices.length) return;
+    levelUpChoices[idx].apply(player);
+    player.pendingLevelUps--;
+    if (player.pendingLevelUps > 0) {
+      enterLevelUp();
+    } else {
+      state = STATE.INTERMISSION;
+      intermissionTimer = 3;
+    }
+  }
+
+  function startNextWave() {
+    currentWave += 1;
+    state = STATE.PLAYING;
+    const cfg = waveConfig(currentWave);
+    waveTimer = cfg.duration;
+    spawnTimer = 0;
+  }
+
+  function resetWorld() {
+    player = new Player(W / 2, H / 2);
+    enemies = [];
+    projectiles = [];
+    xpGems = [];
+    particles = [];
+    shake = 0;
+    state = STATE.PLAYING;
+    currentWave = 1;
+    spawnTimer = 0;
+    intermissionTimer = 0;
+    levelUpChoices = [];
+    levelUpFlashTimer = 0;
+    const cfg = waveConfig(currentWave);
+    waveTimer = cfg.duration;
+  }
+
+  // ============================================================
+  // RENDER
+  // ============================================================
   function drawBackground() {
-    // Background fill
     ctx.fillStyle = '#1f1f24';
     ctx.fillRect(0, 0, W, H);
-    // Subtle grid for depth — feels less empty
     ctx.fillStyle = '#26262c';
     for (let gx = 0; gx < W; gx += 16) {
       for (let gy = 0; gy < H; gy += 16) {
@@ -381,46 +718,228 @@
     }
   }
 
+  function drawHud() {
+    // HP bar
+    const hpx = 8, hpy = 8;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
+    ctx.fillStyle = '#3a2020';
+    ctx.fillRect(hpx, hpy, 120, 6);
+    const hpRatio = Math.max(0, player.hp / player.maxHp);
+    ctx.fillStyle = hpRatio > 0.5 ? '#ff5050' : hpRatio > 0.25 ? '#ff8030' : '#ff3030';
+    ctx.fillRect(hpx, hpy, 120 * hpRatio, 6);
+    ctx.fillStyle = '#fff';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 2, hpy + 5);
+
+    // XP bar
+    const xpx = 8, xpy = 20;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
+    ctx.fillStyle = '#1a2030';
+    ctx.fillRect(xpx, xpy, 120, 3);
+    const xpRatio = player.xp / player.xpToNext;
+    ctx.fillStyle = '#9b59ff';
+    ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
+    ctx.fillStyle = '#c89aff';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(`LV ${player.level}`, xpx + 1, xpy + 13);
+
+    // Wave + time / intermission countdown
+    ctx.textAlign = 'center';
+    if (state === STATE.PLAYING) {
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px monospace';
+      ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
+      ctx.fillStyle = '#999';
+      ctx.font = '8px monospace';
+      ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
+    } else if (state === STATE.INTERMISSION) {
+      ctx.fillStyle = '#fff';
+      ctx.font = '10px monospace';
+      ctx.fillText(`WAVE ${currentWave + 1} INCOMING`, W / 2, 12);
+      ctx.fillStyle = '#7ad96b';
+      ctx.font = '14px monospace';
+      ctx.fillText(`${Math.ceil(intermissionTimer)}`, W / 2, 28);
+    }
+
+    // Kills + enemies count
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'right';
+    ctx.font = '8px monospace';
+    ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
+    ctx.fillStyle = '#aaa';
+    ctx.fillText(`ENEMIES  ${enemies.filter(e => e.alive).length}`, W - 8, 22);
+
+    // Level-up flash
+    if (levelUpFlashTimer > 0) {
+      const alpha = Math.min(1, levelUpFlashTimer / 1.5);
+      ctx.fillStyle = `rgba(255, 208, 64, ${alpha})`;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`+ LEVEL UP  (${player.pendingLevelUps} queued)`, W / 2, 42);
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  function drawLevelUpScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#ffd040';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('LEVEL UP', W / 2, 56);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '8px monospace';
+    ctx.fillText('Pick one: 1 / 2 / 3, click, or face button', W / 2, 72);
+
+    const cardW = 130, cardH = 140, gap = 18;
+    const totalW = cardW * 3 + gap * 2;
+    const startX = (W - totalW) / 2;
+    const cardY = (H - cardH) / 2 + 10;
+
+    for (let i = 0; i < levelUpChoices.length; i++) {
+      const choice = levelUpChoices[i];
+      const cx = startX + i * (cardW + gap);
+      const cy = cardY;
+      const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
+
+      ctx.fillStyle = hovered ? '#3a3a45' : '#2a2a35';
+      ctx.fillRect(cx, cy, cardW, cardH);
+
+      ctx.strokeStyle = choice.color;
+      ctx.lineWidth = hovered ? 3 : 2;
+      ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
+      ctx.lineWidth = 1;
+
+      ctx.fillStyle = '#666';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 6, cy + 14);
+
+      ctx.fillStyle = choice.color;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(choice.name, cx + cardW / 2, cy + 64);
+
+      ctx.fillStyle = '#aaa';
+      ctx.font = '8px monospace';
+      ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  function drawDeathScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#ff4040';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px monospace';
+    ctx.fillText(`Wave ${currentWave}  -  Level ${player.level}  -  Kills ${player.kills}`, W / 2, H / 2);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '9px monospace';
+    ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
+
+    ctx.textAlign = 'left';
+  }
+
   // ============================================================
   // MAIN LOOP
   // ============================================================
+  resetWorld();
   let lastTime = performance.now();
 
   function loop(now) {
-    const dt = Math.min((now - lastTime) / 1000, 1 / 30); // cap dt to avoid spiral after tab-out
+    const dt = Math.min((now - lastTime) / 1000, 1 / 30);
     lastTime = now;
 
-    // --- Update ---
     updateInput();
 
-    spawnTimer += dt;
-    if (spawnTimer >= spawnInterval) {
-      spawnTimer = 0;
-      spawnEnemy();
+    if (state === STATE.PLAYING) {
+      const cfg = waveConfig(currentWave);
+      waveTimer -= dt;
+
+      // Spawn while wave timer running
+      if (waveTimer > 0) {
+        spawnTimer += dt;
+        while (spawnTimer >= cfg.spawnInterval) {
+          spawnTimer -= cfg.spawnInterval;
+          spawnEnemy(cfg);
+        }
+      }
+
+      player.update(dt);
+      for (const e of enemies) if (e.alive) e.update(dt, player);
+      for (const p of projectiles) if (!p.dead) p.update(dt);
+      for (const g of xpGems) if (!g.dead) g.update(dt, player);
+
+      checkCollisions();
+
+      enemies = enemies.filter(e => e.alive);
+      projectiles = projectiles.filter(p => !p.dead);
+      xpGems = xpGems.filter(g => !g.dead);
+
+      if (waveTimer <= 0 && enemies.length === 0) {
+        endWave();
+      }
+    }
+    else if (state === STATE.LEVELUP) {
+      let picked = -1;
+      if (keyJustPressed.has('1')) picked = 0;
+      else if (keyJustPressed.has('2')) picked = 1;
+      else if (keyJustPressed.has('3')) picked = 2;
+      else if (gpJustPressed.has(0)) picked = 0;  // A / Cross
+      else if (gpJustPressed.has(1)) picked = 1;  // B / Circle
+      else if (gpJustPressed.has(2)) picked = 2;  // X / Square
+      else if (mouseClicked) {
+        const cardW = 130, cardH = 140, gap = 18;
+        const totalW = cardW * 3 + gap * 2;
+        const startX = (W - totalW) / 2;
+        const cardY = (H - cardH) / 2 + 10;
+        for (let i = 0; i < levelUpChoices.length; i++) {
+          const cx = startX + i * (cardW + gap);
+          if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
+            picked = i;
+            break;
+          }
+        }
+      }
+      if (picked >= 0) pickLevelUp(picked);
+    }
+    else if (state === STATE.INTERMISSION) {
+      intermissionTimer -= dt;
+      if (intermissionTimer <= 0) {
+        startNextWave();
+      }
+    }
+    else if (state === STATE.DEAD) {
+      const anyGpFace = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
+      if (keyJustPressed.has('r') || mouseClicked || anyGpFace) {
+        resetWorld();
+      }
     }
 
-    player.update(dt);
-    for (const enemy of enemies) {
-      if (enemy.alive) enemy.update(dt, player);
-    }
-    checkCollisions();
-
-    // Cull dead enemies
-    for (let i = enemies.length - 1; i >= 0; i--) {
-      if (!enemies[i].alive) enemies.splice(i, 1);
-    }
-
-    // Particles
+    // Particles + flash timer always update
     for (const p of particles) p.update(dt);
-    for (let i = particles.length - 1; i >= 0; i--) {
-      if (particles[i].dead) particles.splice(i, 1);
-    }
+    particles = particles.filter(p => !p.dead);
+    if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
 
-    // Screen shake decay
     shake *= 0.85;
     if (shake < 0.05) shake = 0;
 
-    // --- Render ---
+    // === RENDER ===
     ctx.save();
     if (shake > 0) {
       const sx = (Math.random() - 0.5) * shake * 2;
@@ -429,15 +948,21 @@
     }
 
     drawBackground();
+    for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
-    for (const enemy of enemies) enemy.draw(ctx);
-    player.draw(ctx);
+    for (const e of enemies) e.draw(ctx);
+    for (const p of projectiles) p.draw(ctx);
+    if (state !== STATE.DEAD) player.draw(ctx);
 
     ctx.restore();
 
-    // HUD
-    $kills.textContent = kills;
-    $alive.textContent = enemies.length;
+    drawHud();
+    if (state === STATE.LEVELUP) drawLevelUpScreen();
+    else if (state === STATE.DEAD) drawDeathScreen();
+
+    // Clear single-frame inputs
+    keyJustPressed.clear();
+    mouseClicked = false;
 
     requestAnimationFrame(loop);
   }
