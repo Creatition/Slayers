@@ -94,17 +94,15 @@
   let selectedClassId = 'archer';
   // Persistent stash (saved to localStorage across runs)
   let stash = [];
-  const STASH_SIZE_INIT = 10;
+  // STASH_SIZE_INIT moved to src/data.js
   let stashSize = STASH_SIZE_INIT;
   let pendingBank = null; // { source: 'inv'|'eq', key: idxNumber|slotName }
-  const SAVE_KEY = 'slayers-save';
-  const SAVE_VERSION = 1;
+  // SAVE_KEY + SAVE_VERSION moved to src/data.js
   // Slayer Trials (Phase 9)
   let runMode = 'standard';  // 'standard' or 'trial'
   let trialTier = 1;
   let unlockedTrialTier = 1; // highest tier the player can attempt
-  const TRIAL_MAX_TIER = 5;
-  const TRIAL_MULT = { 1: 1.5, 2: 2.0, 3: 2.7, 4: 3.6, 5: 5.0 };
+  // TRIAL_MAX_TIER + TRIAL_MULT moved to src/data.js
   // Loadout state — slot -> stashIndex (which stash item to pre-equip per slot)
   let loadout = {};
 
