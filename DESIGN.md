@@ -294,10 +294,11 @@ Slayers supports keyboard/mouse **and** gamepad (Xbox and PS5 DualSense via the 
 #### Keyboard + mouse
 
 - **WASD** — movement
-- **Q / W / E / R** — abilities 1–4
+- **1 / 2 / 3 / 4** — abilities 1–4 (number row keeps the home row free for movement)
 - **Space** — class-specific action (Rogue dash, Monk dash strike, Paladin block, etc.)
-- **Tab** — toggle inventory between waves
-- **Esc** — pause / menu
+- **Tab** or **I** — toggle inventory between waves
+- **Esc** — close menus / pause
+- **R** — restart on death screen
 - **Left-click** — UI interaction (no aim required; auto-targeting handles combat)
 - **Right-click** (optional) — manual aim override toward cursor
 

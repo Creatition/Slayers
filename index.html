@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 2</title>
+<title>Slayers — Phase 3</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -36,7 +36,7 @@
     color: #888;
     letter-spacing: 1px;
     display: flex;
-    gap: 18px;
+    gap: 16px;
     flex-wrap: wrap;
     justify-content: center;
   }
@@ -50,8 +50,8 @@
   <div id="hud">
     <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
     <div><span class="label">MOVE:</span> <span class="value">WASD / Stick</span></div>
+    <div><span class="label">ABILITIES:</span> <span class="value">1-4 / Face Btns</span></div>
     <div><span class="label">INVENTORY:</span> <span class="value">Tab / I</span></div>
-    <div><span class="label">LVL UP:</span> <span class="value">1 / 2 / 3</span></div>
     <div><span class="label">RESTART:</span> <span class="value">R</span></div>
   </div>
 
@@ -72,7 +72,7 @@
   // ============================================================
   const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4 };
   let state = STATE.PLAYING;
-  let prevState = STATE.PLAYING; // for restoring after inventory closes
+  let prevState = STATE.PLAYING;
   let levelUpChoices = [];
   let intermissionTimer = 0;
   let waveTimer = 0;
@@ -86,7 +86,6 @@
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
 
-  // World entities
   let player;
   let enemies = [];
   let projectiles = [];
@@ -199,12 +198,8 @@
   }
 
   // ============================================================
-  // ITEM SYSTEM — rarities, slots, bases, affixes
+  // ITEM SYSTEM
   // ============================================================
-  const SLOT = {
-    HELM: 'helm', CHEST: 'chest', GLOVES: 'gloves', BOOTS: 'boots', BELT: 'belt',
-    AMULET: 'amulet', RING1: 'ring1', RING2: 'ring2', WEAPON: 'weapon', OFFHAND: 'offhand',
-  };
   const SLOT_ORDER = ['helm', 'amulet', 'chest', 'offhand', 'gloves', 'belt', 'boots', 'ring1', 'ring2', 'weapon'];
   const SLOT_LABEL = {
     helm: 'HELM', chest: 'CHEST', gloves: 'GLOVES', boots: 'BOOTS', belt: 'BELT',
@@ -212,11 +207,11 @@
   };
 
   const RARITY = {
-    WHITE:  { id: 'white',     name: 'Common',    color: '#cccccc', glow: 'rgba(204,204,204,0.35)', affixMin: 0, affixMax: 1, weight: 60 },
-    BLUE:   { id: 'blue',      name: 'Magic',     color: '#5599ff', glow: 'rgba(85,153,255,0.45)',  affixMin: 2, affixMax: 3, weight: 25 },
-    YELLOW: { id: 'yellow',    name: 'Rare',      color: '#ffcc33', glow: 'rgba(255,204,51,0.5)',   affixMin: 4, affixMax: 4, weight: 10 },
-    ORANGE: { id: 'orange',    name: 'Legendary', color: '#ff8000', glow: 'rgba(255,128,0,0.55)',   affixMin: 4, affixMax: 4, weight: 4 },
-    GREEN:  { id: 'green',     name: 'Set',       color: '#33cc55', glow: 'rgba(51,204,85,0.55)',   affixMin: 4, affixMax: 4, weight: 1 },
+    WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 60 },
+    BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 25 },
+    YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 10 },
+    ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 4 },
+    GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1 },
   };
   const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
 
@@ -228,11 +223,10 @@
     { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L' },
     { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
     { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
-    { id: 'wand',   name: 'Twig Wand',      slot: 'weapon',  letter: 'W' },
-    { id: 'orb',    name: 'Glass Orb',      slot: 'offhand', letter: 'O' },
+    { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W' },
+    { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
   ];
 
-  // Affix definitions. fmt(v) -> display string. apply(player, value) -> mutate player bonus stats.
   const AFFIX_POOL = [
     { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },
     { id: 'dmg_pct',      min: 5,  max: 18, fmt: (v) => `+${v}% Damage`,        apply: (p, v) => { p.bonusDmgPct += v; } },
@@ -242,6 +236,8 @@
     { id: 'movespeed',    min: 5,  max: 15, fmt: (v) => `+${v} Move Speed`,     apply: (p, v) => { p.bonusMoveSpeed += v; } },
     { id: 'armor',        min: 1,  max: 5,  fmt: (v) => `+${v} Armor`,          apply: (p, v) => { p.bonusArmor += v; } },
     { id: 'crit_chance',  min: 2,  max: 9,  fmt: (v) => `+${v}% Crit Chance`,   apply: (p, v) => { p.bonusCritChance += v; } },
+    { id: 'max_focus',    min: 5,  max: 25, fmt: (v) => `+${v} Max Focus`,      apply: (p, v) => { p.bonusMaxResource += v; } },
+    { id: 'focus_regen',  min: 1,  max: 5,  fmt: (v) => `+${v} Focus/sec`,      apply: (p, v) => { p.bonusResourceRegen += v; } },
   ];
 
   function rngInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -263,8 +259,7 @@
     for (let i = 0; i < count && pool.length > 0; i++) {
       const idx = rngInt(0, pool.length - 1);
       const def = pool.splice(idx, 1)[0];
-      const value = rngInt(def.min, def.max);
-      out.push({ def, value });
+      out.push({ def, value: rngInt(def.min, def.max) });
     }
     return out;
   }
@@ -274,13 +269,90 @@
     const rarity = pickWeightedRarity();
     const base = rngPick(ITEM_BASES);
     const numAffixes = rngInt(rarity.affixMin, rarity.affixMax);
-    const affixes = rollAffixes(numAffixes);
-    return { id: nextItemId++, base, rarity, affixes };
+    return { id: nextItemId++, base, rarity, affixes: rollAffixes(numAffixes) };
   }
 
   function itemDisplayName(item) {
-    // Prefix rarity word for visibility
     return `${item.rarity.name} ${item.base.name}`;
+  }
+
+  // ============================================================
+  // CLASS SYSTEM (Phase 3: Archer only)
+  // ============================================================
+  const CLASS = {
+    ARCHER: {
+      id: 'archer',
+      name: 'Archer',
+      color: '#7ad96b',
+      // Base stats
+      baseMaxHp: 80,
+      baseSpeed: 105,
+      baseCritChance: 5,
+      // Weapon defaults
+      weaponDamage: 4,
+      weaponFireRate: 2.2,
+      weaponRange: 210,
+      weaponProjSpeed: 290,
+      // Resource: Focus — small pool, fast regen, crit refunds
+      resourceName: 'FOCUS',
+      resourceColor: '#ffd23f',
+      baseMaxResource: 100,
+      baseResourceRegen: 15,
+      critResourceGain: 18,
+      // Granted at run start (Phase 3 — no formal draft yet, signature only)
+      signature: 'multishot',
+    },
+  };
+
+  // ============================================================
+  // ABILITIES
+  // ============================================================
+  const ABILITIES = {
+    multishot: {
+      id: 'multishot',
+      name: 'Multishot',
+      letter: 'M',
+      desc: 'Fire 3 arrows in a 40-deg spread (+20% dmg)',
+      cost: 25,
+      cooldown: 1.8,
+      color: '#ffd23f',
+      cast: (player) => {
+        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
+        if (!target) return false;
+        const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
+        const spread = 0.35; // ~20deg each side
+        for (const off of [-spread, 0, spread]) {
+          const a = baseAngle + off;
+          const sp = player.weaponProjSpeed;
+          let dmg = player.weaponDamage * player.dmgMult * 1.20;
+          const isCrit = Math.random() * 100 < player.critChance;
+          if (isCrit) { dmg *= 2; player.onCrit(); }
+          projectiles.push(new Projectile(
+            player.x, player.y,
+            Math.cos(a) * sp, Math.sin(a) * sp,
+            dmg,
+            player.weaponRange / sp + 0.15,
+            isCrit
+          ));
+        }
+        spawnBurst(player.x, player.y, ['#ffd040', '#fff7a0', '#ffffff'], 8);
+        shake = Math.min(shake + 1.5, 5);
+        return true;
+      },
+    },
+  };
+
+  function castAbility(slotIdx) {
+    if (slotIdx < 0 || slotIdx > 3) return;
+    const slot = player.abilities[slotIdx];
+    if (!slot) return;
+    if (player.abilityCooldowns[slotIdx] > 0) return;
+    if (player.resource < slot.def.cost) return;
+    const ok = slot.def.cast(player);
+    if (ok) {
+      player.resource -= slot.def.cost;
+      player.abilityCooldowns[slotIdx] = slot.def.cooldown;
+    }
   }
 
   // ============================================================
@@ -289,10 +361,12 @@
   const STAT_POOL = [
     { id: 'maxhp',    name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
     { id: 'damage',   name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
-    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2;  p.recomputeStats(); } },
-    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10;    p.recomputeStats(); } },
-    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15;          p.recomputeStats(); } },
-    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1;           p.recomputeStats(); } },
+    { id: 'firerate', name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
+    { id: 'pickup',   name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10; p.recomputeStats(); } },
+    { id: 'speed',    name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15; p.recomputeStats(); } },
+    { id: 'regen',    name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1; p.recomputeStats(); } },
+    { id: 'focus_regen', name: '+3 Focus/sec',    desc: 'Regen abilities faster',color: '#ffd23f', apply: (p) => { p.baseResourceRegen += 3; p.recomputeStats(); } },
+    { id: 'crit',     name: '+5% Crit Chance',    desc: 'More crits',            color: '#ff8800', apply: (p) => { p.baseCritChance += 5; p.recomputeStats(); } },
   ];
 
   function rollLevelUpChoices() {
@@ -313,7 +387,7 @@
   }
 
   // ============================================================
-  // ENTITY: Player (with base + bonus stat split)
+  // ENTITY: Player (with class + resource + abilities)
   // ============================================================
   class Player {
     constructor(x, y) {
@@ -321,17 +395,22 @@
       this.r = 5;
       this.facing = 1;
 
-      // BASE STATS (level-up only)
-      this.baseMaxHp = 100;
+      // === CLASS ===
+      this.class = CLASS.ARCHER; // Phase 3: hardcoded
+
+      // === BASE STATS (level-up only) ===
+      this.baseMaxHp = this.class.baseMaxHp;
       this.baseDmgMult = 1.0;
       this.baseFireRateMult = 1.0;
       this.basePickupRange = 30;
-      this.baseSpeed = 95;
+      this.baseSpeed = this.class.baseSpeed;
       this.baseRegen = 0;
       this.baseArmor = 0;
-      this.baseCritChance = 0;
+      this.baseCritChance = this.class.baseCritChance;
+      this.baseMaxResource = this.class.baseMaxResource;
+      this.baseResourceRegen = this.class.baseResourceRegen;
 
-      // EQUIPPED BONUSES (recomputed from items)
+      // === EQUIPPED BONUSES ===
       this.bonusMaxHp = 0;
       this.bonusDmgPct = 0;
       this.bonusFireRatePct = 0;
@@ -340,8 +419,10 @@
       this.bonusRegen = 0;
       this.bonusArmor = 0;
       this.bonusCritChance = 0;
+      this.bonusMaxResource = 0;
+      this.bonusResourceRegen = 0;
 
-      // FINAL STATS (computed)
+      // === FINAL STATS (computed) ===
       this.maxHp = this.baseMaxHp;
       this.hp = this.maxHp;
       this.dmgMult = 1.0;
@@ -350,7 +431,10 @@
       this.speed = this.baseSpeed;
       this.regen = 0;
       this.armor = 0;
-      this.critChance = 0;
+      this.critChance = this.baseCritChance;
+      this.maxResource = this.baseMaxResource;
+      this.resourceRegen = this.baseResourceRegen;
+      this.resource = this.maxResource;
 
       this.iframeTimer = 0;
       this.IFRAME = 0.5;
@@ -362,12 +446,23 @@
       this.pendingLevelUps = 0;
       this.kills = 0;
 
-      // Weapon (Phase 1 starter, modified by stats)
-      this.weaponDamage = 4;
-      this.weaponFireRate = 2;
-      this.weaponRange = 200;
-      this.weaponProjSpeed = 280;
+      // Weapon
+      this.weaponDamage = this.class.weaponDamage;
+      this.weaponFireRate = this.class.weaponFireRate;
+      this.weaponRange = this.class.weaponRange;
+      this.weaponProjSpeed = this.class.weaponProjSpeed;
       this.fireTimer = 0;
+
+      // Abilities (4 slots; 0 = signature for Phase 3)
+      this.abilities = [null, null, null, null];
+      this.abilityCooldowns = [0, 0, 0, 0];
+      if (this.class.signature && ABILITIES[this.class.signature]) {
+        this.abilities[0] = {
+          id: this.class.signature,
+          def: ABILITIES[this.class.signature],
+          rarity: RARITY.WHITE,
+        };
+      }
 
       // Equipment + inventory
       this.equipped = {
@@ -376,6 +471,13 @@
       };
       this.inventory = [];
       this.INVENTORY_CAP = 24;
+    }
+
+    onCrit() {
+      // Class-specific crit benefit (Archer: refund Focus)
+      if (this.class.critResourceGain) {
+        this.resource = Math.min(this.maxResource, this.resource + this.class.critResourceGain);
+      }
     }
 
     recomputeStats() {
@@ -387,6 +489,8 @@
       this.bonusRegen = 0;
       this.bonusArmor = 0;
       this.bonusCritChance = 0;
+      this.bonusMaxResource = 0;
+      this.bonusResourceRegen = 0;
 
       for (const k in this.equipped) {
         const it = this.equipped[k];
@@ -396,6 +500,8 @@
 
       const oldMax = this.maxHp;
       const ratio = oldMax > 0 ? this.hp / oldMax : 1;
+      const oldMaxR = this.maxResource;
+      const ratioR = oldMaxR > 0 ? this.resource / oldMaxR : 1;
 
       this.maxHp = this.baseMaxHp + this.bonusMaxHp;
       this.dmgMult = this.baseDmgMult * (1 + this.bonusDmgPct / 100);
@@ -405,12 +511,14 @@
       this.regen = this.baseRegen + this.bonusRegen;
       this.armor = this.baseArmor + this.bonusArmor;
       this.critChance = this.baseCritChance + this.bonusCritChance;
+      this.maxResource = this.baseMaxResource + this.bonusMaxResource;
+      this.resourceRegen = this.baseResourceRegen + this.bonusResourceRegen;
 
-      if (this.maxHp !== oldMax) {
-        this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
-      } else {
-        this.hp = Math.min(this.hp, this.maxHp);
-      }
+      if (this.maxHp !== oldMax) this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
+      else this.hp = Math.min(this.hp, this.maxHp);
+
+      if (this.maxResource !== oldMaxR) this.resource = Math.min(this.maxResource, ratioR * this.maxResource);
+      else this.resource = Math.min(this.resource, this.maxResource);
     }
 
     update(dt) {
@@ -425,6 +533,16 @@
       if (this.hitFlash > 0) this.hitFlash -= dt;
       if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
 
+      // Resource regen
+      if (this.resource < this.maxResource) {
+        this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
+      }
+      // Ability cooldowns
+      for (let i = 0; i < this.abilityCooldowns.length; i++) {
+        if (this.abilityCooldowns[i] > 0) this.abilityCooldowns[i] -= dt;
+      }
+
+      // Auto-fire weapon
       if (this.fireTimer > 0) this.fireTimer -= dt;
       if (this.fireTimer <= 0) {
         const target = findNearestEnemy(this.x, this.y, this.weaponRange);
@@ -498,10 +616,7 @@
       const dx = target.x - this.x;
       const dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
-      if (d > 0.01) {
-        this.x += (dx / d) * this.speed * dt;
-        this.y += (dy / d) * this.speed * dt;
-      }
+      if (d > 0.01) { this.x += (dx / d) * this.speed * dt; this.y += (dy / d) * this.speed * dt; }
       this.bobPhase += dt * 8;
       if (this.hitFlash > 0) this.hitFlash -= dt;
     }
@@ -531,7 +646,7 @@
   }
 
   // ============================================================
-  // ENTITY: Projectile (with crit support)
+  // ENTITY: Projectile
   // ============================================================
   class Projectile {
     constructor(x, y, vx, vy, damage, life, isCrit) {
@@ -606,7 +721,7 @@
   }
 
   // ============================================================
-  // ENTITY: ItemDrop (loot on the ground)
+  // ENTITY: ItemDrop
   // ============================================================
   class ItemDrop {
     constructor(x, y, item) {
@@ -630,12 +745,10 @@
         this.x += this.vx * dt; this.y += this.vy * dt;
         if (Math.abs(this.vx) + Math.abs(this.vy) < 5) this.settled = true;
       }
-      // Pickup on touch
       const dx = player.x - this.x;
       const dy = player.y - this.y;
       const rr = player.r + this.r;
       if (dx * dx + dy * dy < rr * rr) {
-        // Inventory capacity check
         if (player.inventory.length < player.INVENTORY_CAP) {
           player.inventory.push(this.item);
           this.dead = true;
@@ -643,25 +756,20 @@
           lootFlashTimer = 2.0;
           lastLootName = itemDisplayName(this.item);
         }
-        // If inventory full, leave on ground (no pickup)
       }
     }
     draw(ctx) {
       const px = Math.floor(this.x);
       const py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
       const glow = 0.4 + 0.2 * Math.sin(this.glowPhase);
-      // Rarity glow
       ctx.globalAlpha = glow;
       ctx.fillStyle = this.item.rarity.color;
       ctx.fillRect(px - 6, py - 6, 12, 12);
       ctx.globalAlpha = 1;
-      // Outer ring (rarity color)
       ctx.fillStyle = this.item.rarity.color;
       ctx.fillRect(px - 4, py - 4, 8, 8);
-      // Inner dark
       ctx.fillStyle = '#1a1a22';
       ctx.fillRect(px - 3, py - 3, 6, 6);
-      // Slot letter
       ctx.fillStyle = this.item.rarity.color;
       ctx.font = 'bold 7px monospace';
       ctx.textAlign = 'center';
@@ -740,7 +848,7 @@
     const life = shooter.weaponRange / sp + 0.05;
     let dmg = shooter.weaponDamage * shooter.dmgMult;
     const isCrit = Math.random() * 100 < shooter.critChance;
-    if (isCrit) dmg *= 2;
+    if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
     projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
   }
 
@@ -763,17 +871,13 @@
             player.kills++;
             spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
             xpGems.push(new XPGem(enemy.x, enemy.y, 1));
-            // Item drop chance — Phase 2 starting drop rate ~18%
-            if (Math.random() < 0.18) {
-              itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
-            }
+            if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
             shake = Math.min(shake + 1, 3);
           }
           break;
         }
       }
     }
-
     if (player.iframeTimer <= 0) {
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
@@ -815,12 +919,8 @@
     spawnTimer = 0;
   }
   function toggleInventory() {
-    if (state === STATE.INVENTORY) {
-      state = prevState;
-    } else if (state === STATE.PLAYING || state === STATE.INTERMISSION) {
-      prevState = state;
-      state = STATE.INVENTORY;
-    }
+    if (state === STATE.INVENTORY) state = prevState;
+    else if (state === STATE.PLAYING || state === STATE.INTERMISSION) { prevState = state; state = STATE.INVENTORY; }
   }
   function resetWorld() {
     player = new Player(W / 2, H / 2);
@@ -843,7 +943,7 @@
     if (targetSlot === 'ring') {
       if (!player.equipped.ring1) targetSlot = 'ring1';
       else if (!player.equipped.ring2) targetSlot = 'ring2';
-      else targetSlot = 'ring1'; // replace
+      else targetSlot = 'ring1';
     }
     player.inventory.splice(idx, 1);
     if (player.equipped[targetSlot]) player.inventory.push(player.equipped[targetSlot]);
@@ -853,14 +953,14 @@
   function unequipSlot(slotKey) {
     const item = player.equipped[slotKey];
     if (!item) return;
-    if (player.inventory.length >= player.INVENTORY_CAP) return; // can't, full
+    if (player.inventory.length >= player.INVENTORY_CAP) return;
     player.equipped[slotKey] = null;
     player.inventory.push(item);
     player.recomputeStats();
   }
 
   // ============================================================
-  // RENDER — background, HUD, level-up, death, inventory
+  // RENDER
   // ============================================================
   function drawBackground() {
     ctx.fillStyle = '#1f1f24';
@@ -885,12 +985,27 @@
     ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 2, hpy + 5);
 
     // XP bar
-    const xpx = 8, xpy = 20;
+    const xpx = 8, xpy = 19;
     ctx.fillStyle = '#000'; ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
     ctx.fillStyle = '#1a2030'; ctx.fillRect(xpx, xpy, 120, 3);
     const xpRatio = player.xp / player.xpToNext;
     ctx.fillStyle = '#9b59ff'; ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
-    ctx.fillStyle = '#c89aff'; ctx.fillText(`LV ${player.level}`, xpx + 1, xpy + 13);
+
+    // Resource bar (Focus)
+    const rx = 8, ry = 28;
+    ctx.fillStyle = '#000'; ctx.fillRect(rx - 1, ry - 1, 122, 5);
+    ctx.fillStyle = '#2a2515'; ctx.fillRect(rx, ry, 120, 3);
+    const resRatio = player.resource / player.maxResource;
+    ctx.fillStyle = player.class.resourceColor;
+    ctx.fillRect(rx, ry, 120 * resRatio, 3);
+
+    // Level + class + focus labels (row beneath)
+    ctx.fillStyle = '#c89aff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`LV ${player.level}`, hpx + 1, 42);
+    ctx.fillStyle = '#888';
+    ctx.fillText(`${player.class.name.toUpperCase()}`, hpx + 36, 42);
+    ctx.fillStyle = player.class.resourceColor;
+    ctx.fillText(`${player.class.resourceName} ${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`, hpx + 80, 42);
 
     // Wave / intermission
     ctx.textAlign = 'center';
@@ -906,6 +1021,7 @@
       ctx.fillText(`${Math.ceil(intermissionTimer)}`, W / 2, 28);
     }
 
+    // Right side stats
     ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
     ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
     ctx.fillStyle = '#aaa';
@@ -916,13 +1032,75 @@
       const a = Math.min(1, levelUpFlashTimer / 1.5);
       ctx.fillStyle = `rgba(255,208,64,${a})`;
       ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(`+ LEVEL UP  (${player.pendingLevelUps} queued)`, W / 2, 44);
+      ctx.fillText(`+ LEVEL UP  (${player.pendingLevelUps} queued)`, W / 2, 54);
     }
     if (lootFlashTimer > 0 && lastLootName) {
       const a = Math.min(1, lootFlashTimer / 2.0);
       ctx.fillStyle = `rgba(255,255,255,${a * 0.9})`;
       ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(`+ ${lastLootName}`, W / 2, H - 12);
+      ctx.fillText(`+ ${lastLootName}`, W / 2, H - 50);
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawAbilityBar() {
+    const slotSize = 30;
+    const gap = 6;
+    const totalW = 4 * slotSize + 3 * gap;
+    const startX = (W - totalW) / 2;
+    const y = H - slotSize - 6;
+    for (let i = 0; i < 4; i++) {
+      const x = startX + i * (slotSize + gap);
+      const ability = player.abilities[i];
+      const cd = player.abilityCooldowns[i];
+
+      ctx.fillStyle = ability ? '#22222a' : '#13131a';
+      ctx.fillRect(x, y, slotSize, slotSize);
+      ctx.strokeStyle = ability ? '#555' : '#2a2a30';
+      ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+
+      // Key hint
+      ctx.fillStyle = ability ? '#888' : '#444';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${i + 1}`, x + 3, y + 8);
+
+      if (ability) {
+        // Icon (letter)
+        const canCast = cd <= 0 && player.resource >= ability.def.cost;
+        ctx.fillStyle = canCast ? ability.def.color : '#666';
+        ctx.font = 'bold 16px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ability.def.letter, x + slotSize / 2, y + slotSize / 2 + 1);
+        ctx.textBaseline = 'alphabetic';
+
+        // Cost
+        ctx.fillStyle = player.resource >= ability.def.cost ? '#ffd23f' : '#664020';
+        ctx.font = '6px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(`${ability.def.cost}`, x + slotSize - 2, y + slotSize - 2);
+
+        // Cooldown overlay
+        if (cd > 0) {
+          const ratio = cd / ability.def.cooldown;
+          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.fillRect(x, y + slotSize * (1 - ratio), slotSize, slotSize * ratio);
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 10px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(cd.toFixed(1), x + slotSize / 2, y + slotSize / 2);
+          ctx.textBaseline = 'alphabetic';
+        }
+      } else {
+        ctx.fillStyle = '#333';
+        ctx.font = '6px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('LOCKED', x + slotSize / 2, y + slotSize / 2);
+        ctx.textBaseline = 'alphabetic';
+      }
     }
     ctx.textAlign = 'left';
   }
@@ -970,9 +1148,8 @@
   }
 
   // ============================================================
-  // INVENTORY UI — paper-doll + grid + tooltip
+  // INVENTORY UI
   // ============================================================
-  // Layout positions
   const EQ_LAYOUT = {
     helm:    { x: 70,  y: 50  },
     amulet:  { x: 100, y: 50  },
@@ -993,7 +1170,6 @@
   const INV_SLOT_SIZE = 28;
   const INV_GAP = 4;
 
-  // Returns slot key under mouse or null
   function getEquippedSlotAtMouse() {
     for (const k in EQ_LAYOUT) {
       const p = EQ_LAYOUT[k];
@@ -1011,15 +1187,12 @@
     }
     return -1;
   }
-
   function drawItemInBox(item, x, y, size) {
     if (!item) return;
-    // Rarity border
     ctx.strokeStyle = item.rarity.color;
     ctx.lineWidth = 2;
     ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
     ctx.lineWidth = 1;
-    // Slot letter
     ctx.fillStyle = item.rarity.color;
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
@@ -1030,54 +1203,48 @@
   }
 
   function drawInventoryScreen() {
-    // Dim background
     ctx.fillStyle = 'rgba(0,0,0,0.82)';
     ctx.fillRect(0, 0, W, H);
-    // Title
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
     ctx.fillText('Click inventory item to equip - click equipped to unequip - Tab/I/Esc to close', W / 2, 32);
 
-    // === EQUIPPED SIDE ===
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
     ctx.fillText('EQUIPPED', 30, 44);
     for (const k of SLOT_ORDER) {
       const p = EQ_LAYOUT[k];
       const item = player.equipped[k];
-      // Slot box
       const hovered = mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= p.y && mouseY < p.y + EQ_SLOT_SIZE;
       ctx.fillStyle = hovered ? '#33333d' : '#22222a';
       ctx.fillRect(p.x, p.y, EQ_SLOT_SIZE, EQ_SLOT_SIZE);
       ctx.strokeStyle = '#444'; ctx.strokeRect(p.x + 0.5, p.y + 0.5, EQ_SLOT_SIZE - 1, EQ_SLOT_SIZE - 1);
-      if (item) {
-        drawItemInBox(item, p.x, p.y, EQ_SLOT_SIZE);
-      } else {
-        // Empty slot label
+      if (item) drawItemInBox(item, p.x, p.y, EQ_SLOT_SIZE);
+      else {
         ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
         ctx.fillText(SLOT_LABEL[k], p.x + EQ_SLOT_SIZE / 2, p.y + EQ_SLOT_SIZE / 2 + 2);
         ctx.textAlign = 'left';
       }
     }
 
-    // === STATS BLOCK ===
+    // STATS BLOCK
     const sx = 30, sy = 220;
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
-    ctx.fillText('STATS', sx, sy);
+    ctx.fillText(`STATS  -  ${player.class.name.toUpperCase()}`, sx, sy);
     ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
     const lines = [
       `HP        ${Math.ceil(player.hp)} / ${player.maxHp}`,
+      `FOCUS     ${Math.floor(player.resource)} / ${Math.floor(player.maxResource)}  (+${player.resourceRegen.toFixed(0)}/s)`,
       `DAMAGE    x${player.dmgMult.toFixed(2)}`,
       `ATKSPD    x${player.fireRateMult.toFixed(2)}`,
       `ARMOR     ${player.armor}`,
       `CRIT      ${player.critChance.toFixed(0)}%`,
       `REGEN     ${player.regen}/s`,
       `SPEED     ${player.speed.toFixed(0)}`,
-      `PICKUP    ${player.pickupRange.toFixed(0)}`,
     ];
     for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], sx, sy + 12 + i * 10);
 
-    // === INVENTORY GRID ===
+    // INVENTORY GRID
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
     ctx.fillText(`INVENTORY (${player.inventory.length}/${player.INVENTORY_CAP})`, INV_START_X, 44);
     for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
@@ -1093,8 +1260,7 @@
       if (item) drawItemInBox(item, x, y, INV_SLOT_SIZE);
     }
 
-    // === TOOLTIP ===
-    // Determine hovered item (equipped takes priority)
+    // TOOLTIP
     let tooltipItem = null;
     let tooltipSource = '';
     const eqSlot = getEquippedSlotAtMouse();
@@ -1108,8 +1274,6 @@
         tooltipSource = `INVENTORY [click to equip]`;
       }
     }
-
-    // Tooltip box at bottom
     const tx = 30, ty = H - 80, tw = W - 60, th = 70;
     ctx.fillStyle = '#1a1a22';
     ctx.fillRect(tx, ty, tw, th);
@@ -1117,17 +1281,13 @@
     ctx.lineWidth = 2;
     ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2);
     ctx.lineWidth = 1;
-
     if (tooltipItem) {
       ctx.fillStyle = tooltipItem.rarity.color;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'left';
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
       ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 14);
-      ctx.fillStyle = '#666';
-      ctx.font = '7px monospace';
+      ctx.fillStyle = '#666'; ctx.font = '7px monospace';
       ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}`, tx + 8, ty + 25);
-      ctx.fillStyle = '#ddd';
-      ctx.font = '8px monospace';
+      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
       if (tooltipItem.affixes.length === 0) {
         ctx.fillStyle = '#888';
         ctx.fillText('(no affixes)', tx + 8, ty + 40);
@@ -1138,9 +1298,7 @@
         }
       }
     } else {
-      ctx.fillStyle = '#555';
-      ctx.font = '9px monospace';
-      ctx.textAlign = 'center';
+      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
       ctx.fillText('Hover an item to inspect', W / 2, ty + th / 2 + 3);
       ctx.textAlign = 'left';
     }
@@ -1158,7 +1316,6 @@
 
     updateInput();
 
-    // Tab/I to toggle inventory (only outside death/levelup)
     if ((keyJustPressed.has('tab') || keyJustPressed.has('i')) &&
         (state === STATE.PLAYING || state === STATE.INTERMISSION || state === STATE.INVENTORY)) {
       toggleInventory();
@@ -1167,6 +1324,12 @@
     }
 
     if (state === STATE.PLAYING) {
+      // Ability input
+      if (keyJustPressed.has('1') || gpJustPressed.has(0)) castAbility(0);
+      if (keyJustPressed.has('2') || gpJustPressed.has(1)) castAbility(1);
+      if (keyJustPressed.has('3') || gpJustPressed.has(2)) castAbility(2);
+      if (keyJustPressed.has('4') || gpJustPressed.has(3)) castAbility(3);
+
       const cfg = waveConfig(currentWave);
       waveTimer -= dt;
       if (waveTimer > 0) {
@@ -1217,21 +1380,16 @@
       if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
     }
     else if (state === STATE.INVENTORY) {
-      // Click handling: equipped → unequip, inventory → equip
       if (mouseClicked) {
         const eqSlot = getEquippedSlotAtMouse();
-        if (eqSlot && player.equipped[eqSlot]) {
-          unequipSlot(eqSlot);
-        } else {
+        if (eqSlot && player.equipped[eqSlot]) unequipSlot(eqSlot);
+        else {
           const idx = getInventoryIdxAtMouse();
-          if (idx >= 0 && player.inventory[idx]) {
-            equipFromInventory(idx);
-          }
+          if (idx >= 0 && player.inventory[idx]) equipFromInventory(idx);
         }
       }
     }
 
-    // Particles + flash timers always tick
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
@@ -1257,6 +1415,7 @@
     ctx.restore();
 
     drawHud();
+    if (state === STATE.PLAYING || state === STATE.INTERMISSION) drawAbilityBar();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
