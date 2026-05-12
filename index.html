@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Slayers — Phase 0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #0e0e12;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    color: #ddd;
+    user-select: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  #game {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    background: #1f1f24;
+    border: 2px solid #444;
+    /* Scale up the low-res internal canvas */
+    width: min(1280px, 96vw);
+    height: min(720px, 54vw);
+    box-shadow: 0 0 60px rgba(122, 217, 107, 0.08);
+  }
+  #hud {
+    font-size: 13px;
+    color: #888;
+    letter-spacing: 1px;
+    display: flex;
+    gap: 24px;
+  }
+  #hud .label { color: #5a5a66; }
+  #hud .value { color: #eee; }
+  #hud .accent { color: #7ad96b; }
+  .title {
+    font-size: 11px;
+    color: #5a5a66;
+    letter-spacing: 4px;
+    margin-bottom: -4px;
+  }
+</style>
+</head>
+<body>
+  <div class="title">SLAYERS — PHASE 0 — FOUNDATION</div>
+  <canvas id="game" width="640" height="360"></canvas>
+  <div id="hud">
+    <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
+    <div><span class="label">KILLS:</span> <span id="kills" class="value">0</span></div>
+    <div><span class="label">ALIVE:</span> <span id="alive" class="value">0</span></div>
+    <div><span class="label">CONTROLS:</span> <span class="value">WASD / Left Stick</span></div>
+  </div>
+
+<script>
+(() => {
+  // ============================================================
+  // Canvas + DOM
+  // ============================================================
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const W = canvas.width;
+  const H = canvas.height;
+
+  const $device = document.getElementById('device');
+  const $kills = document.getElementById('kills');
+  const $alive = document.getElementById('alive');
+
+  // ============================================================
+  // INPUT ABSTRACTION LAYER
+  // Translates keyboard + gamepad into abstract game actions.
+  // Game logic only reads Actions.* — never touches raw input.
+  // ============================================================
+  const Actions = {
+    moveX: 0,        // -1 to 1
+    moveY: 0,        // -1 to 1
+    ability1: false,
+    ability2: false,
+    ability3: false,
+    ability4: false,
+    classAction: false,
+    pause: false,
+    inventory: false,
+  };
+
+  let activeDevice = 'keyboard';
+  let detectedGamepadType = null; // 'xbox' | 'playstation' | 'generic'
+
+  // --- Keyboard ---
+  const keys = new Set();
+  window.addEventListener('keydown', (e) => {
+    keys.add(e.key.toLowerCase());
+    // Prevent default browser actions for game keys
+    const blocked = ['arrowup','arrowdown','arrowleft','arrowright',' ','tab'];
+    if (blocked.includes(e.key.toLowerCase())) e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+  // Clear keys if focus lost so they don't get stuck
+  window.addEventListener('blur', () => keys.clear());
+
+  function pollKeyboard() {
+    let kx = 0, ky = 0;
+    if (keys.has('a') || keys.has('arrowleft'))  kx -= 1;
+    if (keys.has('d') || keys.has('arrowright')) kx += 1;
+    if (keys.has('w') || keys.has('arrowup'))    ky -= 1;
+    if (keys.has('s') || keys.has('arrowdown'))  ky += 1;
+
+    if (kx !== 0 || ky !== 0) {
+      // Normalize diagonal so it isn't faster than cardinal
+      const len = Math.hypot(kx, ky);
+      Actions.moveX = kx / len;
+      Actions.moveY = ky / len;
+      activeDevice = 'keyboard';
+      return true;
+    }
+    return false;
+  }
+
+  // --- Gamepad ---
+  window.addEventListener('gamepadconnected', (e) => {
+    detectedGamepadType = detectGamepadType(e.gamepad.id);
+    console.log('Gamepad connected:', e.gamepad.id, '→', detectedGamepadType);
+  });
+  window.addEventListener('gamepaddisconnected', (e) => {
+    console.log('Gamepad disconnected:', e.gamepad.id);
+  });
+
+  function detectGamepadType(id) {
+    const lower = id.toLowerCase();
+    if (lower.includes('xbox') || lower.includes('xinput')) return 'xbox';
+    if (lower.includes('dualshock') || lower.includes('dualsense')
+        || lower.includes('playstation') || lower.includes('054c'))
+      return 'playstation';
+    return 'generic';
+  }
+
+  function pollGamepad() {
+    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (const gp of gps) {
+      if (!gp) continue;
+      if (!detectedGamepadType) detectedGamepadType = detectGamepadType(gp.id);
+
+      // Left stick with radial deadzone + rescale
+      const dz = 0.18;
+      let gx = gp.axes[0] || 0;
+      let gy = gp.axes[1] || 0;
+      const mag = Math.hypot(gx, gy);
+      if (mag < dz) { gx = 0; gy = 0; }
+      else {
+        const scaled = (mag - dz) / (1 - dz);
+        gx = (gx / mag) * scaled;
+        gy = (gy / mag) * scaled;
+      }
+
+      // D-pad as fallback / addition (for thumbstick drift)
+      // Standard mapping: D-pad up=12, down=13, left=14, right=15
+      const btn = (i) => gp.buttons[i] && gp.buttons[i].pressed;
+      if (btn(14)) gx = -1;
+      if (btn(15)) gx =  1;
+      if (btn(12)) gy = -1;
+      if (btn(13)) gy =  1;
+
+      if (gx !== 0 || gy !== 0) {
+        // Normalize if magnitude > 1 (d-pad + stick combo)
+        const m = Math.hypot(gx, gy);
+        if (m > 1) { gx /= m; gy /= m; }
+        Actions.moveX = gx;
+        Actions.moveY = gy;
+        activeDevice = 'gamepad';
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function updateInput() {
+    Actions.moveX = 0;
+    Actions.moveY = 0;
+    // Gamepad first, then keyboard fallback. Last input wins for active-device display.
+    const gpInput = pollGamepad();
+    if (!gpInput) pollKeyboard();
+
+    let label = 'keyboard';
+    if (activeDevice === 'gamepad') {
+      label = detectedGamepadType === 'playstation' ? 'PS5 controller'
+            : detectedGamepadType === 'xbox' ? 'Xbox controller'
+            : 'gamepad';
+    }
+    if ($device.textContent !== label) $device.textContent = label;
+  }
+
+  // ============================================================
+  // ENTITIES
+  // ============================================================
+  class Player {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.r = 5;              // collision radius
+      this.speed = 95;         // pixels/sec (internal)
+      this.facing = 1;         // 1 = right, -1 = left
+    }
+    update(dt) {
+      this.x += Actions.moveX * this.speed * dt;
+      this.y += Actions.moveY * this.speed * dt;
+      // Clamp inside arena
+      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
+      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+      if (Actions.moveX > 0.1) this.facing = 1;
+      else if (Actions.moveX < -0.1) this.facing = -1;
+    }
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y);
+      // Body (green tunic)
+      ctx.fillStyle = '#7ad96b';
+      ctx.fillRect(px - 4, py - 2, 8, 7);
+      // Belt
+      ctx.fillStyle = '#3a4a2a';
+      ctx.fillRect(px - 4, py + 2, 8, 1);
+      // Legs
+      ctx.fillStyle = '#4a3a2a';
+      ctx.fillRect(px - 3, py + 5, 2, 2);
+      ctx.fillRect(px + 1, py + 5, 2, 2);
+      // Head
+      ctx.fillStyle = '#ffd5a0';
+      ctx.fillRect(px - 3, py - 7, 6, 5);
+      // Hair
+      ctx.fillStyle = '#5a3a2a';
+      ctx.fillRect(px - 3, py - 8, 6, 2);
+      // Eyes
+      ctx.fillStyle = '#000';
+      const eyeOffset = this.facing === 1 ? 0 : -1;
+      ctx.fillRect(px - 2 + eyeOffset, py - 5, 1, 1);
+      ctx.fillRect(px + 1 + eyeOffset, py - 5, 1, 1);
+    }
+  }
+
+  class Skeleton {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.r = 4;
+      this.speed = 38 + Math.random() * 18;
+      this.alive = true;
+      this.bobPhase = Math.random() * Math.PI * 2;
+    }
+    update(dt, target) {
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 0.01) {
+        this.x += (dx / d) * this.speed * dt;
+        this.y += (dy / d) * this.speed * dt;
+      }
+      this.bobPhase += dt * 8;
+    }
+    draw(ctx) {
+      const px = Math.floor(this.x);
+      const py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
+      // Body bones
+      ctx.fillStyle = '#e8e8d8';
+      ctx.fillRect(px - 3, py - 1, 6, 4);
+      // Ribcage line
+      ctx.fillStyle = '#b0b0a0';
+      ctx.fillRect(px - 2, py + 1, 4, 1);
+      // Legs
+      ctx.fillStyle = '#d0d0c0';
+      ctx.fillRect(px - 2, py + 3, 1, 2);
+      ctx.fillRect(px + 1, py + 3, 1, 2);
+      // Skull
+      ctx.fillStyle = '#f0f0e0';
+      ctx.fillRect(px - 2, py - 5, 4, 4);
+      // Eye sockets
+      ctx.fillStyle = '#1a0a0a';
+      ctx.fillRect(px - 1, py - 4, 1, 1);
+      ctx.fillRect(px + 1, py - 4, 1, 1);
+    }
+  }
+
+  // ============================================================
+  // PARTICLES (juice — burst on enemy death)
+  // ============================================================
+  class Particle {
+    constructor(x, y, vx, vy, color, life) {
+      this.x = x; this.y = y;
+      this.vx = vx; this.vy = vy;
+      this.color = color;
+      this.life = life;
+      this.maxLife = life;
+    }
+    update(dt) {
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      this.vx *= 0.90;
+      this.vy *= 0.90;
+      this.life -= dt;
+    }
+    draw(ctx) {
+      const a = Math.max(0, this.life / this.maxLife);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = this.color;
+      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 2, 2);
+      ctx.globalAlpha = 1;
+    }
+    get dead() { return this.life <= 0; }
+  }
+
+  function spawnBurst(x, y, count = 8) {
+    const palette = ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'];
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = 40 + Math.random() * 70;
+      const c = palette[Math.floor(Math.random() * palette.length)];
+      particles.push(new Particle(x, y, Math.cos(a) * s, Math.sin(a) * s, c, 0.35 + Math.random() * 0.2));
+    }
+  }
+
+  // ============================================================
+  // WORLD
+  // ============================================================
+  const player = new Player(W / 2, H / 2);
+  const enemies = [];
+  const particles = [];
+  let kills = 0;
+  let spawnTimer = 0;
+  let spawnInterval = 0.7; // seconds; will tighten as we go
+
+  function spawnEnemy() {
+    // Pick a random edge so they come from all sides
+    const edge = Math.floor(Math.random() * 4);
+    let x, y;
+    const pad = 12;
+    if (edge === 0) { x = Math.random() * W; y = -pad; }
+    else if (edge === 1) { x = W + pad; y = Math.random() * H; }
+    else if (edge === 2) { x = Math.random() * W; y = H + pad; }
+    else { x = -pad; y = Math.random() * H; }
+    enemies.push(new Skeleton(x, y));
+  }
+
+  function checkCollisions() {
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      const dx = enemy.x - player.x;
+      const dy = enemy.y - player.y;
+      if (dx * dx + dy * dy < (enemy.r + player.r) ** 2) {
+        enemy.alive = false;
+        kills++;
+        spawnBurst(enemy.x, enemy.y);
+        // Light screen shake on kill
+        shake = Math.min(shake + 1.5, 3);
+      }
+    }
+  }
+
+  // ============================================================
+  // RENDER HELPERS
+  // ============================================================
+  let shake = 0;
+
+  function drawBackground() {
+    // Background fill
+    ctx.fillStyle = '#1f1f24';
+    ctx.fillRect(0, 0, W, H);
+    // Subtle grid for depth — feels less empty
+    ctx.fillStyle = '#26262c';
+    for (let gx = 0; gx < W; gx += 16) {
+      for (let gy = 0; gy < H; gy += 16) {
+        if (((gx / 16) + (gy / 16)) % 2 === 0) {
+          ctx.fillRect(gx, gy, 16, 16);
+        }
+      }
+    }
+  }
+
+  // ============================================================
+  // MAIN LOOP
+  // ============================================================
+  let lastTime = performance.now();
+
+  function loop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 1 / 30); // cap dt to avoid spiral after tab-out
+    lastTime = now;
+
+    // --- Update ---
+    updateInput();
+
+    spawnTimer += dt;
+    if (spawnTimer >= spawnInterval) {
+      spawnTimer = 0;
+      spawnEnemy();
+    }
+
+    player.update(dt);
+    for (const enemy of enemies) {
+      if (enemy.alive) enemy.update(dt, player);
+    }
+    checkCollisions();
+
+    // Cull dead enemies
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      if (!enemies[i].alive) enemies.splice(i, 1);
+    }
+
+    // Particles
+    for (const p of particles) p.update(dt);
+    for (let i = particles.length - 1; i >= 0; i--) {
+      if (particles[i].dead) particles.splice(i, 1);
+    }
+
+    // Screen shake decay
+    shake *= 0.85;
+    if (shake < 0.05) shake = 0;
+
+    // --- Render ---
+    ctx.save();
+    if (shake > 0) {
+      const sx = (Math.random() - 0.5) * shake * 2;
+      const sy = (Math.random() - 0.5) * shake * 2;
+      ctx.translate(sx, sy);
+    }
+
+    drawBackground();
+    for (const p of particles) p.draw(ctx);
+    for (const enemy of enemies) enemy.draw(ctx);
+    player.draw(ctx);
+
+    ctx.restore();
+
+    // HUD
+    $kills.textContent = kills;
+    $alive.textContent = enemies.length;
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
