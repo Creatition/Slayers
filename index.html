@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 5</title>
+<title>Slayers — Phase 6</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -45,7 +45,7 @@
 
 <script>
 // =============================================================================
-// SLAYERS — Phase 5
+// SLAYERS — Phase 6 — 4 biomes / 4 bosses / 9 enemy types / Victory at wave 20
 // TOC:
 //   - CANVAS + DOM
 //   - GAME STATE / GLOBAL VARS
@@ -80,7 +80,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -95,13 +95,16 @@
   let lastLootName = '';
   let bossBannerTimer = 0;
   let bossDefeatedBannerTimer = 0;
+  let lastBossName = '';
   let goldFlashTimer = 0;
+  let biomeBannerTimer = 0;
 
   // Shop / blacksmith state
   let shopItems = [];
   let shopRefreshCost = 5;
   let selectedInvIdx = -1;
   let levelUpRerollCost = 1;
+  let currentBiomeId = '';
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -113,6 +116,7 @@
   let xpGems = [];
   let itemDrops = [];
   let particles = [];
+  let groundEffects = []; // shockwaves, meteor warnings
   let bossRef = null;
   let floorDecorations = [];
 
@@ -216,10 +220,18 @@
   // BIOME
   // ============================================================
   const BIOME = {
-    CRYPT: { id: 'crypt', name: 'The Crypt', bg: '#15181a', grid: '#1d2220', accent: '#6a7a5a',
-            decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44'] },
+    CRYPT:      { id: 'crypt',      name: 'The Crypt',        bg: '#15181a', grid: '#1d2220', decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44', '#557755'] },
+    FROSTSPIRE: { id: 'frostspire', name: 'Frostspire Peaks', bg: '#1a2030', grid: '#232c3c', decoColors: ['#5a7090', '#3a4a60', '#88aabb', '#aaccff'] },
+    INFERNO:    { id: 'inferno',    name: 'Infernal Depths',  bg: '#1a0e0a', grid: '#2a1410', decoColors: ['#5a2010', '#7a3020', '#aa4020', '#ff8040'] },
+    VOID:       { id: 'void',       name: 'The Void Throne',  bg: '#10081a', grid: '#180c28', decoColors: ['#4a2a6a', '#3a1a5a', '#aa66ff', '#dd99ff'] },
   };
-  function currentBiome() { return BIOME.CRYPT; }
+  function biomeFor(w) {
+    if (w <= 5)  return BIOME.CRYPT;
+    if (w <= 10) return BIOME.FROSTSPIRE;
+    if (w <= 15) return BIOME.INFERNO;
+    return BIOME.VOID;
+  }
+  function currentBiome() { return biomeFor(currentWave); }
 
   // ============================================================
   // ITEM SYSTEM
@@ -478,6 +490,7 @@
   // WAVE / BOSS LOGIC
   // ============================================================
   function isBossWave(w) { return w > 0 && w % 5 === 0; }
+  function isFinalWave(w) { return w === 20; }
   function waveConfig(w) {
     return {
       duration:       isBossWave(w) ? 999 : Math.min(20 + (w - 1) * 3, 50),
@@ -492,22 +505,40 @@
   // ENEMY TYPES
   // ============================================================
   const ENEMY_TYPES = {
-    skeleton: { hp: 8,  speedRange: [38, 56], dmg: 5,  r: 4, name: 'Skeleton',  body: '#e8e8d8', head: '#f0f0e0' },
-    zombie:   { hp: 18, speedRange: [22, 32], dmg: 8,  r: 5, name: 'Zombie',    body: '#6a8a4a', head: '#84a060' },
-    rat:      { hp: 3,  speedRange: [78, 100],dmg: 3,  r: 3, name: 'Crypt Rat', body: '#6b5034', head: '#7a5d3a' },
+    skeleton:   { hp: 8,  speedRange: [38, 56],  dmg: 5,  r: 4, name: 'Skeleton' },
+    zombie:     { hp: 18, speedRange: [22, 32],  dmg: 8,  r: 5, name: 'Zombie' },
+    rat:        { hp: 3,  speedRange: [78, 100], dmg: 3,  r: 3, name: 'Crypt Rat' },
+    yeti:       { hp: 28, speedRange: [28, 38],  dmg: 11, r: 6, name: 'Yeti' },
+    frostWolf:  { hp: 7,  speedRange: [85, 110], dmg: 6,  r: 4, name: 'Frost Wolf' },
+    imp:        { hp: 5,  speedRange: [60, 80],  dmg: 5,  r: 3, name: 'Imp', ranged: true },
+    hellhound:  { hp: 16, speedRange: [55, 75],  dmg: 10, r: 4, name: 'Hellhound' },
+    shadow:     { hp: 22, speedRange: [40, 55],  dmg: 12, r: 5, name: 'Shadow' },
+    voidCaster: { hp: 12, speedRange: [25, 35],  dmg: 8,  r: 4, name: 'Void Caster', ranged: true },
   };
   function pickEnemyType(w) {
-    if (w <= 1) return 'skeleton';
-    if (w === 2) return Math.random() < 0.8 ? 'skeleton' : 'rat';
-    if (w === 3) {
-      const r = Math.random();
-      if (r < 0.5)  return 'skeleton';
-      if (r < 0.75) return 'rat';
-      return 'zombie';
+    const biome = biomeFor(w);
+    if (biome === BIOME.CRYPT) {
+      if (w === 1) return 'skeleton';
+      if (w === 2) return Math.random() < 0.8 ? 'skeleton' : 'rat';
+      if (w === 3) { const r = Math.random(); if (r < 0.5) return 'skeleton'; if (r < 0.75) return 'rat'; return 'zombie'; }
+      const r = Math.random(); if (r < 0.4) return 'skeleton'; if (r < 0.7) return 'rat'; return 'zombie';
     }
+    if (biome === BIOME.FROSTSPIRE) {
+      const r = Math.random();
+      if (r < 0.40) return 'frostWolf';
+      if (r < 0.75) return 'yeti';
+      return 'rat';
+    }
+    if (biome === BIOME.INFERNO) {
+      const r = Math.random();
+      if (r < 0.45) return 'imp';
+      if (r < 0.80) return 'hellhound';
+      return 'rat';
+    }
+    // VOID
     const r = Math.random();
-    if (r < 0.4) return 'skeleton';
-    if (r < 0.7) return 'rat';
+    if (r < 0.40) return 'shadow';
+    if (r < 0.75) return 'voidCaster';
     return 'zombie';
   }
 
@@ -676,13 +707,28 @@
       this.alive = true;
       this.bobPhase = Math.random() * Math.PI * 2;
       this.hitFlash = 0; this.isBoss = false;
+      this.fireTimer = 1 + Math.random() * 2;
     }
     update(dt, target) {
       const dx = target.x - this.x, dy = target.y - this.y;
       const d = Math.hypot(dx, dy);
       if (d > 0.01) { this.x += (dx / d) * this.speed * dt; this.y += (dy / d) * this.speed * dt; }
-      this.bobPhase += dt * (this.type === 'rat' ? 14 : this.type === 'zombie' ? 5 : 8);
+      const bobSpeed = (this.type === 'rat' || this.type === 'frostWolf') ? 14
+                     : (this.type === 'zombie' || this.type === 'yeti') ? 5
+                     : 8;
+      this.bobPhase += dt * bobSpeed;
       if (this.hitFlash > 0) this.hitFlash -= dt;
+      // Ranged enemies fire occasionally
+      const t = ENEMY_TYPES[this.type];
+      if (t.ranged) {
+        this.fireTimer -= dt;
+        if (this.fireTimer <= 0 && d < 200 && d > 0.01) {
+          this.fireTimer = 2.5 + Math.random() * 1.5;
+          const sp = this.type === 'imp' ? 110 : 90;
+          const theme = this.type === 'imp' ? 'fire' : 'void';
+          enemyProjectiles.push(new BoneProjectile(this.x, this.y, (dx/d)*sp, (dy/d)*sp, this.contactDmg, theme));
+        }
+      }
     }
     takeDamage(amount) {
       this.hp -= amount; this.hitFlash = 0.1;
@@ -711,12 +757,68 @@
         ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
         ctx.fillStyle = '#aabb55'; ctx.fillRect(px, py - 3, 1, 1);
       } else if (this.type === 'rat') {
-        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 3, py - 1, 5, 3);
+        ctx.fillStyle = f ? '#ffffff' : '#6b5034'; ctx.fillRect(px - 3, py - 1, 5, 3);
         ctx.fillStyle = '#4a3a25'; ctx.fillRect(px + 2, py, 2, 1);
-        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 4, py - 3, 3, 3);
+        ctx.fillStyle = f ? '#ffffff' : '#7a5d3a'; ctx.fillRect(px - 4, py - 3, 3, 3);
         ctx.fillStyle = '#ff3030'; ctx.fillRect(px - 3, py - 2, 1, 1);
         ctx.fillStyle = '#4a3a25';
         ctx.fillRect(px - 4, py - 4, 1, 1); ctx.fillRect(px - 2, py - 4, 1, 1);
+      } else if (this.type === 'yeti') {
+        ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 5, py - 2, 10, 8);
+        ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
+        ctx.fillRect(px - 5, py + 3, 10, 1); ctx.fillRect(px - 5, py + 5, 10, 1);
+        ctx.fillStyle = f ? '#dddddd' : '#88aac0';
+        ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
+        ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 4, py - 8, 8, 6);
+        ctx.fillStyle = '#5599ff';
+        ctx.fillRect(px - 2, py - 6, 2, 2); ctx.fillRect(px, py - 6, 2, 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(px - 3, py - 2, 1, 2); ctx.fillRect(px + 2, py - 2, 1, 2);
+      } else if (this.type === 'frostWolf') {
+        ctx.fillStyle = f ? '#ffffff' : '#88aac0'; ctx.fillRect(px - 4, py - 1, 7, 4);
+        ctx.fillStyle = '#5588a0'; ctx.fillRect(px + 3, py, 3, 1);
+        ctx.fillStyle = f ? '#ffffff' : '#aaccd8'; ctx.fillRect(px - 5, py - 4, 4, 4);
+        ctx.fillStyle = '#3366aa'; ctx.fillRect(px - 4, py - 3, 1, 1);
+        ctx.fillStyle = '#5588a0';
+        ctx.fillRect(px - 5, py - 5, 1, 1); ctx.fillRect(px - 3, py - 5, 1, 1);
+        ctx.fillStyle = '#88ccdd';
+        ctx.fillRect(px - 4, py + 3, 1, 2); ctx.fillRect(px + 2, py + 3, 1, 2);
+      } else if (this.type === 'imp') {
+        ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 3, py - 1, 5, 4);
+        ctx.fillStyle = '#882010'; ctx.fillRect(px - 3, py + 3, 5, 1);
+        ctx.fillStyle = f ? '#ffffff' : '#dd3030'; ctx.fillRect(px - 3, py - 5, 5, 4);
+        ctx.fillStyle = '#ffff00';
+        ctx.fillRect(px - 2, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
+        ctx.fillStyle = '#882010';
+        ctx.fillRect(px - 3, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
+        ctx.fillStyle = '#aa3030';
+        ctx.fillRect(px - 5, py - 1, 2, 2); ctx.fillRect(px + 3, py - 1, 2, 2);
+      } else if (this.type === 'hellhound') {
+        ctx.fillStyle = f ? '#ffffff' : '#3a1010'; ctx.fillRect(px - 4, py - 2, 8, 5);
+        ctx.fillStyle = '#5a2020'; ctx.fillRect(px - 4, py + 3, 8, 1);
+        ctx.fillStyle = '#ff5520';
+        ctx.fillRect(px - 3, py, 2, 1); ctx.fillRect(px + 1, py, 2, 1);
+        ctx.fillStyle = f ? '#ffffff' : '#5a2020'; ctx.fillRect(px - 5, py - 5, 4, 4);
+        ctx.fillStyle = '#ff2020'; ctx.fillRect(px - 4, py - 4, 2, 2);
+        ctx.fillStyle = '#3a1010';
+        ctx.fillRect(px - 4, py + 4, 1, 2); ctx.fillRect(px + 3, py + 4, 1, 2);
+      } else if (this.type === 'shadow') {
+        const shimmer = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
+        ctx.globalAlpha = shimmer;
+        ctx.fillStyle = f ? '#ffffff' : '#2a1a4a'; ctx.fillRect(px - 4, py - 4, 8, 9);
+        ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 3, py - 7, 6, 5);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#aa66ff';
+        ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
+        ctx.fillStyle = '#ddaaff'; ctx.fillRect(px - 2, py - 5, 1, 1);
+      } else if (this.type === 'voidCaster') {
+        ctx.fillStyle = f ? '#ffffff' : '#3a1a5a'; ctx.fillRect(px - 4, py - 2, 8, 7);
+        ctx.fillStyle = '#5a2a7a'; ctx.fillRect(px - 4, py + 4, 8, 1);
+        ctx.fillStyle = f ? '#ffffff' : '#aa66ff'; ctx.fillRect(px - 2, py - 7, 4, 5);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(px - 1, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
+        const orbY = py + Math.sin(performance.now() * 0.005) * 1;
+        ctx.fillStyle = '#aa66ff'; ctx.fillRect(px + 4, Math.floor(orbY), 2, 2);
       }
     }
   }
@@ -796,6 +898,260 @@
   }
 
   // ============================================================
+  // BOSS: IceGiant (Wave 10)
+  // ============================================================
+  class IceGiant {
+    constructor(x, y, hpMult, speedMult, dmgMult) {
+      this.x = x; this.y = y; this.r = 14;
+      this.maxHp = Math.round(500 * hpMult); this.hp = this.maxHp;
+      this.contactDmg = Math.round(14 * dmgMult);
+      this.speed = 22 * speedMult;
+      this.alive = true; this.isBoss = true;
+      this.bobPhase = 0; this.hitFlash = 0;
+      this.shardTimer = 4.0; this.slamTimer = 6.0; this.summonTimer = 12.0;
+      this.name = 'Ice Giant';
+    }
+    update(dt, target) {
+      const dx = target.x - this.x, dy = target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 60 && d > 0.01) {
+        this.x += (dx / d) * this.speed * dt;
+        this.y += (dy / d) * this.speed * dt;
+      }
+      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
+      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+      this.bobPhase += dt * 3;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
+      this.shardTimer -= dt;
+      if (this.shardTimer <= 0) {
+        this.shardTimer = 4.0;
+        const a0 = Math.atan2(dy, dx);
+        for (const off of [-0.35, -0.18, 0, 0.18, 0.35]) {
+          const a = a0 + off;
+          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 120, Math.sin(a) * 120, this.contactDmg, 'ice'));
+        }
+        spawnBurst(this.x, this.y, ['#aaccff', '#5599ff'], 8);
+      }
+      this.slamTimer -= dt;
+      if (this.slamTimer <= 0) {
+        this.slamTimer = 6.5;
+        groundEffects.push({ type: 'shockwave', x: this.x, y: this.y, r: 0, maxR: 100, damage: this.contactDmg * 1.5, life: 0.6, maxLife: 0.6, color: '#aaccff', hit: new Set() });
+        shake = Math.min(shake + 5, 10);
+      }
+      if (this.hp < this.maxHp * 0.5) {
+        this.summonTimer -= dt;
+        if (this.summonTimer <= 0) {
+          this.summonTimer = 10.0;
+          for (let i = 0; i < 2; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const sx = this.x + Math.cos(ang) * 32;
+            const sy = this.y + Math.sin(ang) * 32;
+            enemies.push(new Enemy(sx, sy, 'frostWolf', 0.9, 1.0, 0.9));
+          }
+          spawnBurst(this.x, this.y, ['#aaccff', '#5599ff', '#ffffff'], 14);
+        }
+      }
+    }
+    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+    draw(ctx) {
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
+      const f = this.hitFlash > 0;
+      ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 9, py - 2, 18, 12);
+      ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
+      ctx.fillRect(px - 9, py + 4, 18, 1); ctx.fillRect(px - 9, py + 7, 18, 1);
+      ctx.fillStyle = f ? '#dddddd' : '#88aac0';
+      ctx.fillRect(px - 7, py + 11, 4, 4); ctx.fillRect(px + 3, py + 11, 4, 4);
+      ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 6, py - 10, 12, 8);
+      ctx.fillStyle = '#5599ff';
+      ctx.fillRect(px - 4, py - 8, 3, 2); ctx.fillRect(px + 1, py - 8, 3, 2);
+      ctx.fillStyle = '#aaccff';
+      ctx.fillRect(px - 3, py - 7, 1, 1); ctx.fillRect(px + 2, py - 7, 1, 1);
+      ctx.fillStyle = '#bbddee';
+      ctx.fillRect(px - 6, py - 13, 2, 3); ctx.fillRect(px + 4, py - 13, 2, 3);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 6, py - 14, 2, 1); ctx.fillRect(px + 4, py - 14, 2, 1);
+      ctx.fillStyle = '#aaccff';
+      ctx.fillRect(px - 10, py, 1, 4); ctx.fillRect(px + 9, py, 1, 4);
+    }
+  }
+
+  // ============================================================
+  // BOSS: Pyromancer (Wave 15)
+  // ============================================================
+  class Pyromancer {
+    constructor(x, y, hpMult, speedMult, dmgMult) {
+      this.x = x; this.y = y; this.r = 8;
+      this.maxHp = Math.round(420 * hpMult); this.hp = this.maxHp;
+      this.contactDmg = Math.round(13 * dmgMult);
+      this.speed = 55 * speedMult;
+      this.alive = true; this.isBoss = true;
+      this.bobPhase = 0; this.hitFlash = 0;
+      this.teleportTimer = 5.0; this.meteorTimer = 2.5; this.summonTimer = 10.0;
+      this.name = 'Pyromancer';
+      this.teleportFlash = 0;
+    }
+    update(dt, target) {
+      const dx = target.x - this.x, dy = target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      if (d > 100 && d > 0.01) {
+        this.x += (dx / d) * this.speed * dt;
+        this.y += (dy / d) * this.speed * dt;
+      } else if (d < 60 && d > 0.01) {
+        this.x -= (dx / d) * this.speed * 0.6 * dt;
+        this.y -= (dy / d) * this.speed * 0.6 * dt;
+      }
+      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
+      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+      this.bobPhase += dt * 6;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
+      if (this.teleportFlash > 0) this.teleportFlash -= dt;
+      this.teleportTimer -= dt;
+      if (this.teleportTimer <= 0) {
+        this.teleportTimer = 5.0;
+        spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
+        this.x = 80 + Math.random() * (W - 160);
+        this.y = 80 + Math.random() * (H - 160);
+        this.teleportFlash = 0.5;
+        spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
+      }
+      this.meteorTimer -= dt;
+      if (this.meteorTimer <= 0) {
+        this.meteorTimer = 2.5;
+        const mx = target.x + (Math.random() - 0.5) * 20;
+        const my = target.y + (Math.random() - 0.5) * 20;
+        groundEffects.push({ type: 'meteor', x: mx, y: my, r: 0, maxR: 35, damage: this.contactDmg * 1.6, life: 1.2, maxLife: 1.2, color: '#ff4400', hit: new Set(), exploded: false });
+      }
+      if (this.hp < this.maxHp * 0.5) {
+        this.summonTimer -= dt;
+        if (this.summonTimer <= 0) {
+          this.summonTimer = 9.0;
+          for (let i = 0; i < 3; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const sx = this.x + Math.cos(ang) * 24;
+            const sy = this.y + Math.sin(ang) * 24;
+            enemies.push(new Enemy(sx, sy, 'imp', 0.9, 1.0, 0.9));
+          }
+          spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
+        }
+      }
+    }
+    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+    draw(ctx) {
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
+      const f = this.hitFlash > 0;
+      if (this.teleportFlash > 0) {
+        ctx.globalAlpha = this.teleportFlash * 1.5;
+        ctx.fillStyle = '#ff8800';
+        ctx.fillRect(px - 8, py - 10, 16, 18);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = f ? '#ffffff' : '#aa1010'; ctx.fillRect(px - 5, py - 1, 10, 8);
+      ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 5, py - 4, 10, 4);
+      ctx.fillStyle = f ? '#ffffff' : '#dd3010'; ctx.fillRect(px - 4, py - 8, 8, 4);
+      ctx.fillStyle = '#ffff40';
+      ctx.fillRect(px - 2, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
+      const flamY = py - 12 + Math.sin(performance.now() * 0.008) * 1;
+      ctx.fillStyle = '#ff8800'; ctx.fillRect(px - 1, Math.floor(flamY), 2, 3);
+      ctx.fillStyle = '#ffdd00'; ctx.fillRect(px, Math.floor(flamY) + 1, 1, 1);
+      ctx.fillStyle = '#660000';
+      ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
+    }
+  }
+
+  // ============================================================
+  // BOSS: Slayer-Killer (Wave 20, final)
+  // ============================================================
+  class SlayerKiller {
+    constructor(x, y, hpMult, speedMult, dmgMult) {
+      this.x = x; this.y = y; this.r = 11;
+      this.maxHp = Math.round(800 * hpMult); this.hp = this.maxHp;
+      this.contactDmg = Math.round(16 * dmgMult);
+      this.speed = 40 * speedMult;
+      this.alive = true; this.isBoss = true;
+      this.bobPhase = 0; this.hitFlash = 0;
+      this.boltTimer = 2.0; this.summonTimer = 12.0;
+      this.preferredDistance = 110;
+      this.name = 'The Slayer-Killer';
+      this.phase = 1;
+    }
+    update(dt, target) {
+      const hpRatio = this.hp / this.maxHp;
+      const newPhase = hpRatio > 0.66 ? 1 : hpRatio > 0.33 ? 2 : 3;
+      if (newPhase !== this.phase) {
+        this.phase = newPhase;
+        spawnBurst(this.x, this.y, ['#aa66ff', '#dd99ff', '#ffffff'], 20);
+        shake = Math.min(shake + 5, 10);
+      }
+      const dx = target.x - this.x, dy = target.y - this.y;
+      const d = Math.hypot(dx, dy);
+      let mv = 0;
+      if (d > this.preferredDistance + 20) mv = 1;
+      else if (d < this.preferredDistance - 20) mv = -0.6;
+      if (d > 0.01 && mv !== 0) {
+        const sm = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1.0;
+        this.x += (dx / d) * this.speed * sm * mv * dt;
+        this.y += (dy / d) * this.speed * sm * mv * dt;
+      }
+      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
+      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+      this.bobPhase += dt * 5;
+      if (this.hitFlash > 0) this.hitFlash -= dt;
+      this.boltTimer -= dt;
+      const boltCd = this.phase === 3 ? 1.0 : this.phase === 2 ? 1.5 : 2.0;
+      if (this.boltTimer <= 0) {
+        this.boltTimer = boltCd;
+        const a0 = Math.atan2(dy, dx);
+        const sc = this.phase === 3 ? 5 : this.phase === 2 ? 4 : 3;
+        const hs = 0.3;
+        for (let i = 0; i < sc; i++) {
+          const t = sc === 1 ? 0 : (i / (sc - 1)) * 2 - 1;
+          const a = a0 + t * hs;
+          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 140, Math.sin(a) * 140, this.contactDmg, 'void'));
+        }
+        spawnBurst(this.x, this.y, ['#aa66ff', '#dd99ff'], 6);
+      }
+      if (this.phase >= 2) {
+        this.summonTimer -= dt;
+        if (this.summonTimer <= 0) {
+          this.summonTimer = this.phase === 3 ? 8.0 : 12.0;
+          for (let i = 0; i < 2; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const sx = this.x + Math.cos(ang) * 28;
+            const sy = this.y + Math.sin(ang) * 28;
+            enemies.push(new Enemy(sx, sy, 'shadow', 0.9, 1.0, 0.9));
+          }
+          spawnBurst(this.x, this.y, ['#5533aa', '#aa66ff', '#ffffff'], 18);
+        }
+      }
+    }
+    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+    draw(ctx) {
+      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
+      const f = this.hitFlash > 0;
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = this.phase === 3 ? '#ff4080' : this.phase === 2 ? '#aa66ff' : '#5533aa';
+      ctx.fillRect(px - 14, py - 14, 28, 28);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = f ? '#ffffff' : '#2a1a5a'; ctx.fillRect(px - 7, py - 2, 14, 10);
+      ctx.fillStyle = f ? '#ffffff' : '#3a2a7a'; ctx.fillRect(px - 7, py + 4, 14, 1);
+      ctx.fillStyle = '#1a0a3a';
+      ctx.fillRect(px - 5, py + 8, 3, 4); ctx.fillRect(px + 2, py + 8, 3, 4);
+      ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 5, py - 9, 10, 7);
+      ctx.fillStyle = '#aa66ff';
+      ctx.fillRect(px - 6, py - 11, 2, 3); ctx.fillRect(px + 4, py - 11, 2, 3); ctx.fillRect(px - 1, py - 12, 2, 4);
+      const eyeC = this.phase === 3 ? '#ff4080' : '#aa66ff';
+      ctx.fillStyle = eyeC;
+      ctx.fillRect(px - 3, py - 7, 2, 2); ctx.fillRect(px + 1, py - 7, 2, 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 3, py - 7, 1, 1); ctx.fillRect(px + 1, py - 7, 1, 1);
+      for (let i = 0; i < this.phase; i++) {
+        ctx.fillStyle = eyeC;
+        ctx.fillRect(px - 8 + i * 8, py + 14, 2, 2);
+      }
+    }
+  }
+
+  // ============================================================
   // ENTITY: Projectile
   // ============================================================
   class Projectile {
@@ -828,11 +1184,18 @@
   // ============================================================
   // ENTITY: BoneProjectile
   // ============================================================
+  const ENEMY_SHOT_THEMES = {
+    bone: { outer: '#d8d8c0', inner: '#a0a090', spark: '#e8e8d0' },
+    ice:  { outer: '#aaccff', inner: '#5599ff', spark: '#ddeeff' },
+    fire: { outer: '#ff8800', inner: '#ffdd00', spark: '#ffaa44' },
+    void: { outer: '#aa66ff', inner: '#5533aa', spark: '#dd99ff' },
+  };
   class BoneProjectile {
-    constructor(x, y, vx, vy, damage) {
+    constructor(x, y, vx, vy, damage, theme) {
       this.x = x; this.y = y; this.vx = vx; this.vy = vy;
       this.r = 3; this.damage = damage;
       this.life = 3.5; this.dead = false; this.rot = 0;
+      this.theme = theme || 'bone';
     }
     update(dt) {
       this.x += this.vx * dt; this.y += this.vy * dt;
@@ -840,11 +1203,12 @@
       if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
     }
     draw(ctx) {
+      const t = ENEMY_SHOT_THEMES[this.theme] || ENEMY_SHOT_THEMES.bone;
       const px = Math.floor(this.x), py = Math.floor(this.y);
       const flicker = Math.floor(this.rot) % 2;
-      ctx.fillStyle = flicker ? '#e8e8d0' : '#d8d8c0'; ctx.fillRect(px - 2, py - 2, 4, 4);
-      ctx.fillStyle = '#a0a090'; ctx.fillRect(px - 1, py - 1, 2, 2);
-      ctx.fillStyle = '#e8e8d0';
+      ctx.fillStyle = flicker ? t.spark : t.outer; ctx.fillRect(px - 2, py - 2, 4, 4);
+      ctx.fillStyle = t.inner; ctx.fillRect(px - 1, py - 1, 2, 2);
+      ctx.fillStyle = t.spark;
       ctx.fillRect(px - 3, py, 1, 1); ctx.fillRect(px + 2, py, 1, 1);
     }
   }
@@ -978,8 +1342,14 @@
     enemies.push(new Enemy(x, y, pickEnemyType(currentWave), cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
   }
   function spawnBoss(cfg) {
-    bossRef = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
-    enemies.push(bossRef);
+    let boss;
+    if (currentWave === 5)       boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 10) boss = new IceGiant(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 15) boss = new Pyromancer(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 20) boss = new SlayerKiller(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else                         boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    bossRef = boss;
+    enemies.push(boss);
     bossBannerTimer = 2.5;
     shake = Math.min(shake + 4, 8);
     spawnBurst(W / 2, 70, ['#7755aa', '#aa88cc', '#ffd040'], 18);
@@ -1004,6 +1374,63 @@
     const isCrit = Math.random() * 100 < crit;
     if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
     projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
+  }
+
+  // ============================================================
+  // GROUND EFFECTS (boss attacks: shockwaves, meteors)
+  // ============================================================
+  function updateGroundEffects(dt) {
+    for (const g of groundEffects) {
+      g.life -= dt;
+      if (g.type === 'shockwave') {
+        g.r += (g.maxR / g.maxLife) * dt;
+        if (g.life > 0 && player.iframeTimer <= 0 && !g.hit.has(player)) {
+          const dx = player.x - g.x, dy = player.y - g.y;
+          const d2 = dx*dx + dy*dy;
+          if (d2 < g.r * g.r && d2 > (g.r - 25) * (g.r - 25)) {
+            const died = player.takeDamage(g.damage);
+            if (died) state = STATE.DEAD;
+            g.hit.add(player);
+          }
+        }
+      } else if (g.type === 'meteor') {
+        if (!g.exploded && g.life <= 0.05) {
+          g.exploded = true;
+          if (player.iframeTimer <= 0) {
+            const dx = player.x - g.x, dy = player.y - g.y;
+            if (dx*dx + dy*dy < g.maxR * g.maxR) {
+              const died = player.takeDamage(g.damage);
+              if (died) state = STATE.DEAD;
+            }
+          }
+          spawnBurst(g.x, g.y, ['#ff4400', '#ff8800', '#ffdd00', '#ffffff'], 24);
+          shake = Math.min(shake + 5, 10);
+        }
+      }
+    }
+    for (let i = groundEffects.length - 1; i >= 0; i--) {
+      if (groundEffects[i].life <= 0 && (groundEffects[i].type !== 'meteor' || groundEffects[i].exploded)) groundEffects.splice(i, 1);
+    }
+  }
+  function drawGroundEffects(ctx) {
+    for (const g of groundEffects) {
+      if (g.type === 'shockwave') {
+        const a = Math.max(0, g.life / g.maxLife);
+        ctx.strokeStyle = g.color;
+        ctx.globalAlpha = a * 0.8; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
+      } else if (g.type === 'meteor') {
+        const a = Math.max(0, g.life / g.maxLife);
+        ctx.strokeStyle = '#ff4040';
+        ctx.globalAlpha = (1 - a) * 0.9; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.maxR, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = '#ff4040';
+        ctx.globalAlpha = (1 - a) * 0.3;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.maxR * (1 - a), 0, Math.PI * 2); ctx.fill();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
+      }
+    }
   }
 
   // ============================================================
@@ -1050,7 +1477,12 @@
             if (enemy.isBoss) {
               bossRef = null;
               bossDefeatedBannerTimer = 2.0;
-              enterAbilityDraft();
+              lastBossName = enemy.name || 'BOSS';
+              if (isFinalWave(currentWave)) {
+                state = STATE.VICTORY;
+              } else {
+                enterAbilityDraft();
+              }
             }
           }
           if (!proj.piercing) break;
@@ -1088,7 +1520,7 @@
   // STATE TRANSITIONS
   // ============================================================
   function endWave() {
-    enemies = []; enemyProjectiles = []; bossRef = null;
+    enemies = []; enemyProjectiles = []; bossRef = null; groundEffects = [];
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
   }
@@ -1143,6 +1575,12 @@
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
     spawnTimer = 0;
+    const newBiome = biomeFor(currentWave);
+    if (newBiome.id !== currentBiomeId) {
+      currentBiomeId = newBiome.id;
+      generateFloorDecorations();
+      biomeBannerTimer = 2.5;
+    }
     if (isBossWave(currentWave)) spawnBoss(cfg);
   }
   function toggleInventory() {
@@ -1163,13 +1601,15 @@
   function resetWorld() {
     player = new Player(W / 2, H / 2);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
-    bossRef = null; shake = 0;
+    groundEffects = []; bossRef = null; shake = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     levelUpChoices = []; abilityDraftChoices = [];
     levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
-    bossBannerTimer = 0; bossDefeatedBannerTimer = 0; goldFlashTimer = 0;
+    bossBannerTimer = 0; bossDefeatedBannerTimer = 0; lastBossName = '';
+    goldFlashTimer = 0; biomeBannerTimer = 2.5;
     shopItems = []; shopRefreshCost = 5; selectedInvIdx = -1; levelUpRerollCost = 1;
+    currentBiomeId = currentBiome().id;
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
     generateFloorDecorations();
@@ -1339,12 +1779,13 @@
     if (state === STATE.PLAYING) {
       if (!bossRef) {
         ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-        ctx.fillText(`WAVE ${currentWave}`, W / 2, 12);
+        ctx.fillText(`WAVE ${currentWave} / 20`, W / 2, 12);
         ctx.fillStyle = '#999'; ctx.font = '8px monospace';
         ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
       }
     }
-    ctx.fillStyle = '#557755'; ctx.font = '7px monospace';
+    ctx.fillStyle = currentBiome().decoColors[3] || '#557755';
+    ctx.font = '7px monospace';
     ctx.fillText(currentBiome().name.toUpperCase(), W / 2, H - 86);
 
     ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
@@ -1369,17 +1810,23 @@
       ctx.font = '9px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`+ ${lastLootName}`, W / 2, H - 50);
     }
-    if (bossBannerTimer > 0) {
+    if (bossBannerTimer > 0 && bossRef) {
       const a = Math.min(1, bossBannerTimer / 2.5);
       ctx.fillStyle = `rgba(255,80,80,${a})`;
       ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('THE BONE LORD APPROACHES', W / 2, H / 2 - 20);
+      ctx.fillText(`${bossRef.name.toUpperCase()} APPROACHES`, W / 2, H / 2 - 20);
     }
     if (bossDefeatedBannerTimer > 0) {
       const a = Math.min(1, bossDefeatedBannerTimer / 2.0);
       ctx.fillStyle = `rgba(255,208,64,${a})`;
       ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('BONE LORD SLAIN', W / 2, H / 2 - 20);
+      ctx.fillText(`${(lastBossName || 'BOSS').toUpperCase()} SLAIN`, W / 2, H / 2 - 20);
+    }
+    if (biomeBannerTimer > 0) {
+      const a = Math.min(1, biomeBannerTimer / 2.5);
+      ctx.fillStyle = `rgba(255,255,255,${a * 0.85})`;
+      ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(`ENTERING  ${currentBiome().name.toUpperCase()}`, W / 2, H / 2 + 40);
     }
     ctx.textAlign = 'left';
     drawBossBar();
@@ -1480,7 +1927,7 @@
     ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
     ctx.fillText('ABILITY DRAFT', W / 2, 50);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
-    ctx.fillText('Bone Lord defeated. Choose one ability.', W / 2, 68);
+    ctx.fillText(`${lastBossName || 'Boss'} defeated. Choose one ability.`, W / 2, 68);
     ctx.fillStyle = '#888'; ctx.font = '8px monospace';
     ctx.fillText('Pick: 1 / 2 / 3, click, or face button', W / 2, 82);
     const cardW = 150, cardH = 170, gap = 18;
@@ -1528,9 +1975,32 @@
     ctx.fillStyle = '#ff4040'; ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-    ctx.fillText(`Wave ${currentWave}  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
+    ctx.fillText(`Wave ${currentWave}/20  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
+    ctx.textAlign = 'left';
+  }
+  function drawVictoryScreen() {
+    const t = performance.now() * 0.001;
+    ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, W, H);
+    // Confetti
+    if (Math.random() < 0.4) {
+      const cols = ['#ff4040', '#ffd040', '#7ad96b', '#5599ff', '#aa66ff', '#ffffff'];
+      for (let i = 0; i < 3; i++) {
+        particles.push(new Particle(Math.random() * W, -5, (Math.random() - 0.5) * 40, 40 + Math.random() * 40, cols[Math.floor(Math.random() * cols.length)], 2 + Math.random(), 3));
+      }
+    }
+    ctx.textAlign = 'center';
+    const titleColor = `hsl(${(t * 60) % 360}, 90%, 60%)`;
+    ctx.fillStyle = titleColor; ctx.font = 'bold 32px monospace';
+    ctx.fillText('VICTORY', W / 2, H / 2 - 50);
+    ctx.fillStyle = '#ffd040'; ctx.font = 'bold 11px monospace';
+    ctx.fillText('The Slayer-Killer has fallen.', W / 2, H / 2 - 20);
+    ctx.fillText('The Crypt, Frostspire, Inferno, and Void are yours.', W / 2, H / 2 - 4);
+    ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
+    ctx.fillText(`Final  -  LV ${player.level}  -  KILLS ${player.kills}  -  ${player.gold}g`, W / 2, H / 2 + 22);
+    ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
+    ctx.fillText('Press R, click, or face button to start a new run', W / 2, H / 2 + 48);
     ctx.textAlign = 'left';
   }
 
@@ -1935,6 +2405,7 @@
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(dt);
       for (const g of xpGems) if (!g.dead) g.update(dt, player);
       for (const d of itemDrops) if (!d.dead) d.update(dt, player);
+      updateGroundEffects(dt);
       checkCollisions();
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
@@ -1992,7 +2463,7 @@
       }
       if (picked >= 0) pickAbilityDraft(picked);
     }
-    else if (state === STATE.DEAD) {
+    else if (state === STATE.DEAD || state === STATE.VICTORY) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
       if (keyJustPressed.has('r') || mouseClicked || anyGp) resetWorld();
     }
@@ -2064,6 +2535,7 @@
     if (bossBannerTimer > 0) bossBannerTimer -= dt;
     if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
     if (goldFlashTimer > 0) goldFlashTimer -= dt;
+    if (biomeBannerTimer > 0) biomeBannerTimer -= dt;
     shake *= 0.85; if (shake < 0.05) shake = 0;
 
     ctx.save();
@@ -2073,6 +2545,7 @@
       ctx.translate(sx, sy);
     }
     drawBackground();
+    drawGroundEffects(ctx);
     for (const d of itemDrops) d.draw(ctx);
     for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
@@ -2087,6 +2560,7 @@
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
+    else if (state === STATE.VICTORY) drawVictoryScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
     else if (state === STATE.SHOP) drawShopScreen();
 
