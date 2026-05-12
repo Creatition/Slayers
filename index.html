@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Slayers — Phase 7</title>
+<title>Slayers — Phase 8</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -81,7 +81,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -107,6 +107,13 @@
   let levelUpRerollCost = 1;
   let currentBiomeId = '';
   let selectedClassId = 'archer';
+  // Persistent stash (saved to localStorage across runs)
+  let stash = [];
+  const STASH_SIZE_INIT = 10;
+  let stashSize = STASH_SIZE_INIT;
+  let pendingBank = null; // { source: 'inv'|'eq', key: idxNumber|slotName }
+  const SAVE_KEY = 'slayers-save';
+  const SAVE_VERSION = 1;
 
   let activeDevice = 'keyboard';
   let detectedGamepadType = null;
@@ -396,8 +403,23 @@
       baseMaxResource: 140, baseResourceRegen: 8, critResourceGain: 0,
       signature: 'fireball',
     },
+    WARRIOR: {
+      id: 'warrior', name: 'Warrior', color: '#cc4040',
+      desc: 'Tanky melee cleaver. Rage builds from dealing and taking hits.',
+      baseMaxHp: 140, baseSpeed: 90, baseCritChance: 4,
+      weaponDamage: 11, weaponFireRate: 1.6, weaponRange: 52, weaponProjSpeed: 1,
+      meleeRange: 52,
+      rageOnHit: 5, rageOnTake: 12,
+      resourceName: 'RAGE', resourceColor: '#ff6060',
+      baseMaxResource: 150, baseResourceRegen: 0, critResourceGain: 0,
+      signature: 'whirlwind',
+    },
   };
-  function getClassById(id) { return id === 'wizard' ? CLASS.WIZARD : CLASS.ARCHER; }
+  function getClassById(id) {
+    if (id === 'wizard') return CLASS.WIZARD;
+    if (id === 'warrior') return CLASS.WARRIOR;
+    return CLASS.ARCHER;
+  }
 
   // ============================================================
   // ABILITIES
@@ -647,6 +669,146 @@
         return true;
       },
     },
+    whirlwind: {
+      id: 'whirlwind', name: 'Whirlwind', letter: 'W', classOf: 'warrior',
+      desc: 'Spin attack, big AoE around you', cost: 30, cooldown: 2.0, color: '#ff6060',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const radius = isLegend ? 95 : 75;
+        const dmg = player.weaponDamage * player.dmgMult * 2.4 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - player.x, dy = e.y - player.y;
+          if (dx*dx + dy*dy < radius*radius) {
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            spawnBurst(e.x, e.y, ['#cc4040', '#ff6060', '#ffaa40'], 4);
+            if (isCrit) player.onCrit();
+            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
+          }
+        }
+        for (let i = 0; i < 28; i++) {
+          const a = (i / 28) * Math.PI * 2;
+          spawnBurst(player.x + Math.cos(a) * radius * 0.7, player.y + Math.sin(a) * radius * 0.7, ['#cc4040', '#ff6060'], 2);
+        }
+        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.4, maxLife: 0.4, color: '#ff6060', hit: new Set(), target: 'none' });
+        shake = Math.min(shake + 3, 6);
+        return true;
+      },
+    },
+    cleave: {
+      id: 'cleave', name: 'Cleave', letter: 'C', classOf: 'warrior',
+      desc: 'Massive forward swing (250% dmg)', cost: 25, cooldown: 2.0, color: '#ffaa40',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const cone = isLegend ? 1.6 : 1.2;
+        const range = 90;
+        const dmg = player.weaponDamage * player.dmgMult * 2.6 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+        const faceAngle = player.facing >= 0 ? 0 : Math.PI;
+        let hitAny = false;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - player.x, dy = e.y - player.y;
+          if (dx*dx + dy*dy > range * range) continue;
+          const ang = Math.atan2(dy, dx);
+          let diff = Math.abs(ang - faceAngle);
+          if (diff > Math.PI) diff = 2 * Math.PI - diff;
+          if (diff < cone / 2) {
+            hitAny = true;
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            spawnBurst(e.x, e.y, ['#ffaa40', '#ff6020', '#ffffff'], 6);
+            if (isCrit) player.onCrit();
+            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
+          }
+        }
+        spawnBurst(player.x + player.facing * 20, player.y, ['#ffaa40', '#ff6020', '#ffffff'], 14);
+        if (hitAny) shake = Math.min(shake + 4, 7);
+        return true;
+      },
+    },
+    warCry: {
+      id: 'warCry', name: 'War Cry', letter: 'Y', classOf: 'warrior',
+      desc: '+40% damage for 6s', cost: 50, cooldown: 14.0, color: '#cc4040',
+      cast: (player, slot) => {
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        player.warCryTimer = isLegend ? 10 : 6;
+        spawnBurst(player.x, player.y, ['#cc4040', '#ff6060', '#ffaa40', '#ffffff'], 16);
+        return true;
+      },
+    },
+    charge: {
+      id: 'charge', name: 'Charge', letter: 'H', classOf: 'warrior',
+      desc: 'Dash to enemy, damage path (200% dmg)', cost: 35, cooldown: 3.0, color: '#ffaa40',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const target = findNearestEnemy(player.x, player.y, 250);
+        if (!target) return false;
+        const startX = player.x, startY = player.y;
+        const dx = target.x - startX, dy = target.y - startY;
+        const d = Math.hypot(dx, dy);
+        if (d < 1) return false;
+        const stepX = dx / d, stepY = dy / d;
+        const pathW = 30;
+        const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const ex = e.x - startX, ey = e.y - startY;
+          const proj = ex * stepX + ey * stepY;
+          if (proj < 0 || proj > d) continue;
+          const perpX = ex - proj * stepX, perpY = ey - proj * stepY;
+          if (Math.hypot(perpX, perpY) < pathW) {
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            spawnBurst(e.x, e.y, ['#ff6020', '#ffaa40'], 5);
+            if (isCrit) player.onCrit();
+            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
+          }
+        }
+        player.x = Math.max(player.r, Math.min(W - player.r, target.x - stepX * 15));
+        player.y = Math.max(player.r, Math.min(H - player.r, target.y - stepY * 15));
+        for (let i = 0; i < 18; i++) {
+          const t = i / 18;
+          spawnBurst(startX + dx * t, startY + dy * t, ['#cc4040', '#ff6060'], 2);
+        }
+        shake = Math.min(shake + 3, 6);
+        player.iframeTimer = Math.max(player.iframeTimer, 0.35);
+        return true;
+      },
+    },
+    groundSlam: {
+      id: 'groundSlam', name: 'Ground Slam', letter: 'S', classOf: 'warrior',
+      desc: 'AoE slam, slows enemies', cost: 45, cooldown: 4.5, color: '#cc6020',
+      cast: (player, slot) => {
+        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
+        const radius = isLegend ? 115 : 90;
+        const dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+        const slowDur = isLegend ? 3.5 : 2.5;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - player.x, dy = e.y - player.y;
+          if (dx*dx + dy*dy < radius*radius) {
+            const isCrit = Math.random() * 100 < player.critChance;
+            const finalDmg = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(finalDmg);
+            e.slowTimer = slowDur;
+            e.slowFactor = 0.45;
+            if (isCrit) player.onCrit();
+            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
+          }
+        }
+        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.55, maxLife: 0.55, color: '#cc6020', hit: new Set(), target: 'none' });
+        spawnBurst(player.x, player.y, ['#cc6020', '#ffaa40', '#ffffff'], 20);
+        shake = Math.min(shake + 5, 9);
+        return true;
+      },
+    },
     meteor: {
       id: 'meteor', name: 'Meteor', letter: 'T', classOf: 'wizard',
       desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
@@ -786,6 +948,7 @@
       this.resource = this.maxResource;
       this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
       this.hawkEyeTimer = 0;
+      this.warCryTimer = 0;
       this.level = 1; this.xp = 0; this.xpToNext = 5;
       this.pendingLevelUps = 0; this.kills = 0;
       this.weaponDamage = this.class.weaponDamage;
@@ -852,6 +1015,7 @@
       if (this.iframeTimer > 0) this.iframeTimer -= dt;
       if (this.hitFlash > 0) this.hitFlash -= dt;
       if (this.hawkEyeTimer > 0) this.hawkEyeTimer -= dt;
+      if (this.warCryTimer > 0) this.warCryTimer -= dt;
       if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
       if (this.resource < this.maxResource) this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
       for (let i = 0; i < this.abilityCooldowns.length; i++) {
@@ -859,10 +1023,43 @@
       }
       if (this.fireTimer > 0) this.fireTimer -= dt;
       if (this.fireTimer <= 0) {
-        const target = findNearestEnemy(this.x, this.y, this.weaponRange);
-        if (target) {
-          fireProjectile(this, target);
-          this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
+        if (this.class.meleeRange) {
+          // Melee auto-attack — AoE around player
+          const range = this.class.meleeRange;
+          const buff = this.warCryTimer > 0 ? 1.4 : 1;
+          const dmg = this.weaponDamage * this.dmgMult * buff;
+          let hitAny = false;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            const dx = e.x - this.x, dy = e.y - this.y;
+            if (dx*dx + dy*dy < range*range) {
+              hitAny = true;
+              const isCrit = Math.random() * 100 < this.effectiveCritChance();
+              const finalDmg = isCrit ? dmg * 2 : dmg;
+              const died = e.takeDamage(finalDmg);
+              spawnBurst(e.x, e.y, isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#ff6020', '#ffaa40'], isCrit ? 5 : 2);
+              if (isCrit) this.onCrit();
+              if (this.class.rageOnHit) {
+                this.resource = Math.min(this.maxResource, this.resource + this.class.rageOnHit);
+              }
+              if (died) {
+                if (e.isBoss) handleBossDeath(e);
+                else handleEnemyDeath(e);
+              }
+            }
+          }
+          if (hitAny) {
+            spawnBurst(this.x + this.facing * 12, this.y, ['#ff6020', '#ffaa40', '#ffffff'], 4);
+            this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
+          } else {
+            this.fireTimer = 0.1;
+          }
+        } else {
+          const target = findNearestEnemy(this.x, this.y, this.weaponRange);
+          if (target) {
+            fireProjectile(this, target);
+            this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
+          }
         }
       }
     }
@@ -872,6 +1069,9 @@
       this.hp -= actual;
       this.iframeTimer = this.IFRAME; this.hitFlash = 0.25;
       shake = Math.min(shake + 3, 6);
+      if (this.class.rageOnTake) {
+        this.resource = Math.min(this.maxResource, this.resource + this.class.rageOnTake);
+      }
       if (this.hp <= 0) { this.hp = 0; return true; }
       return false;
     }
@@ -893,13 +1093,31 @@
         ctx.fillRect(px - 8, py - 9, 16, 17);
         ctx.globalAlpha = 1;
       }
-      ctx.fillStyle = flash ? '#ff4444' : '#7ad96b';
+      if (this.warCryTimer > 0) {
+        const pulse = 0.5 + 0.4 * Math.sin(performance.now() * 0.018);
+        ctx.globalAlpha = pulse * 0.55;
+        ctx.fillStyle = '#ff4040';
+        ctx.fillRect(px - 8, py - 10, 16, 18);
+        ctx.globalAlpha = 1;
+      }
+      ctx.fillStyle = flash ? '#ff4444' : this.class.color;
       ctx.fillRect(px - 4, py - 2, 8, 7);
-      ctx.fillStyle = '#3a4a2a'; ctx.fillRect(px - 4, py + 2, 8, 1);
+      ctx.fillStyle = '#3a3a2a'; ctx.fillRect(px - 4, py + 2, 8, 1);
       ctx.fillStyle = '#4a3a2a';
       ctx.fillRect(px - 3, py + 5, 2, 2); ctx.fillRect(px + 1, py + 5, 2, 2);
       ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0'; ctx.fillRect(px - 3, py - 7, 6, 5);
-      ctx.fillStyle = '#5a3a2a'; ctx.fillRect(px - 3, py - 8, 6, 2);
+      if (this.class.id === 'wizard') {
+        ctx.fillStyle = '#3366aa';
+        ctx.fillRect(px - 3, py - 8, 6, 2);
+        ctx.fillRect(px - 2, py - 10, 4, 2);
+        ctx.fillRect(px - 1, py - 11, 2, 1);
+      } else if (this.class.id === 'warrior') {
+        ctx.fillStyle = '#888888'; ctx.fillRect(px - 3, py - 8, 6, 1);
+        ctx.fillStyle = '#cccccc';
+        ctx.fillRect(px - 4, py - 9, 1, 2); ctx.fillRect(px + 3, py - 9, 1, 2);
+      } else {
+        ctx.fillStyle = '#5a3a2a'; ctx.fillRect(px - 3, py - 8, 6, 2);
+      }
       ctx.fillStyle = '#000';
       const eo = this.facing === 1 ? 0 : -1;
       ctx.fillRect(px - 2 + eo, py - 5, 1, 1);
@@ -1415,7 +1633,7 @@
       }
     }
   }
-  // Handle a non-boss enemy death (XP gem, gold, loot drop). Boss deaths are inlined in collisions.
+  // Handle a non-boss enemy death (XP gem, gold, loot drop).
   function handleEnemyDeath(enemy) {
     player.kills++;
     spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
@@ -1425,6 +1643,27 @@
     goldFlashTimer = 0.8;
     if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
     shake = Math.min(shake + 1, 3);
+  }
+  // Handle boss death (extra XP/gold/loot + transition to next state).
+  function handleBossDeath(enemy) {
+    player.kills++;
+    spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 14);
+    xpGems.push(new XPGem(enemy.x, enemy.y, 8));
+    const goldAmt = rngInt(40, 80);
+    player.gold += goldAmt;
+    goldFlashTimer = 0.8;
+    let it = generateItem();
+    let tries = 0;
+    while (it.rarity.id === 'white' && tries < 6) { it = generateItem(); tries++; }
+    itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
+    itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
+    itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
+    shake = Math.min(shake + 8, 12);
+    bossRef = null;
+    bossDefeatedBannerTimer = 2.0;
+    lastBossName = enemy.name || 'BOSS';
+    if (isFinalWave(currentWave)) state = STATE.VICTORY;
+    else enterAbilityDraft();
   }
   // Trigger an AoE explosion at a position (used by explosive projectiles)
   function explodeAt(x, y, radius, damage) {
@@ -1726,37 +1965,8 @@
             explodeAt(proj.x, proj.y, proj.explosionRadius, proj.explosionDamage);
           }
           if (died) {
-            player.kills++;
-            spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
-            xpGems.push(new XPGem(enemy.x, enemy.y, enemy.isBoss ? 8 : 1));
-            // Gold drop
-            const goldAmt = enemy.isBoss ? rngInt(40, 80) : rngInt(1, 3);
-            player.gold += goldAmt;
-            goldFlashTimer = 0.8;
-            const dropChance = enemy.isBoss ? 1.0 : 0.18;
-            if (Math.random() < dropChance) {
-              if (enemy.isBoss) {
-                let it = generateItem();
-                let tries = 0;
-                while (it.rarity.id === 'white' && tries < 6) { it = generateItem(); tries++; }
-                itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
-                itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
-                itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
-              } else {
-                itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
-              }
-            }
-            shake = Math.min(shake + (enemy.isBoss ? 6 : 1), enemy.isBoss ? 10 : 3);
-            if (enemy.isBoss) {
-              bossRef = null;
-              bossDefeatedBannerTimer = 2.0;
-              lastBossName = enemy.name || 'BOSS';
-              if (isFinalWave(currentWave)) {
-                state = STATE.VICTORY;
-              } else {
-                enterAbilityDraft();
-              }
-            }
+            if (enemy.isBoss) handleBossDeath(enemy);
+            else handleEnemyDeath(enemy);
           }
           if (!proj.piercing) break;
         }
@@ -1877,6 +2087,55 @@
       });
     }
   }
+  // === SAVE / LOAD ===
+  function serializeItem(item) {
+    return {
+      id: item.id,
+      baseId: item.base.id,
+      rarityId: item.rarity.id,
+      affixes: item.affixes.map(a => ({ defId: a.def.id, value: a.value })),
+    };
+  }
+  function deserializeItem(s) {
+    const base = ITEM_BASES.find(b => b.id === s.baseId) || ITEM_BASES[0];
+    const rarity = RARITY_LIST.find(r => r.id === s.rarityId) || RARITY.WHITE;
+    const affixes = (s.affixes || []).map(a => {
+      const def = AFFIX_POOL.find(d => d.id === a.defId);
+      return def ? { def, value: a.value } : null;
+    }).filter(Boolean);
+    return { id: s.id || nextItemId++, base, rarity, affixes };
+  }
+  function loadSave() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (data.version !== SAVE_VERSION) return;
+      stash = (data.stash || []).map(deserializeItem);
+      stashSize = data.stashSize || STASH_SIZE_INIT;
+    } catch (e) { console.warn('load save failed:', e); }
+  }
+  function saveData() {
+    try {
+      localStorage.setItem(SAVE_KEY, JSON.stringify({
+        version: SAVE_VERSION,
+        stash: stash.map(serializeItem),
+        stashSize,
+      }));
+    } catch (e) { console.warn('save failed:', e); }
+  }
+  function commitBank() {
+    if (!pendingBank) return;
+    let item = null;
+    if (pendingBank.source === 'inv') item = player.inventory[pendingBank.key];
+    else if (pendingBank.source === 'eq') item = player.equipped[pendingBank.key];
+    if (item && stash.length < stashSize) {
+      stash.push(item);
+      saveData();
+    }
+    pendingBank = null;
+  }
+
   function resetWorld() {
     player = new Player(W / 2, H / 2, selectedClassId);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
@@ -2259,6 +2518,100 @@
     ctx.fillText('Press R, click, or face button to restart', W / 2, H / 2 + 30);
     ctx.textAlign = 'left';
   }
+  function drawStashBankingScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 16px monospace';
+    ctx.fillText('BANK ONE ITEM TO YOUR STASH', W / 2, 18);
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+    ctx.fillText('Click any run item to mark it. DONE saves it; SKIP discards all run loot.', W / 2, 32);
+
+    // Stash row (top)
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`STASH (${stash.length}/${stashSize})`, 20, 52);
+    const stashY = 58, sSize = 26, sGap = 4;
+    for (let i = 0; i < stashSize; i++) {
+      const col = i % 10;
+      const x = 20 + col * (sSize + sGap);
+      const item = stash[i];
+      ctx.fillStyle = '#22222a';
+      ctx.fillRect(x, stashY, sSize, sSize);
+      ctx.strokeStyle = '#444';
+      ctx.strokeRect(x + 0.5, stashY + 0.5, sSize - 1, sSize - 1);
+      if (item) drawItemInBox(item, x, stashY, sSize);
+    }
+
+    // Run loot
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('YOUR RUN LOOT', 20, 102);
+
+    const runItems = [];
+    for (const k of SLOT_ORDER) {
+      if (player.equipped[k]) runItems.push({ source: 'eq', key: k, item: player.equipped[k] });
+    }
+    for (let i = 0; i < player.inventory.length; i++) {
+      runItems.push({ source: 'inv', key: i, item: player.inventory[i] });
+    }
+
+    const cols = 10, slotSize = 28, slotGap = 4;
+    const startX = 20, startY = 112;
+    for (let i = 0; i < runItems.length; i++) {
+      const r = runItems[i];
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = startX + col * (slotSize + slotGap);
+      const y = startY + row * (slotSize + slotGap);
+      const hovered = mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize;
+      const isSel = pendingBank && pendingBank.source === r.source && pendingBank.key === r.key;
+      ctx.fillStyle = isSel ? '#3a3a45' : (hovered ? '#33333d' : '#22222a');
+      ctx.fillRect(x, y, slotSize, slotSize);
+      ctx.strokeStyle = isSel ? '#ffd23f' : '#444';
+      ctx.lineWidth = isSel ? 3 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+      ctx.lineWidth = 1;
+      drawItemInBox(r.item, x, y, slotSize, isSel);
+    }
+    if (runItems.length === 0) {
+      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('(no items collected this run)', W / 2, 180);
+    }
+
+    // Tooltip
+    let tooltipItem = null;
+    for (let i = 0; i < runItems.length; i++) {
+      const r = runItems[i];
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = startX + col * (slotSize + slotGap);
+      const y = startY + row * (slotSize + slotGap);
+      if (mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize) { tooltipItem = r.item; break; }
+    }
+    if (!tooltipItem && pendingBank) {
+      tooltipItem = pendingBank.source === 'inv' ? player.inventory[pendingBank.key] : player.equipped[pendingBank.key];
+    }
+    const tx = 20, ty = H - 95, tw = W - 40, th = 50;
+    ctx.fillStyle = '#1a1a22'; ctx.fillRect(tx, ty, tw, th);
+    ctx.strokeStyle = tooltipItem ? tooltipItem.rarity.color : '#333';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2); ctx.lineWidth = 1;
+    if (tooltipItem) {
+      ctx.fillStyle = tooltipItem.rarity.color; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 13);
+      ctx.fillStyle = '#ddd'; ctx.font = '7px monospace';
+      const afftext = tooltipItem.affixes.length === 0 ? '(no affixes)' : tooltipItem.affixes.map(a => a.def.fmt(a.value)).join('  -  ');
+      ctx.fillText(afftext, tx + 8, ty + 26);
+      if (pendingBank) {
+        ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 8px monospace';
+        ctx.fillText('SELECTED — WILL BE BANKED ON DONE', tx + 8, ty + 40);
+      }
+    } else {
+      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('Hover or click any run item', tx + tw / 2, ty + th / 2 + 3);
+    }
+
+    // Buttons
+    const stashFull = stash.length >= stashSize;
+    const doneLabel = !pendingBank ? 'DONE (no bank)' : (stashFull ? 'STASH FULL' : 'DONE - BANK IT');
+    drawButton(W - 280, H - 30, 130, 24, doneLabel, !(pendingBank && stashFull), '#7ad96b');
+    drawButton(W - 140, H - 30, 120, 24, 'SKIP', true, '#888');
+  }
   function drawClassSelectScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.92)';
     ctx.fillRect(0, 0, W, H);
@@ -2267,10 +2620,14 @@
     ctx.fillStyle = '#888'; ctx.font = '9px monospace';
     ctx.fillText('Click a card, press 1 / 2, or A / B button', W / 2, 56);
 
-    const classes = [CLASS.ARCHER, CLASS.WIZARD];
-    const cardW = 240, cardH = 220, gap = 30;
-    const totalW = cardW * 2 + gap;
+    const classes = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR];
+    const cardW = 180, cardH = 230, gap = 18;
+    const totalW = cardW * classes.length + gap * (classes.length - 1);
     const startX = (W - totalW) / 2;
+    // Stash count display
+    ctx.fillStyle = '#ffd23f'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillText(`STASH  ${stash.length}/${stashSize}`, W - 12, H - 12);
+    ctx.textAlign = 'left';
     const cardY = 76;
     for (let i = 0; i < classes.length; i++) {
       const c = classes[i];
@@ -2299,18 +2656,39 @@
       ctx.fillStyle = '#4a3a2a';
       ctx.fillRect(sx - 4, sy + 5, 2, 3); ctx.fillRect(sx + 2, sy + 5, 2, 3);
       ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 8, 8, 6);
-      ctx.fillStyle = c.id === 'wizard' ? '#3366aa' : '#5a3a2a';
+      ctx.fillStyle = c.id === 'wizard' ? '#3366aa' : c.id === 'warrior' ? '#5a2020' : '#5a3a2a';
       ctx.fillRect(sx - 4, sy - 9, 8, 2);
-      // Wizard hat
+      // Class headgear
       if (c.id === 'wizard') {
         ctx.fillStyle = '#3366aa';
         ctx.fillRect(sx - 4, sy - 11, 8, 2);
         ctx.fillRect(sx - 2, sy - 13, 4, 2);
         ctx.fillRect(sx - 1, sy - 14, 2, 1);
         ctx.fillStyle = '#ffd040'; ctx.fillRect(sx, sy - 12, 1, 1);
+      } else if (c.id === 'warrior') {
+        // Horned helmet
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(sx - 4, sy - 11, 8, 2);
+        ctx.fillRect(sx - 4, sy - 9, 1, 3);
+        ctx.fillRect(sx + 3, sy - 9, 1, 3);
+        // Horns
+        ctx.fillStyle = '#cccccc';
+        ctx.fillRect(sx - 5, sy - 13, 1, 2);
+        ctx.fillRect(sx + 4, sy - 13, 1, 2);
       }
       ctx.fillStyle = '#000';
       ctx.fillRect(sx - 3, sy - 6, 1, 1); ctx.fillRect(sx + 2, sy - 6, 1, 1);
+      // Class weapon
+      if (c.id === 'warrior') {
+        ctx.fillStyle = '#aaaaaa';
+        ctx.fillRect(sx + 6, sy - 6, 1, 8);
+        ctx.fillRect(sx + 5, sy - 6, 3, 1);
+      } else if (c.id === 'wizard') {
+        ctx.fillStyle = '#5a3a2a';
+        ctx.fillRect(sx + 6, sy - 6, 1, 10);
+        ctx.fillStyle = '#aa66ff';
+        ctx.fillRect(sx + 5, sy - 8, 3, 2);
+      }
 
       // Description
       ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
@@ -2734,6 +3112,7 @@
   // ============================================================
   // MAIN LOOP
   // ============================================================
+  loadSave();
   resetWorld();
   state = STATE.CLASS_SELECT; // start at class picker
   let lastTime = performance.now();
@@ -2834,22 +3213,64 @@
     }
     else if (state === STATE.DEAD || state === STATE.VICTORY) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
-      if (keyJustPressed.has('r') || mouseClicked || anyGp) returnToClassSelect();
+      if (keyJustPressed.has('r') || mouseClicked || anyGp) {
+        pendingBank = null;
+        state = STATE.STASH_BANKING;
+      }
+    }
+    else if (state === STATE.STASH_BANKING) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (gpJustPressed.has(1)) { pendingBank = null; state = STATE.CLASS_SELECT; }
+      if (mouseClicked) {
+        const runItems = [];
+        for (const k of SLOT_ORDER) {
+          if (player.equipped[k]) runItems.push({ source: 'eq', key: k });
+        }
+        for (let i = 0; i < player.inventory.length; i++) {
+          runItems.push({ source: 'inv', key: i });
+        }
+        const cols = 10, slotSize = 28, slotGap = 4, startX = 20, startY = 112;
+        let consumed = false;
+        for (let i = 0; i < runItems.length; i++) {
+          const r = runItems[i];
+          const col = i % cols, row = Math.floor(i / cols);
+          const x = startX + col * (slotSize + slotGap);
+          const y = startY + row * (slotSize + slotGap);
+          if (mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize) {
+            if (pendingBank && pendingBank.source === r.source && pendingBank.key === r.key) pendingBank = null;
+            else pendingBank = r;
+            consumed = true;
+            break;
+          }
+        }
+        if (!consumed) {
+          if (isHovering(W - 280, H - 30, 130, 24)) {
+            commitBank();
+            state = STATE.CLASS_SELECT;
+          } else if (isHovering(W - 140, H - 30, 120, 24)) {
+            pendingBank = null;
+            state = STATE.CLASS_SELECT;
+          }
+        }
+      }
     }
     else if (state === STATE.CLASS_SELECT) {
       updateVirtualCursor(dt);
       let picked = null;
+      const classIds = ['archer', 'wizard', 'warrior'];
       if (keyJustPressed.has('1') || gpJustPressed.has(0)) picked = 'archer';
       else if (keyJustPressed.has('2') || gpJustPressed.has(1)) picked = 'wizard';
+      else if (keyJustPressed.has('3') || gpJustPressed.has(2)) picked = 'warrior';
       else if (mouseClicked) {
-        const cardW = 240, cardH = 220, gap = 30;
-        const totalW = cardW * 2 + gap;
+        const cardW = 180, cardH = 230, gap = 18;
+        const totalW = cardW * 3 + gap * 2;
         const startX = (W - totalW) / 2;
         const cardY = 76;
-        for (let i = 0; i < 2; i++) {
+        for (let i = 0; i < 3; i++) {
           const cx = startX + i * (cardW + gap);
           if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
-            picked = i === 0 ? 'archer' : 'wizard';
+            picked = classIds[i];
             break;
           }
         }
@@ -2960,9 +3381,10 @@
     else if (state === STATE.INVENTORY) drawInventoryScreen();
     else if (state === STATE.SHOP) drawShopScreen();
     else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
+    else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
 
     // Virtual cursor draws on top of all UI
-    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT) {
+    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT || state === STATE.STASH_BANKING) {
       drawVirtualCursor();
     }
 
