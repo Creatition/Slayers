@@ -2982,7 +2982,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
-    ctx.fillText('Click=equip  Right-click=salvage  V=salvage whites  B=salvage blues  Tab/I/Esc=close', W / 2, 32);
+    ctx.fillText('Click=equip  Right-click=salvage  V=whites  B=blues  Y=rares  Tab/I/Esc=close', W / 2, 32);
 
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
     ctx.fillText('EQUIPPED', 30, 44);
@@ -3002,21 +3002,63 @@
       }
     }
 
-    const sx = 30, sy = 220;
-    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
-    ctx.fillText(`STATS  -  ${player.class.name.toUpperCase()}`, sx, sy);
-    ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
-    const lines = [
-      `HP        ${Math.ceil(player.hp)} / ${player.maxHp}`,
-      `FOCUS     ${Math.floor(player.resource)} / ${Math.floor(player.maxResource)}  (+${player.resourceRegen.toFixed(0)}/s)`,
-      `DAMAGE    x${player.dmgMult.toFixed(2)}`,
-      `ATKSPD    x${player.fireRateMult.toFixed(2)}`,
-      `ARMOR     ${player.armor}`,
-      `CRIT      ${player.critChance.toFixed(0)}%`,
-      `REGEN     ${player.regen}/s`,
-      `SPEED     ${player.speed.toFixed(0)}`,
-    ];
-    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], sx, sy + 12 + i * 10);
+    // ── Full stats breakdown (base+level vs gear) ──────────────────────────
+    const sx = 10, sy = 222;
+    ctx.fillStyle = '#888'; ctx.font = 'bold 8px monospace';
+    ctx.fillText(`STATS — ${player.class.name.toUpperCase()}  LV ${player.level}`, sx, sy);
+    // Helper: draw a stat row with gear/level-up callouts
+    function drawStat(label, value, gearPart, lvlPart, yOff) {
+      const rowY = sy + 11 + yOff;
+      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(label, sx, rowY);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(value, sx + 52, rowY);
+      let cx = sx + 84;
+      if (gearPart) {
+        ctx.fillStyle = '#55dd88'; ctx.font = '7px monospace';
+        ctx.fillText(gearPart, cx, rowY); cx += ctx.measureText(gearPart).width + 4;
+      }
+      if (lvlPart) {
+        ctx.fillStyle = '#ffcc44'; ctx.font = '7px monospace';
+        ctx.fillText(lvlPart, cx, rowY);
+      }
+    }
+    // Compute deltas
+    const hpGear = player.bonusMaxHp;
+    const hpLvl  = player.baseMaxHp - player.class.baseMaxHp;
+    const resGear = player.bonusMaxResource;
+    const resLvl  = player.baseMaxResource - player.class.baseMaxResource;
+    const dmgGear = player.bonusDmgPct;
+    const dmgLvl  = Math.round((player.baseDmgMult - 1) * 100);
+    const spdGear = Math.round(player.bonusMoveSpeed);
+    const spdLvl  = Math.round(player.baseSpeed - player.class.baseSpeed);
+    const frGear  = Math.round(player.bonusFireRatePct);
+    const frLvl   = Math.round((player.baseFireRateMult - 1) * 100);
+    const critGear = Math.round(player.bonusCritChance);
+    const critLvl  = Math.round(player.baseCritChance - player.class.baseCritChance);
+    const regenGear = player.bonusRegen;
+    const regenLvl  = Math.round(player.baseRegen);
+    drawStat('MAX HP',  `${Math.ceil(player.hp)}/${player.maxHp}`,
+      hpGear  ? `+${hpGear}g`  : '', hpLvl  ? `+${hpLvl}lv`  : '', 0);
+    drawStat(player.class.resourceName, `${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`,
+      resGear ? `+${resGear}g` : '', resLvl ? `+${resLvl}lv` : '', 11);
+    drawStat('DAMAGE',  `×${player.effectiveDmgMult().toFixed(2)}`,
+      dmgGear ? `+${dmgGear}%g` : '', dmgLvl ? `+${dmgLvl}%lv` : '', 22);
+    drawStat('ATK SPD', `×${player.effectiveFireRateMult().toFixed(2)}`,
+      frGear  ? `+${frGear}%g` : '', frLvl  ? `+${frLvl}%lv`  : '', 33);
+    drawStat('CRIT',    `${player.effectiveCritChance().toFixed(0)}%`,
+      critGear ? `+${critGear}%g` : '', critLvl ? `+${critLvl}%lv` : '', 44);
+    drawStat('ARMOR',   `${player.armor}`,
+      player.bonusArmor ? `+${player.bonusArmor}g` : '', '', 55);
+    drawStat('REGEN',   `${player.regen.toFixed(1)}/s`,
+      regenGear ? `+${regenGear}g` : '', regenLvl ? `+${regenLvl}lv` : '', 66);
+    drawStat('SPEED',   `${player.effectiveSpeed().toFixed(0)}`,
+      spdGear ? `+${spdGear}g` : '', spdLvl ? `+${spdLvl}lv` : '', 77);
+    // Gold + kills summary
+    ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`GOLD ${player.gold}g   KILLS ${player.kills}`, sx, sy + 100);
+    ctx.fillStyle = '#555'; ctx.font = '6px monospace';
+    ctx.fillText('GREEN=gear  YELLOW=level', sx, sy + 110);
 
     ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace';
     ctx.fillText(`INVENTORY (${player.inventory.length}/${player.INVENTORY_CAP})`, INV_START_X, 44);
@@ -3056,7 +3098,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-    ctx.fillText('Click=buy/select  Right-click=salvage  V=salvage whites  B=salvage blues  R=refresh', W / 2, 28);
+    ctx.fillText('Click=buy/select  Right-click=salvage  V=whites  B=blues  Y=rares  R=refresh', W / 2, 28);
 
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
@@ -3138,6 +3180,18 @@
     ctx.fillStyle = canSalvageBlues ? '#88aaff' : '#444';
     ctx.font = '7px monospace';
     ctx.fillText(`(${blueCount}) [B]`, salvBX + 45, salvY + 38);
+    // Salvage Rares button (yellow)
+    const rareCount = player.inventory.filter(it => it && it.rarity && it.rarity.id === 'yellow').length;
+    const canSalvageRares = rareCount > 0;
+    const salvRX = salvBX + 94;
+    drawButton(salvRX, salvY, 90, SHOP_ITEM_H, '', canSalvageRares, '#ffcc33');
+    ctx.fillStyle = canSalvageRares ? '#ffe888' : '#555';
+    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('SALVAGE', salvRX + 45, salvY + 16);
+    ctx.fillText('RARES', salvRX + 45, salvY + 26);
+    ctx.fillStyle = canSalvageRares ? '#ccaa22' : '#444';
+    ctx.font = '7px monospace';
+    ctx.fillText(`(${rareCount}) [Y]`, salvRX + 45, salvY + 38);
 
     // Equipped paper-doll (smaller layout)
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 8px monospace';
@@ -3557,9 +3611,10 @@
       if (gpJustPressed.has(0)) mouseClicked = true;
       // B button = close
       if (gpJustPressed.has(1)) toggleInventory();
-      // V = bulk-salvage whites, B = bulk-salvage blues
+      // V=whites  B=blues  Y=rares
       if (keyJustPressed.has('v')) bulkSalvage(0);
       if (keyJustPressed.has('b')) bulkSalvage(1);
+      if (keyJustPressed.has('y')) bulkSalvage(2);
       // Right-click = instant salvage
       if (rightClicked) {
         const rIdx = getInventoryIdxAtMouse();
@@ -3586,9 +3641,10 @@
       }
       // Refresh shortcut: R key
       if (keyJustPressed.has('r')) doRefreshShop();
-      // Bulk-salvage shortcuts: V=whites, B=blues
+      // Bulk-salvage shortcuts: V=whites, B=blues, Y=rares
       if (keyJustPressed.has('v')) bulkSalvage(0);
       if (keyJustPressed.has('b')) bulkSalvage(1);
+      if (keyJustPressed.has('y')) bulkSalvage(2);
       if (mouseClicked) {
         // Shop item buy
         const shopIdx = getShopIdxAtMouse();

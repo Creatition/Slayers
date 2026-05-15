@@ -151,10 +151,146 @@ const SPRITE_WARRIOR = {
   ],
 };
 
+
+const SPRITE_ROGUE = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-shadow 2=skin 3=hood-dark 4=leather-dark 5=leather-light 6=belt 7=blade 8=hilt 9=eye-glow
+  palette: [
+    '#0e081a', '#a87850', '#e8c898', '#2a1048',
+    '#4a2878', '#7848a8', '#1e0e38', '#c8c0e8',
+    '#8858b0', '#cc88ff',
+  ],
+  rows: [
+    '..03330...',  //  0  hood top
+    '.0333330..',  //  1  hood
+    '.0333340..',  //  2  hood brim (skin barely)
+    '.0309940..',  //  3  glowing eyes
+    '.0334430..',  //  4  mask shadow
+    '..03430...',  //  5  chin guard
+    '.04444487.',  //  6  shoulders + dagger tip
+    '0455554487',  //  7  chest + dagger
+    '0455554488',  //  8  body + dagger
+    '0466666488',  //  9  belt + hilt
+    '.04555488.',  // 10  hips
+    '.04..4488.',  // 11  legs
+    '.04..40...',  // 12  legs
+    '.06..60...',  // 13  boots
+  ],
+};
+
+const SPRITE_MONK = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-shadow 2=skin 3=topknot 4=gi-dark 5=gi-light 6=sash-gold 7=wrap 8=accent 9=eye
+  palette: [
+    '#1a0e08', '#a87850', '#e8c898', '#2a1a08',
+    '#7a3c10', '#d07028', '#d8a020', '#e8d098',
+    '#a05818', '#1a0e08',
+  ],
+  rows: [
+    '...03330..',  //  0  topknot tip
+    '..033330..',  //  1  topknot
+    '.0322230..',  //  2  forehead
+    '.0392290..',  //  3  eyes
+    '.0322220..',  //  4  cheeks
+    '..00220...',  //  5  chin
+    '.0444447..',  //  6  gi shoulders + raised fist
+    '0455554477',  //  7  gi chest + fist out
+    '0455554472',  //  8  gi body + bare forearm
+    '0466666472',  //  9  sash + arm
+    '.04555.7..',  // 10  hips + fist level
+    '.04..40...',  // 11  legs
+    '.04..40...',  // 12  legs
+    '.02..20...',  // 13  bare feet
+  ],
+};
+
+const SPRITE_PALADIN = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-shadow 2=skin 3=gold-trim 4=plate-dark 5=plate-light 6=gold 7=hammer-head 8=haft 9=visor
+  palette: [
+    '#1a1008', '#a87850', '#e8c898', '#d8a828',
+    '#4a4840', '#9a9888', '#c8a020', '#906820',
+    '#4a2c18', '#1a1008',
+  ],
+  rows: [
+    '..04440...',  //  0  helm dome top
+    '.0444440..',  //  1  helm dome
+    '.0444420..',  //  2  helm face gap
+    '.0499940..',  //  3  visor slit (eyes)
+    '.0444440..',  //  4  full visor lower
+    '..04440...',  //  5  chin guard
+    '.04444487.',  //  6  pauldrons + hammer head
+    '0455556487',  //  7  chest plate + hammer
+    '0455556488',  //  8  armor body + haft
+    '0466666488',  //  9  belt + haft
+    '5455556488',  // 10  hips + haft
+    '.04..4488.',  // 11  legs
+    '.04..40..8',  // 12  legs + butt end
+    '.06..60...',  // 13  greaves
+  ],
+};
+
+const SPRITE_WITCH_DOCTOR = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-shadow 2=skin 3=bone-mask 4=robe-dark 5=robe-light 6=beads-orange 7=staff-glow 8=staff-wood 9=eye-hollow
+  palette: [
+    '#0a1208', '#a87850', '#e8c898', '#d8d0b0',
+    '#183818', '#2a5828', '#d87020', '#77ff88',
+    '#4a3018', '#0a1208',
+  ],
+  rows: [
+    '.03333340.',  //  0  headdress wide
+    '0333333330',  //  1  headdress
+    '.0333340..',  //  2  skull mask top
+    '.0399940..',  //  3  hollow eye sockets
+    '.0333340..',  //  4  skull lower
+    '..03340...',  //  5  jaw
+    '.04444487.',  //  6  robe shoulders + staff glow
+    '0455554487',  //  7  robe chest + staff
+    '0455554488',  //  8  robe body
+    '0466666488',  //  9  bead necklace + staff
+    '.04555488.',  // 10  robe hem
+    '.04..4488.',  // 11  legs
+    '.04..4488.',  // 12  legs
+    '.04..40.8.',  // 13  hem end + staff tip
+  ],
+};
+
+const SPRITE_NECROMANCER = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-shadow 2=skin(pale) 3=cowl-deep 4=robe-dark 5=robe-mid 6=trim-purple 7=bone-glow 8=staff-bone 9=eye-glow
+  palette: [
+    '#0e0818', '#907060', '#d8c8b8', '#0a0618',
+    '#1a1230', '#2e224a', '#6644a0', '#ddccff',
+    '#9988cc', '#cc00ff',
+  ],
+  rows: [
+    '..03330...',  //  0  cowl peak
+    '.0333330..',  //  1  cowl deep
+    '.0333330..',  //  2  cowl shadow
+    '.0309930..',  //  3  pale glowing eyes
+    '.0333320..',  //  4  lower cowl (pale jaw)
+    '..03320...',  //  5  chin
+    '.04444487.',  //  6  robe shoulders + staff glow
+    '0455554487',  //  7  robe chest + staff
+    '0455554488',  //  8  robe body
+    '0466554488',  //  9  robe trim + staff
+    '.04555488.',  // 10  robe hem
+    '.04..4488.',  // 11  legs
+    '.04..4488.',  // 12  legs
+    '.04..40.8.',  // 13  hem + staff tip
+  ],
+};
+
 const PLAYER_SPRITES = {
-  archer:  SPRITE_ARCHER,
-  wizard:  SPRITE_WIZARD,
-  warrior: SPRITE_WARRIOR,
+  archer:      SPRITE_ARCHER,
+  wizard:      SPRITE_WIZARD,
+  warrior:     SPRITE_WARRIOR,
+  rogue:       SPRITE_ROGUE,
+  monk:        SPRITE_MONK,
+  paladin:     SPRITE_PALADIN,
+  witchdoctor: SPRITE_WITCH_DOCTOR,
+  necromancer: SPRITE_NECROMANCER,
 };
 
 // ============================================================
