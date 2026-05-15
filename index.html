@@ -134,7 +134,9 @@
   const gpJustPressed = new Set();
   let mouseX = -1, mouseY = -1;
   let mouseClicked = false;
+  let rightClicked = false;
   let virtualCursor = { x: W / 2, y: H / 2, active: false, idleTimer: 0 };
+  let gpClassIdx = 0; // highlighted card index for gamepad nav on class select
   const CURSOR_SPEED = 260; // px/sec
   let dpadCooldown = 0;
 
@@ -154,11 +156,12 @@
     mouseX = (e.clientX - rect.left) * (W / rect.width);
     mouseY = (e.clientY - rect.top) * (H / rect.height);
   });
-  canvas.addEventListener('mousedown', () => {
-    mouseClicked = true;
-    // Lazy-init audio on first user gesture.
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 2) { rightClicked = true; }
+    else { mouseClicked = true; }
     Sfx.init(); Sfx.resume();
   });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('gamepadconnected', (e) => { detectedGamepadType = detectGamepadType(e.gamepad.id); });
   window.addEventListener('gamepaddisconnected', () => {});
 
@@ -2327,6 +2330,8 @@
     ctx.textAlign = 'left';
   }
   function drawHud() {
+    // Skip player-stat bars on pure menu screens
+    if (state === STATE.CLASS_SELECT || state === STATE.TRIAL_LOADOUT) return;
     const hpx = 8, hpy = 8;
     ctx.fillStyle = '#000'; ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
     ctx.fillStyle = '#3a2020'; ctx.fillRect(hpx, hpy, 120, 6);
@@ -2827,12 +2832,21 @@
       const cx = startX + col * (cardW + gap);
       const cy = startY + row * (cardH + gap);
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
+      const gpHover = (i === gpClassIdx);
 
-      ctx.fillStyle = hovered ? '#2a2a38' : '#18181f';
+      ctx.fillStyle = (hovered || gpHover) ? '#2a2a38' : '#18181f';
       ctx.fillRect(cx, cy, cardW, cardH);
       ctx.strokeStyle = c.color;
-      ctx.lineWidth = hovered ? 3 : 2;
+      ctx.lineWidth = gpHover ? 4 : hovered ? 3 : 2;
       ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
+      // Extra glow rect for gamepad selection
+      if (gpHover) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.25 + 0.2 * Math.sin(performance.now() * 0.01);
+        ctx.strokeRect(cx + 3, cy + 3, cardW - 6, cardH - 6);
+        ctx.globalAlpha = 1;
+      }
       ctx.lineWidth = 1;
 
       // Key hint
@@ -2968,7 +2982,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
-    ctx.fillText('Click=equip  -  Shift+Click=salvage  -  V=salvage all whites  -  Tab/I/Esc=close', W / 2, 32);
+    ctx.fillText('Click=equip  Right-click=salvage  V=salvage whites  B=salvage blues  Tab/I/Esc=close', W / 2, 32);
 
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
     ctx.fillText('EQUIPPED', 30, 44);
@@ -3042,7 +3056,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-    ctx.fillText('Click to buy/select  -  Shift+Click inventory = instant salvage  -  V = salvage all whites  -  R = refresh', W / 2, 28);
+    ctx.fillText('Click=buy/select  Right-click=salvage  V=salvage whites  B=salvage blues  R=refresh', W / 2, 28);
 
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
@@ -3104,14 +3118,26 @@
     const salvY = refY;
     const whiteCount = player.inventory.filter(it => it && it.rarity.id === 'white').length;
     const canSalvageWhites = whiteCount > 0;
-    drawButton(salvX, salvY, 95, SHOP_ITEM_H, '', canSalvageWhites, '#cccccc');
+    drawButton(salvX, salvY, 90, SHOP_ITEM_H, '', canSalvageWhites, '#cccccc');
     ctx.fillStyle = canSalvageWhites ? '#eee' : '#555';
-    ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
-    ctx.fillText('SALVAGE', salvX + 47, salvY + 16);
-    ctx.fillText('WHITES', salvX + 47, salvY + 28);
-    ctx.fillStyle = canSalvageWhites ? '#cccccc' : '#555';
+    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('SALVAGE', salvX + 45, salvY + 16);
+    ctx.fillText('WHITES', salvX + 45, salvY + 26);
+    ctx.fillStyle = canSalvageWhites ? '#aaa' : '#444';
     ctx.font = '7px monospace';
-    ctx.fillText(`(${whiteCount})  [V]`, salvX + 47, salvY + 42);
+    ctx.fillText(`(${whiteCount}) [V]`, salvX + 45, salvY + 38);
+    // Salvage Blues button
+    const blueCount = player.inventory.filter(it => it && it.rarity && it.rarity.tier <= 1).length - whiteCount;
+    const canSalvageBlues = blueCount > 0;
+    const salvBX = salvX + 94;
+    drawButton(salvBX, salvY, 90, SHOP_ITEM_H, '', canSalvageBlues, '#5599ff');
+    ctx.fillStyle = canSalvageBlues ? '#aaddff' : '#555';
+    ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('SALVAGE', salvBX + 45, salvY + 16);
+    ctx.fillText('BLUES', salvBX + 45, salvY + 26);
+    ctx.fillStyle = canSalvageBlues ? '#88aaff' : '#444';
+    ctx.font = '7px monospace';
+    ctx.fillText(`(${blueCount}) [B]`, salvBX + 45, salvY + 38);
 
     // Equipped paper-doll (smaller layout)
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 8px monospace';
@@ -3446,39 +3472,40 @@
       }
     }
     else if (state === STATE.CLASS_SELECT) {
-      updateVirtualCursor(dt);
       // Tab or T key cycles mode
       if (keyJustPressed.has('t') || gpJustPressed.has(3)) cycleMode();
-      let picked = null;
       const classIds = ['archer', 'wizard', 'warrior', 'rogue', 'monk', 'paladin', 'witchdoctor', 'necromancer'];
-      // Keyboard 1-8 picks a class
+      const COLS = 4;
+      let picked = null;
+
+      // Keyboard 1-8
       for (let ki = 0; ki < classIds.length; ki++) {
         if (keyJustPressed.has(String(ki + 1))) { picked = classIds[ki]; break; }
       }
-      // Gamepad face buttons pick first 4
-      if (!picked) {
-        if (gpJustPressed.has(0)) picked = 'archer';
-        else if (gpJustPressed.has(1)) picked = 'wizard';
-        else if (gpJustPressed.has(2)) picked = 'warrior';
-        else if (gpJustPressed.has(3)) picked = 'rogue';
-      }
+
+      // Gamepad d-pad grid navigation
+      if (gpJustPressed.has(15)) { gpClassIdx = (gpClassIdx % COLS === COLS - 1) ? gpClassIdx : gpClassIdx + 1; }
+      if (gpJustPressed.has(14)) { gpClassIdx = (gpClassIdx % COLS === 0) ? gpClassIdx : gpClassIdx - 1; }
+      if (gpJustPressed.has(13)) { gpClassIdx = Math.min(classIds.length - 1, gpClassIdx + COLS); }
+      if (gpJustPressed.has(12)) { gpClassIdx = Math.max(0, gpClassIdx - COLS); }
+      // A/Cross = confirm highlighted
+      if (gpJustPressed.has(0)) picked = classIds[gpClassIdx];
+
+      // Mouse click
       if (!picked && mouseClicked) {
-        // Mode toggle button (top-left)
         if (isHovering(8, 8, 140, 20)) {
           cycleMode();
         } else {
           const cardW = 148, cardH = 138, gap = 6;
-          const cols = 4;
-          const totalW = cardW * cols + gap * (cols - 1);
+          const totalW = cardW * COLS + gap * (COLS - 1);
           const startX = Math.floor((W - totalW) / 2);
           const startY = 48;
           for (let i = 0; i < classIds.length; i++) {
-            const col = i % cols, row = Math.floor(i / cols);
+            const col = i % COLS, row = Math.floor(i / COLS);
             const cx = startX + col * (cardW + gap);
             const cy = startY + row * (cardH + gap);
             if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH) {
-              picked = classIds[i];
-              break;
+              picked = classIds[i]; break;
             }
           }
         }
@@ -3530,8 +3557,14 @@
       if (gpJustPressed.has(0)) mouseClicked = true;
       // B button = close
       if (gpJustPressed.has(1)) toggleInventory();
-      // V = bulk-salvage all white items
+      // V = bulk-salvage whites, B = bulk-salvage blues
       if (keyJustPressed.has('v')) bulkSalvage(0);
+      if (keyJustPressed.has('b')) bulkSalvage(1);
+      // Right-click = instant salvage
+      if (rightClicked) {
+        const rIdx = getInventoryIdxAtMouse();
+        if (rIdx >= 0 && player.inventory[rIdx]) salvageInventoryItem(rIdx);
+      }
       if (mouseClicked) {
         const eqSlot = getEquippedSlotAtMouse();
         if (eqSlot && player.equipped[eqSlot]) unequipSlot(eqSlot);
@@ -3553,8 +3586,9 @@
       }
       // Refresh shortcut: R key
       if (keyJustPressed.has('r')) doRefreshShop();
-      // Bulk-salvage whites shortcut: V key
+      // Bulk-salvage shortcuts: V=whites, B=blues
       if (keyJustPressed.has('v')) bulkSalvage(0);
+      if (keyJustPressed.has('b')) bulkSalvage(1);
       if (mouseClicked) {
         // Shop item buy
         const shopIdx = getShopIdxAtMouse();
@@ -3571,6 +3605,11 @@
             // Bulk salvage whites button
             bulkSalvage(0);
           } else {
+            // Right-click = instant salvage from shop screen
+            if (rightClicked) {
+              const rIdxS = getInventoryIdxAtMouse();
+              if (rIdxS >= 0 && player.inventory[rIdxS]) { salvageInventoryItem(rIdxS); }
+            }
             // Inventory click — select (or Shift+Click = instant salvage)
             let invHit = -1;
             for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
@@ -3660,6 +3699,7 @@
   function finalizeFrame() {
     keyJustPressed.clear();
     mouseClicked = false;
+    rightClicked = false;
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);

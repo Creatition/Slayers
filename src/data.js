@@ -1179,15 +1179,15 @@ function waveConfig(w) {
 // ENEMY TYPES
 // ============================================================
 const ENEMY_TYPES = {
-  skeleton:   { hp: 8,  speedRange: [38, 56],  dmg: 5,  r: 4, name: 'Skeleton' },
-  zombie:     { hp: 18, speedRange: [22, 32],  dmg: 8,  r: 5, name: 'Zombie' },
-  rat:        { hp: 3,  speedRange: [78, 100], dmg: 3,  r: 3, name: 'Crypt Rat' },
-  yeti:       { hp: 28, speedRange: [28, 38],  dmg: 11, r: 6, name: 'Yeti' },
-  frostWolf:  { hp: 7,  speedRange: [85, 110], dmg: 6,  r: 4, name: 'Frost Wolf' },
-  imp:        { hp: 5,  speedRange: [60, 80],  dmg: 5,  r: 3, name: 'Imp', ranged: true },
-  hellhound:  { hp: 16, speedRange: [55, 75],  dmg: 10, r: 4, name: 'Hellhound' },
-  shadow:     { hp: 22, speedRange: [40, 55],  dmg: 12, r: 5, name: 'Shadow' },
-  voidCaster: { hp: 12, speedRange: [25, 35],  dmg: 8,  r: 4, name: 'Void Caster', ranged: true },
+  skeleton:   { hp: 8,  speedRange: [42, 62],  dmg: 10, r: 4, name: 'Skeleton' },
+  zombie:     { hp: 18, speedRange: [24, 36],  dmg: 16, r: 5, name: 'Zombie' },
+  rat:        { hp: 3,  speedRange: [85, 110], dmg: 6,  r: 3, name: 'Crypt Rat' },
+  yeti:       { hp: 28, speedRange: [30, 42],  dmg: 22, r: 6, name: 'Yeti' },
+  frostWolf:  { hp: 7,  speedRange: [90, 118], dmg: 12, r: 4, name: 'Frost Wolf' },
+  imp:        { hp: 5,  speedRange: [65, 85],  dmg: 10, r: 3, name: 'Imp', ranged: true },
+  hellhound:  { hp: 16, speedRange: [60, 82],  dmg: 20, r: 4, name: 'Hellhound' },
+  shadow:     { hp: 22, speedRange: [44, 60],  dmg: 24, r: 5, name: 'Shadow' },
+  voidCaster: { hp: 12, speedRange: [28, 40],  dmg: 15, r: 4, name: 'Void Caster', ranged: true },
 };
 function pickEnemyType(w) {
   const biome = biomeFor(w);
