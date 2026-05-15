@@ -2973,13 +2973,13 @@
     ctx.lineWidth = selected ? 3 : 2;
     ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
     ctx.lineWidth = 1;
-    // Try sprite first, fall back to rarity letter
     const spr = (typeof ITEM_SPRITES !== 'undefined') && ITEM_SPRITES[item.base.id];
     if (spr && typeof drawSprite === 'function') {
-      // Tint the sprite with rarity color via a subtle overlay after drawing
-      drawSprite(ctx, spr, Math.floor(x + size / 2), Math.floor(y + size / 2), false, false, 2);
-      // Rarity color tint overlay (very faint)
-      ctx.globalAlpha = 0.18;
+      // Pick scale so sprite fills ~75% of box
+      const scale = Math.max(1, Math.floor(size * 0.75 / spr.w));
+      drawSprite(ctx, spr, Math.floor(x + size / 2), Math.floor(y + size / 2), false, false, scale);
+      // Subtle rarity tint
+      ctx.globalAlpha = 0.15;
       ctx.fillStyle = item.rarity.color;
       ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
       ctx.globalAlpha = 1;
@@ -3141,12 +3141,14 @@
       ctx.strokeRect(x + 0.5, y + 0.5, SHOP_ITEM_W - 1, SHOP_ITEM_H - 1);
       ctx.lineWidth = 1;
       if (item) {
-        drawItemInBox(item, x + (SHOP_ITEM_W - 26) / 2, y + 4, 26);
+        drawItemInBox(item, x + (SHOP_ITEM_W - 36) / 2, y + 2, 36);
+        ctx.fillStyle = item.rarity.color; ctx.font = '6px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(item.base.name, x + SHOP_ITEM_W / 2, y + 42);
         const price = itemPrice(item);
         const canBuy = player.gold >= price && player.inventory.length < player.INVENTORY_CAP;
         ctx.fillStyle = canBuy ? '#ffd23f' : '#664020';
-        ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(`${price}g`, x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H - 6);
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(`${price}g`, x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H - 2);
         // Lock badge
         if (shopLocked[i]) {
           ctx.fillStyle = 'rgba(255,220,60,0.18)';
@@ -3189,7 +3191,7 @@
     ctx.font = '7px monospace';
     ctx.fillText(`(${whiteCount}) [V]`, salvX + 45, salvY + 38);
     // Salvage Blues button
-    const blueCount = player.inventory.filter(it => it && it.rarity && it.rarity.tier <= 1).length - whiteCount;
+    const blueCount = player.inventory.filter(it => it && it.rarity && it.rarity.id === 'blue').length;
     const canSalvageBlues = blueCount > 0;
     const salvBX = salvX + 94;
     drawButton(salvBX, salvY, 90, SHOP_ITEM_H, '', canSalvageBlues, '#5599ff');
