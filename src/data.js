@@ -148,10 +148,60 @@ const CLASS = {
     baseMaxResource: 150, baseResourceRegen: 0, critResourceGain: 0,
     signature: 'whirlwind',
   },
+  ROGUE: {
+    id: 'rogue', name: 'Rogue', color: '#cc88ff',
+    desc: 'Fastest attacks, highest crit. ENERGY refills quickly.',
+    baseMaxHp: 70, baseSpeed: 125, baseCritChance: 10,
+    weaponDamage: 3, weaponFireRate: 3.0, weaponRange: 130, weaponProjSpeed: 340,
+    resourceName: 'ENERGY', resourceColor: '#cc88ff',
+    baseMaxResource: 80, baseResourceRegen: 30, critResourceGain: 0,
+    signature: 'shadowStrike',
+  },
+  MONK: {
+    id: 'monk', name: 'Monk', color: '#ffaa44',
+    desc: 'Close-range brawler. Chi flows steadily. Heals through combat.',
+    baseMaxHp: 90, baseSpeed: 115, baseCritChance: 5,
+    weaponDamage: 5, weaponFireRate: 2.2, weaponRange: 110, weaponProjSpeed: 260,
+    resourceName: 'CHI', resourceColor: '#ffaa44',
+    baseMaxResource: 80, baseResourceRegen: 12, critResourceGain: 8,
+    signature: 'fistsOfThunder',
+  },
+  PALADIN: {
+    id: 'paladin', name: 'Paladin', color: '#ffe866',
+    desc: 'Holy tank. Hits heal. Consecrated ground burns the wicked.',
+    baseMaxHp: 110, baseSpeed: 85, baseCritChance: 4,
+    weaponDamage: 7, weaponFireRate: 1.5, weaponRange: 170, weaponProjSpeed: 230,
+    resourceName: 'HOLY POWER', resourceColor: '#ffe866',
+    baseMaxResource: 100, baseResourceRegen: 7, critResourceGain: 0,
+    signature: 'holyNova',
+  },
+  WITCH_DOCTOR: {
+    id: 'witchdoctor', name: 'Witch Doctor', color: '#55dd66',
+    desc: 'Long-range hex caster. MOJO fuels devastating curses.',
+    baseMaxHp: 75, baseSpeed: 88, baseCritChance: 3,
+    weaponDamage: 4, weaponFireRate: 1.2, weaponRange: 260, weaponProjSpeed: 185,
+    resourceName: 'MOJO', resourceColor: '#55dd66',
+    baseMaxResource: 120, baseResourceRegen: 8, critResourceGain: 0,
+    signature: 'plagueFrogs',
+  },
+  NECROMANCER: {
+    id: 'necromancer', name: 'Necromancer', color: '#9988cc',
+    desc: 'Master of death. Bone spells pierce. Blood sacrifices shatter.',
+    baseMaxHp: 65, baseSpeed: 88, baseCritChance: 4,
+    weaponDamage: 5, weaponFireRate: 1.1, weaponRange: 230, weaponProjSpeed: 200,
+    resourceName: 'ESSENCE', resourceColor: '#9988cc',
+    baseMaxResource: 100, baseResourceRegen: 10, critResourceGain: 0,
+    signature: 'boneSpear',
+  },
 };
 function getClassById(id) {
-  if (id === 'wizard') return CLASS.WIZARD;
-  if (id === 'warrior') return CLASS.WARRIOR;
+  if (id === 'wizard')      return CLASS.WIZARD;
+  if (id === 'warrior')     return CLASS.WARRIOR;
+  if (id === 'rogue')       return CLASS.ROGUE;
+  if (id === 'monk')        return CLASS.MONK;
+  if (id === 'paladin')     return CLASS.PALADIN;
+  if (id === 'witchdoctor') return CLASS.WITCH_DOCTOR;
+  if (id === 'necromancer') return CLASS.NECROMANCER;
   return CLASS.ARCHER;
 }
 
@@ -554,6 +604,521 @@ const ABILITIES = {
       return true;
     },
   },
+
+  // ── ROGUE ────────────────────────────────────────────────────
+  shadowStrike: {
+    id: 'shadowStrike', name: 'Shadow Strike', letter: 'S', classOf: 'rogue',
+    desc: 'Blink behind nearest enemy, 350% dmg + brief iframe',
+    cost: 20, cooldown: 4.0, color: '#cc88ff',
+    cast: (player) => {
+      const target = findNearestEnemy(player.x, player.y, 300);
+      if (!target) return false;
+      const dx = target.x - player.x, dy = target.y - player.y;
+      const d = Math.hypot(dx, dy) || 1;
+      spawnBurst(player.x, player.y, ['#cc88ff', '#ffffff'], 8);
+      player.x = Math.max(player.r, Math.min(W - player.r, target.x - (dx/d) * 16));
+      player.y = Math.max(player.r, Math.min(H - player.r, target.y - (dy/d) * 16));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.4);
+      const isCrit = true;
+      const dmg = player.weaponDamage * player.dmgMult * 3.5;
+      const died = target.takeDamage(dmg, { crit: true });
+      player.onCrit();
+      spawnBurst(player.x, player.y, ['#cc88ff', '#ff88ff', '#ffffff'], 14);
+      if (died) handleEnemyDeath(target);
+      shake = Math.min(shake + 3, 6);
+      return true;
+    },
+  },
+  bladeFlurry: {
+    id: 'bladeFlurry', name: 'Blade Flurry', letter: 'F', classOf: 'rogue',
+    desc: '5 daggers in a forward arc',
+    cost: 30, cooldown: 2.5, color: '#dd99ff',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, 200);
+      const baseAngle = target ? Math.atan2(target.y - player.y, target.x - player.x) : 0;
+      for (let i = 0; i < 5; i++) {
+        const t = (i / 4) * 2 - 1;
+        const a = baseAngle + t * 0.55;
+        const sp = player.weaponProjSpeed * 1.1;
+        let dmg = player.weaponDamage * player.dmgMult * 1.1 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        projectiles.push(new Projectile(player.x, player.y, Math.cos(a)*sp, Math.sin(a)*sp, dmg, 0.5, isCrit));
+      }
+      spawnBurst(player.x, player.y, ['#cc88ff', '#ffffff'], 8);
+      shake = Math.min(shake + 1.5, 5);
+      return true;
+    },
+  },
+  smokeBomb: {
+    id: 'smokeBomb', name: 'Smoke Bomb', letter: 'B', classOf: 'rogue',
+    desc: 'Slow nearby enemies, gain +40% speed for 4s',
+    cost: 35, cooldown: 8.0, color: '#887799',
+    cast: (player) => {
+      const radius = 100;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) { e.slowTimer = 3.5; e.slowFactor = 0.35; }
+      }
+      player.smokeBombTimer = 4.0;
+      spawnBurst(player.x, player.y, ['#887799', '#bbaacc', '#ffffff'], 20);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+  backstab: {
+    id: 'backstab', name: 'Backstab', letter: 'K', classOf: 'rogue',
+    desc: 'Guaranteed crit for 450% dmg on nearest',
+    cost: 40, cooldown: 5.0, color: '#ff66cc',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, 220);
+      if (!target) return false;
+      const dmg = player.weaponDamage * player.dmgMult * 4.5 * rDmg * 2;
+      const died = target.takeDamage(dmg, { crit: true });
+      player.onCrit();
+      spawnBurst(target.x, target.y, ['#ff66cc', '#ff88ff', '#ffffff'], 16);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.07);
+      shake = Math.min(shake + 4, 7);
+      if (died) handleEnemyDeath(target);
+      return true;
+    },
+  },
+  evasion: {
+    id: 'evasion', name: 'Evasion', letter: 'E', classOf: 'rogue',
+    desc: 'Dash away from nearest threat, 0.5s iframe',
+    cost: 15, cooldown: 3.0, color: '#aa66cc',
+    cast: (player) => {
+      const target = findNearestEnemy(player.x, player.y, 250);
+      const dx = target ? player.x - target.x : 1;
+      const dy = target ? player.y - target.y : 0;
+      const d = Math.hypot(dx, dy) || 1;
+      player.x = Math.max(player.r, Math.min(W - player.r, player.x + (dx/d) * 80));
+      player.y = Math.max(player.r, Math.min(H - player.r, player.y + (dy/d) * 80));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.5);
+      spawnBurst(player.x, player.y, ['#cc88ff', '#ffffff'], 10);
+      return true;
+    },
+  },
+
+  // ── MONK ─────────────────────────────────────────────────────
+  fistsOfThunder: {
+    id: 'fistsOfThunder', name: 'Fists of Thunder', letter: 'F', classOf: 'monk',
+    desc: '5 rapid strikes on nearest for 120% dmg each',
+    cost: 25, cooldown: 2.0, color: '#ffaa44',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, 140);
+      if (!target) return false;
+      let died = false;
+      for (let i = 0; i < 5; i++) {
+        const isCrit = Math.random() * 100 < player.critChance;
+        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        if (!died && target.alive) { died = target.takeDamage(dmg, { crit: isCrit }); }
+        spawnBurst(target.x + (Math.random()-0.5)*10, target.y + (Math.random()-0.5)*10, ['#ffaa44','#ffffff'], 3);
+      }
+      if (died) handleEnemyDeath(target);
+      shake = Math.min(shake + 2, 5);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.05);
+      return true;
+    },
+  },
+  innerSanctuary: {
+    id: 'innerSanctuary', name: 'Inner Sanctuary', letter: 'I', classOf: 'monk',
+    desc: 'Heal 25% max HP',
+    cost: 40, cooldown: 8.0, color: '#ffe0a0',
+    cast: (player) => {
+      const heal = Math.round(player.maxHp * 0.25);
+      player.hp = Math.min(player.maxHp, player.hp + heal);
+      spawnBurst(player.x, player.y, ['#ffe0a0', '#ffdd44', '#ffffff'], 18);
+      return true;
+    },
+  },
+  cycloneStrike: {
+    id: 'cycloneStrike', name: 'Cyclone Strike', letter: 'C', classOf: 'monk',
+    desc: 'Pull enemies in 120px toward you, then deal AoE',
+    cost: 35, cooldown: 4.0, color: '#ffcc66',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const radius = 120;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = player.x - e.x, dy = player.y - e.y;
+        const d = Math.hypot(dx, dy);
+        if (d < radius) {
+          e.x += (dx/d) * Math.min(d * 0.6, 40);
+          e.y += (dy/d) * Math.min(d * 0.6, 40);
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.4, maxLife: 0.4, color: '#ffaa44', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#ffaa44', '#ffdd44', '#ffffff'], 18);
+      shake = Math.min(shake + 3, 6);
+      return true;
+    },
+  },
+  sevenSidedStrike: {
+    id: 'sevenSidedStrike', name: 'Seven-Sided Strike', letter: 'V', classOf: 'monk',
+    desc: '7 hits distributed among nearby enemies',
+    cost: 50, cooldown: 5.0, color: '#ff8822',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const nearby = enemies.filter(e => e.alive && Math.hypot(e.x-player.x, e.y-player.y) < 130);
+      if (!nearby.length) return false;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+      for (let i = 0; i < 7; i++) {
+        const e = nearby[Math.floor(Math.random() * nearby.length)];
+        if (!e.alive) continue;
+        const isCrit = Math.random() * 100 < player.critChance;
+        const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+        if (isCrit) player.onCrit();
+        spawnBurst(e.x, e.y, ['#ffaa44', '#ff8822'], 4);
+        if (died) { handleEnemyDeath(e); }
+      }
+      shake = Math.min(shake + 3, 6);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.06);
+      return true;
+    },
+  },
+  mantraOfHealing: {
+    id: 'mantraOfHealing', name: 'Mantra of Healing', letter: 'M', classOf: 'monk',
+    desc: '+4 HP/s regen for 8s',
+    cost: 30, cooldown: 12.0, color: '#ffeeaa',
+    cast: (player) => {
+      player.mantraTimer = 8.0;
+      spawnBurst(player.x, player.y, ['#ffeeaa', '#ffdd44', '#ffffff'], 14);
+      return true;
+    },
+  },
+
+  // ── PALADIN ──────────────────────────────────────────────────
+  holyNova: {
+    id: 'holyNova', name: 'Holy Nova', letter: 'N', classOf: 'paladin',
+    desc: 'AoE blast: damage enemies, heal 4 HP each hit',
+    cost: 40, cooldown: 5.0, color: '#ffe866',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const radius = 90;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      let healed = 0;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          healed++;
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      player.hp = Math.min(player.maxHp, player.hp + healed * 4);
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.45, maxLife: 0.45, color: '#ffe866', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#ffe866', '#ffffff', '#ffcc44'], 20);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+  consecration: {
+    id: 'consecration', name: 'Consecration', letter: 'C', classOf: 'paladin',
+    desc: 'Holy ground burns enemies for 5s',
+    cost: 50, cooldown: 8.0, color: '#ffdd44',
+    cast: (player, slot) => {
+      const dmg = Math.round(player.weaponDamage * player.dmgMult * 0.4);
+      groundEffects.push({ type: 'holy_zone', x: player.x, y: player.y, r: 55, life: 5.0, maxLife: 5.0, damage: dmg, cooldowns: new Map() });
+      spawnBurst(player.x, player.y, ['#ffe866', '#ffdd44', '#ffffff'], 14);
+      return true;
+    },
+  },
+  divineShield: {
+    id: 'divineShield', name: 'Divine Shield', letter: 'D', classOf: 'paladin',
+    desc: '2s full invincibility + knockback pulse',
+    cost: 60, cooldown: 15.0, color: '#ffffff',
+    cast: (player) => {
+      player.iframeTimer = Math.max(player.iframeTimer, 2.0);
+      const radius = 80;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        const d = Math.hypot(dx, dy);
+        if (d < radius) {
+          e.x += (dx/d || 1) * (radius - d) * 1.2;
+          e.y += (dy/d || 0) * (radius - d) * 1.2;
+        }
+      }
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.5, maxLife: 0.5, color: '#ffe866', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#ffffff', '#ffe866', '#ffcc44'], 24);
+      shake = Math.min(shake + 3, 6);
+      return true;
+    },
+  },
+  hammerOfJustice: {
+    id: 'hammerOfJustice', name: 'Hammer of Justice', letter: 'H', classOf: 'paladin',
+    desc: 'Heavy projectile slows on impact (220% dmg)',
+    cost: 30, cooldown: 3.0, color: '#ffcc44',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
+      if (!target) return false;
+      const dx = target.x - player.x, dy = target.y - player.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const sp = player.weaponProjSpeed * 0.55;
+      let dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg;
+      const isCrit = Math.random() * 100 < player.critChance;
+      if (isCrit) { dmg *= 2; player.onCrit(); }
+      const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, d/sp + 0.1, isCrit);
+      proj.r = 6; proj.theme = 'light';
+      proj.onHit = (e) => { e.slowTimer = 2.5; e.slowFactor = 0.3; };
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#ffe866', '#ffcc44'], 8);
+      return true;
+    },
+  },
+  layOnHands: {
+    id: 'layOnHands', name: 'Lay on Hands', letter: 'L', classOf: 'paladin',
+    desc: 'Restore 70% max HP',
+    cost: 80, cooldown: 20.0, color: '#fffacc',
+    cast: (player) => {
+      const heal = Math.round(player.maxHp * 0.70);
+      player.hp = Math.min(player.maxHp, player.hp + heal);
+      spawnBurst(player.x, player.y, ['#ffffff', '#ffe866', '#fffacc'], 24);
+      return true;
+    },
+  },
+
+  // ── WITCH DOCTOR ─────────────────────────────────────────────
+  plagueFrogs: {
+    id: 'plagueFrogs', name: 'Plague of Frogs', letter: 'T', classOf: 'witchdoctor',
+    desc: '8 piercing toad projectiles in a ring',
+    cost: 25, cooldown: 3.0, color: '#55dd66',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = 8;
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        const sp = player.weaponProjSpeed * 0.75;
+        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        const proj = new Projectile(player.x, player.y, Math.cos(a)*sp, Math.sin(a)*sp, dmg, 1.2, isCrit);
+        proj.piercing = true; proj.r = 3; proj.theme = 'arcane';
+        projectiles.push(proj);
+      }
+      spawnBurst(player.x, player.y, ['#55dd66', '#88ff88', '#ffffff'], 12);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+  soulHarvest: {
+    id: 'soulHarvest', name: 'Soul Harvest', letter: 'H', classOf: 'witchdoctor',
+    desc: 'AoE damage, heal 4 HP per enemy hit',
+    cost: 35, cooldown: 5.0, color: '#22aa44',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const radius = 100;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+      let hits = 0;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          hits++;
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      player.hp = Math.min(player.maxHp, player.hp + hits * 4);
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.4, maxLife: 0.4, color: '#55dd66', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#55dd66', '#88ff88', '#ffffff'], 16);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+  bigBadVoodoo: {
+    id: 'bigBadVoodoo', name: 'Big Bad Voodoo', letter: 'V', classOf: 'witchdoctor',
+    desc: '+35% dmg & +15% speed for 8s',
+    cost: 60, cooldown: 15.0, color: '#aaff44',
+    cast: (player) => {
+      player.bigBadVoodooTimer = 8.0;
+      spawnBurst(player.x, player.y, ['#55dd66', '#aaff44', '#ffff44', '#ffffff'], 20);
+      return true;
+    },
+  },
+  corpseSpiders: {
+    id: 'corpseSpiders', name: 'Corpse Spiders', letter: 'S', classOf: 'witchdoctor',
+    desc: 'Explosive projectile splits into 3 fast piercers',
+    cost: 30, cooldown: 3.5, color: '#885522',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, 260);
+      if (!target) return false;
+      const dx = target.x - player.x, dy = target.y - player.y;
+      const d = Math.hypot(dx, dy) || 1;
+      let dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg;
+      const isCrit = Math.random() * 100 < player.critChance;
+      if (isCrit) { dmg *= 2; player.onCrit(); }
+      const proj = new Projectile(player.x, player.y, (dx/d)*player.weaponProjSpeed*0.8, (dy/d)*player.weaponProjSpeed*0.8, dmg, d/(player.weaponProjSpeed*0.8)+0.1, isCrit);
+      proj.r = 5; proj.theme = 'arcane';
+      proj.explosive = true;
+      proj.explosionRadius = 30;
+      proj.explosionDamage = dmg * 0.5;
+      // Spawn 3 piercers from impact point (handled via explosive callback — use groundEffect proxy)
+      proj.onExplode = (px2, py2) => {
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + Math.random() * 0.4;
+          const sp2 = player.weaponProjSpeed * 1.2;
+          const p2 = new Projectile(px2, py2, Math.cos(a)*sp2, Math.sin(a)*sp2, dmg*0.5, 0.6, false);
+          p2.piercing = true; p2.r = 2; p2.theme = 'arcane';
+          projectiles.push(p2);
+        }
+      };
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#885522', '#55dd66'], 8);
+      return true;
+    },
+  },
+  locustSwarm: {
+    id: 'locustSwarm', name: 'Locust Swarm', letter: 'L', classOf: 'witchdoctor',
+    desc: 'Slow + damage all enemies in 130px',
+    cost: 40, cooldown: 6.0, color: '#66aa22',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const radius = 130;
+      const dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          e.slowTimer = 3.0; e.slowFactor = 0.45;
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      spawnBurst(player.x, player.y, ['#66aa22', '#88ff44', '#55dd66'], 22);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+
+  // ── NECROMANCER ──────────────────────────────────────────────
+  boneSpear: {
+    id: 'boneSpear', name: 'Bone Spear', letter: 'B', classOf: 'necromancer',
+    desc: 'Fast piercing bone lance (280% dmg)',
+    cost: 30, cooldown: 2.0, color: '#ccbbee',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
+      if (!target) return false;
+      const dx = target.x - player.x, dy = target.y - player.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const sp = player.weaponProjSpeed * 1.6;
+      let dmg = player.weaponDamage * player.dmgMult * 2.8 * rDmg;
+      const isCrit = Math.random() * 100 < player.critChance;
+      if (isCrit) { dmg *= 2; player.onCrit(); }
+      const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, 1.0, isCrit);
+      proj.piercing = true; proj.r = 4; proj.theme = 'arcane';
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#9988cc', '#ccbbee', '#ffffff'], 8);
+      return true;
+    },
+  },
+  deathNova: {
+    id: 'deathNova', name: 'Death Nova', letter: 'N', classOf: 'necromancer',
+    desc: 'Bone explosion AoE around player (200% dmg)',
+    cost: 40, cooldown: 4.0, color: '#7766aa',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const radius = 85;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.45, maxLife: 0.45, color: '#9988cc', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#9988cc', '#ccbbee', '#ffffff'], 18);
+      shake = Math.min(shake + 4, 7);
+      return true;
+    },
+  },
+  boneArmor: {
+    id: 'boneArmor', name: 'Bone Armor', letter: 'R', classOf: 'necromancer',
+    desc: 'Absorb the next 3 hits',
+    cost: 35, cooldown: 10.0, color: '#d0c8ee',
+    cast: (player) => {
+      player.boneArmorCharges = 3;
+      spawnBurst(player.x, player.y, ['#d0c8ee', '#9988cc', '#ffffff'], 14);
+      return true;
+    },
+  },
+  bloodNova: {
+    id: 'bloodNova', name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
+    desc: 'Sacrifice 15% max HP for massive AoE',
+    cost: 0, cooldown: 6.0, color: '#cc2244',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const sacrifice = Math.round(player.maxHp * 0.15);
+      if (player.hp <= sacrifice) return false; // refuse if fatal
+      player.hp -= sacrifice;
+      const radius = 110;
+      const dmg = player.weaponDamage * player.dmgMult * 3.5 * rDmg + sacrifice * 0.5;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const dx = e.x - player.x, dy = e.y - player.y;
+        if (dx*dx + dy*dy < radius*radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.5, maxLife: 0.5, color: '#cc2244', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#cc2244', '#ff4466', '#ffffff'], 24);
+      shake = Math.min(shake + 6, 10);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.08);
+      return true;
+    },
+  },
+  corpseLance: {
+    id: 'corpseLance', name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
+    desc: 'Fire bone lances at 3 nearest enemies',
+    cost: 45, cooldown: 3.0, color: '#aa99dd',
+    cast: (player, slot) => {
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const sorted = enemies.filter(e => e.alive).sort((a,b) => Math.hypot(a.x-player.x,a.y-player.y) - Math.hypot(b.x-player.x,b.y-player.y));
+      const targets = sorted.slice(0, 3);
+      if (!targets.length) return false;
+      for (const t of targets) {
+        const dx = t.x - player.x, dy = t.y - player.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const sp = player.weaponProjSpeed * 1.4;
+        let dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, d/sp+0.1, isCrit);
+        proj.r = 3; proj.theme = 'arcane';
+        projectiles.push(proj);
+      }
+      spawnBurst(player.x, player.y, ['#9988cc', '#ffffff'], 10);
+      return true;
+    },
+  },
 };
 const ABILITY_LIST = Object.values(ABILITIES);
 function classAbilities(classId) {
@@ -648,35 +1213,6 @@ function pickEnemyType(w) {
   if (r < 0.40) return 'shadow';
   if (r < 0.75) return 'voidCaster';
   return 'zombie';
-}
-
-// ============================================================
-// ELITE / CHAMPION MODS
-// ============================================================
-const ELITE_MODS = [
-  { id: 'vampiric',   name: 'Vampiric',   auraColor: '#ff4488', trailColor: '#cc2255' },
-  { id: 'enraged',    name: 'Enraged',    auraColor: '#ff7700', trailColor: '#cc4400' },
-  { id: 'molten',     name: 'Molten',     auraColor: '#ffaa00', trailColor: '#ff6600' },
-  { id: 'arcane',     name: 'Arcane',     auraColor: '#bb88ff', trailColor: '#8844ff' },
-  { id: 'plagued',    name: 'Plagued',    auraColor: '#66ff77', trailColor: '#33aa44' },
-  { id: 'shielded',   name: 'Shielded',   auraColor: '#88ccff', trailColor: '#4488cc' },
-  { id: 'teleporter', name: 'Teleporter', auraColor: '#ff88ff', trailColor: '#aa44aa' },
-];
-
-function rollEliteMods(count) {
-  const pool = [...ELITE_MODS];
-  const result = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
-    const idx = Math.floor(Math.random() * pool.length);
-    result.push(pool.splice(idx, 1)[0]);
-  }
-  return result;
-}
-
-// Chance for a given wave to spawn an elite (0 before wave 3)
-function eliteChance(wave) {
-  if (wave < 3) return 0;
-  return Math.min(0.35, 0.10 + (wave - 3) * 0.02);
 }
 
 // ============================================================

@@ -235,6 +235,10 @@ class Player {
     this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
     this.hawkEyeTimer = 0;
     this.warCryTimer = 0;
+    this.smokeBombTimer = 0;
+    this.mantraTimer = 0;
+    this.bigBadVoodooTimer = 0;
+    this.boneArmorCharges = 0;
     this.level = 1; this.xp = 0; this.xpToNext = 5;
     this.pendingLevelUps = 0; this.kills = 0;
     this.weaponDamage = this.class.weaponDamage;
@@ -262,6 +266,17 @@ class Player {
   }
   effectiveCritChance() { return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0); }
   effectiveFireRateMult() { return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0); }
+  effectiveSpeed() {
+    let s = this.speed;
+    if (this.smokeBombTimer > 0) s *= 1.4;
+    if (this.bigBadVoodooTimer > 0) s *= 1.15;
+    return s;
+  }
+  effectiveDmgMult() {
+    let d = this.dmgMult;
+    if (this.bigBadVoodooTimer > 0) d *= 1.35;
+    return d;
+  }
   recomputeStats() {
     this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
     this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
@@ -292,8 +307,8 @@ class Player {
     else this.resource = Math.min(this.resource, this.maxResource);
   }
   update(dt) {
-    this.x += Actions.moveX * this.speed * dt;
-    this.y += Actions.moveY * this.speed * dt;
+    this.x += Actions.moveX * this.effectiveSpeed() * dt;
+    this.y += Actions.moveY * this.effectiveSpeed() * dt;
     this.x = Math.max(this.r, Math.min(W - this.r, this.x));
     this.y = Math.max(this.r, Math.min(H - this.r, this.y));
     if (Actions.moveX >  0.1) this.facing =  1;
@@ -302,6 +317,12 @@ class Player {
     if (this.hitFlash > 0) this.hitFlash -= dt;
     if (this.hawkEyeTimer > 0) this.hawkEyeTimer -= dt;
     if (this.warCryTimer > 0) this.warCryTimer -= dt;
+    if (this.smokeBombTimer > 0) this.smokeBombTimer -= dt;
+    if (this.bigBadVoodooTimer > 0) this.bigBadVoodooTimer -= dt;
+    if (this.mantraTimer > 0) {
+      this.mantraTimer -= dt;
+      this.hp = Math.min(this.maxHp, this.hp + 4 * dt);
+    }
     if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
     if (this.resource < this.maxResource) this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
     for (let i = 0; i < this.abilityCooldowns.length; i++) {
@@ -312,7 +333,7 @@ class Player {
       if (this.class.meleeRange) {
         const range = this.class.meleeRange;
         const buff = this.warCryTimer > 0 ? 1.4 : 1;
-        const dmg = this.weaponDamage * this.dmgMult * buff;
+        const dmg = this.weaponDamage * this.effectiveDmgMult() * buff;
         let hitAny = false;
         for (const e of enemies) {
           if (!e.alive) continue;
@@ -350,6 +371,11 @@ class Player {
   }
   takeDamage(amount) {
     if (this.iframeTimer > 0) return false;
+    if (this.boneArmorCharges > 0) {
+      this.boneArmorCharges -= 1;
+      spawnBurst(this.x, this.y, ['#9988cc', '#ccbbff', '#ffffff'], 4);
+      return false;
+    }
     const actual = Math.max(1, amount - this.armor);
     this.hp -= actual;
     this.iframeTimer = this.IFRAME; this.hitFlash = 0.25;
@@ -386,6 +412,30 @@ class Player {
       ctx.fillStyle = '#ff4040';
       ctx.fillRect(px - 8, py - 10, 16, 18);
       ctx.globalAlpha = 1;
+    }
+    if (this.smokeBombTimer > 0) {
+      const pulse = 0.35 + 0.25 * Math.sin(performance.now() * 0.02);
+      ctx.globalAlpha = pulse * 0.5;
+      ctx.fillStyle = '#cc88ff';
+      ctx.fillRect(px - 9, py - 10, 18, 18);
+      ctx.globalAlpha = 1;
+    }
+    if (this.bigBadVoodooTimer > 0) {
+      const pulse = 0.5 + 0.4 * Math.sin(performance.now() * 0.015);
+      ctx.globalAlpha = pulse * 0.5;
+      ctx.fillStyle = '#55dd66';
+      ctx.fillRect(px - 9, py - 11, 18, 19);
+      ctx.globalAlpha = 1;
+    }
+    if (this.boneArmorCharges > 0) {
+      ctx.strokeStyle = '#9988cc';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.8;
+      ctx.strokeRect(px - 7, py - 8, 14, 14);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ccbbff';
+      ctx.font = '5px monospace';
+      ctx.fillText(this.boneArmorCharges, px + 5, py - 8);
     }
     // Pick the right class sprite. facing===-1 mirrors horizontally.
     const sprite = (typeof PLAYER_SPRITES !== 'undefined')

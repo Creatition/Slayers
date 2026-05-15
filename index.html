@@ -1737,7 +1737,7 @@
     if (d < 0.01) return;
     const sp = shooter.weaponProjSpeed;
     const life = shooter.weaponRange / sp + 0.05;
-    let dmg = shooter.weaponDamage * shooter.dmgMult;
+    let dmg = shooter.weaponDamage * (shooter.effectiveDmgMult ? shooter.effectiveDmgMult() : shooter.dmgMult);
     const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
     const isCrit = Math.random() * 100 < crit;
     if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
@@ -1822,6 +1822,22 @@
             if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
           }
         }
+      } else if (g.type === 'holy_zone') {
+        // Damage enemies inside the consecrated zone once per 0.8s
+        const now = performance.now();
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const hzDx = e.x - g.x, hzDy = e.y - g.y;
+          if (hzDx*hzDx + hzDy*hzDy < g.r * g.r) {
+            const last = g.cooldowns.get(e) || 0;
+            if (now - last > 800) {
+              g.cooldowns.set(e, now);
+              const died = e.takeDamage(g.damage, { color: '#ffe866' });
+              spawnBurst(e.x, e.y, ['#ffe866', '#ffffff'], 3);
+              if (died) handleEnemyDeath(e);
+            }
+          }
+        }
       }
     }
     for (let i = groundEffects.length - 1; i >= 0; i--) {
@@ -1867,6 +1883,21 @@
         ctx.fillStyle = '#88ff99';
         ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.55, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
+      } else if (g.type === 'holy_zone') {
+        const lifeRatio = Math.max(0, g.life / g.maxLife);
+        const pulse = 0.3 + 0.2 * Math.sin(performance.now() * 0.008 + g.x);
+        ctx.globalAlpha = lifeRatio * pulse * 0.45;
+        ctx.fillStyle = '#ffe866';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * 0.85;
+        ctx.strokeStyle = '#ffe866';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = lifeRatio * pulse * 0.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.6, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
       }
     }
   }
@@ -1887,6 +1918,7 @@
         const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = enemy.takeDamage(proj.damage, { crit: proj.isCrit });
+          if (proj.onHit) proj.onHit(enemy);
           if (proj.piercing) proj.hitSet.add(enemy);
           else proj.dead = true;
           spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
@@ -1901,6 +1933,7 @@
           }
           if (proj.explosive && !proj.piercing) {
             explodeAt(proj.x, proj.y, proj.explosionRadius, proj.explosionDamage);
+            if (proj.onExplode) proj.onExplode(proj.x, proj.y);
           }
           if (died) {
             if (enemy.isBoss) handleBossDeath(enemy);
@@ -2764,118 +2797,88 @@
   function drawClassSelectScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.92)';
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 22px monospace';
-    ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 40);
-    ctx.fillStyle = '#888'; ctx.font = '9px monospace';
-    ctx.fillText('Click a card or press 1 / 2 / 3.  Click MODE to toggle Trial.', W / 2, 56);
+    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
+    ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 28);
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+    ctx.fillText('Click a card or press 1-8.  Click MODE to toggle Trial.', W / 2, 40);
     // Mode toggle button (top-left)
     const modeLabel = runMode === 'standard' ? 'MODE: STANDARD' : `MODE: TRIAL T${trialTier}`;
     const modeColor = runMode === 'standard' ? '#7ad96b' : '#ff4080';
-    drawButton(12, 12, 160, 22, modeLabel, true, modeColor);
+    drawButton(8, 8, 140, 20, modeLabel, true, modeColor);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
-    ctx.fillText(`Unlocked tier: ${unlockedTrialTier}/${TRIAL_MAX_TIER}`, 12, 44);
-    ctx.textAlign = 'center';
-
-    const classes = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR];
-    const cardW = 180, cardH = 230, gap = 18;
-    const totalW = cardW * classes.length + gap * (classes.length - 1);
-    const startX = (W - totalW) / 2;
+    ctx.fillText(`Unlocked tier: ${unlockedTrialTier}/${TRIAL_MAX_TIER}`, 8, 38);
     // Stash count display
     ctx.fillStyle = '#ffd23f'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
-    ctx.fillText(`STASH  ${stash.length}/${stashSize}`, W - 12, H - 12);
+    ctx.fillText(`STASH  ${stash.length}/${stashSize}`, W - 8, H - 8);
     ctx.textAlign = 'left';
-    const cardY = 76;
-    for (let i = 0; i < classes.length; i++) {
-      const c = classes[i];
-      const cx = startX + i * (cardW + gap), cy = cardY;
+
+    // 4×2 grid layout — row 0: Archer/Wizard/Warrior/Rogue, row 1: Monk/Paladin/Witch Doctor/Necromancer
+    const allClasses = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR, CLASS.ROGUE,
+                        CLASS.MONK, CLASS.PALADIN, CLASS.WITCH_DOCTOR, CLASS.NECROMANCER];
+    const cardW = 148, cardH = 138, gap = 6;
+    const cols = 4;
+    const totalW = cardW * cols + gap * (cols - 1);
+    const startX = Math.floor((W - totalW) / 2);
+    const startY = 48;
+
+    for (let i = 0; i < allClasses.length; i++) {
+      const c = allClasses[i];
+      const col = i % cols, row = Math.floor(i / cols);
+      const cx = startX + col * (cardW + gap);
+      const cy = startY + row * (cardH + gap);
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
-      ctx.fillStyle = hovered ? '#2a2a35' : '#1a1a22';
+
+      ctx.fillStyle = hovered ? '#2a2a38' : '#18181f';
       ctx.fillRect(cx, cy, cardW, cardH);
       ctx.strokeStyle = c.color;
-      ctx.lineWidth = hovered ? 4 : 3;
-      ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4);
+      ctx.lineWidth = hovered ? 3 : 2;
+      ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2);
       ctx.lineWidth = 1;
 
       // Key hint
-      ctx.fillStyle = '#666'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`[${i + 1}]`, cx + 10, cy + 18);
+      ctx.fillStyle = '#555'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 6, cy + 12);
 
       // Name
-      ctx.fillStyle = c.color; ctx.font = 'bold 20px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 30);
+      ctx.fillStyle = c.color; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 22);
 
-      // Sprite preview (class-colored block at center-top)
-      const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 60);
+      // Sprite icon — colored block
+      const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 46);
       ctx.fillStyle = c.color;
       ctx.fillRect(sx - 5, sy - 3, 10, 9);
-      ctx.fillStyle = '#3a4a2a'; ctx.fillRect(sx - 5, sy + 2, 10, 1);
-      ctx.fillStyle = '#4a3a2a';
-      ctx.fillRect(sx - 4, sy + 5, 2, 3); ctx.fillRect(sx + 2, sy + 5, 2, 3);
-      ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 8, 8, 6);
-      ctx.fillStyle = c.id === 'wizard' ? '#3366aa' : c.id === 'warrior' ? '#5a2020' : '#5a3a2a';
-      ctx.fillRect(sx - 4, sy - 9, 8, 2);
-      // Class headgear
-      if (c.id === 'wizard') {
-        ctx.fillStyle = '#3366aa';
-        ctx.fillRect(sx - 4, sy - 11, 8, 2);
-        ctx.fillRect(sx - 2, sy - 13, 4, 2);
-        ctx.fillRect(sx - 1, sy - 14, 2, 1);
-        ctx.fillStyle = '#ffd040'; ctx.fillRect(sx, sy - 12, 1, 1);
-      } else if (c.id === 'warrior') {
-        // Horned helmet
-        ctx.fillStyle = '#888888';
-        ctx.fillRect(sx - 4, sy - 11, 8, 2);
-        ctx.fillRect(sx - 4, sy - 9, 1, 3);
-        ctx.fillRect(sx + 3, sy - 9, 1, 3);
-        // Horns
-        ctx.fillStyle = '#cccccc';
-        ctx.fillRect(sx - 5, sy - 13, 1, 2);
-        ctx.fillRect(sx + 4, sy - 13, 1, 2);
-      }
+      ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 9, 8, 6);
       ctx.fillStyle = '#000';
-      ctx.fillRect(sx - 3, sy - 6, 1, 1); ctx.fillRect(sx + 2, sy - 6, 1, 1);
-      // Class weapon
-      if (c.id === 'warrior') {
-        ctx.fillStyle = '#aaaaaa';
-        ctx.fillRect(sx + 6, sy - 6, 1, 8);
-        ctx.fillRect(sx + 5, sy - 6, 3, 1);
-      } else if (c.id === 'wizard') {
-        ctx.fillStyle = '#5a3a2a';
-        ctx.fillRect(sx + 6, sy - 6, 1, 10);
-        ctx.fillStyle = '#aa66ff';
-        ctx.fillRect(sx + 5, sy - 8, 3, 2);
-      }
+      ctx.fillRect(sx - 2, sy - 7, 1, 1); ctx.fillRect(sx + 1, sy - 7, 1, 1);
+      ctx.fillStyle = '#4a3a2a';
+      ctx.fillRect(sx - 4, sy + 6, 2, 3); ctx.fillRect(sx + 2, sy + 6, 2, 3);
 
-      // Description
-      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
-      const words = c.desc.split(' ');
-      const lines = [];
-      let line = '';
+      // Stats block
+      ctx.fillStyle = '#ccc'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+      const sy2 = cy + 68;
+      ctx.fillText(`HP ${c.baseMaxHp}  SPD ${c.baseSpeed}  CRIT ${c.baseCritChance}%`, cx + 8, sy2);
+      ctx.fillText(`WPN ${c.weaponDamage}dmg @ ${c.weaponFireRate}/s`, cx + 8, sy2 + 10);
+      ctx.fillStyle = c.resourceColor || c.color;
+      ctx.fillText(`${c.resourceName}: ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 8, sy2 + 20);
+
+      // Desc (wrapped to ~24 chars)
+      ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      const words = (c.desc || '').split(' ');
+      const dlines = []; let dline = '';
       for (const w of words) {
-        const test = line ? line + ' ' + w : w;
-        if (test.length > 30) { lines.push(line); line = w; }
-        else line = test;
+        const test = dline ? dline + ' ' + w : w;
+        if (test.length > 24) { dlines.push(dline); dline = w; } else dline = test;
       }
-      if (line) lines.push(line);
-      for (let li = 0; li < lines.length; li++) {
-        ctx.fillText(lines[li], cx + cardW / 2, cy + 90 + li * 10);
+      if (dline) dlines.push(dline);
+      for (let li = 0; li < Math.min(dlines.length, 2); li++) {
+        ctx.fillText(dlines[li], cx + cardW / 2, sy2 + 36 + li * 9);
       }
 
-      // Stats
-      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
-      const sy2 = cy + 130;
-      ctx.fillText(`HP:       ${c.baseMaxHp}`, cx + 24, sy2);
-      ctx.fillText(`SPEED:    ${c.baseSpeed}`, cx + 24, sy2 + 10);
-      ctx.fillText(`CRIT:     ${c.baseCritChance}%`, cx + 24, sy2 + 20);
-      ctx.fillText(`WEAPON:   ${c.weaponDamage} dmg @ ${c.weaponFireRate}/s`, cx + 24, sy2 + 30);
-      ctx.fillStyle = c.resourceColor;
-      ctx.fillText(`${c.resourceName}:    ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 24, sy2 + 40);
-
-      // Signature
+      // Signature ability
       const sig = ABILITIES[c.signature];
       if (sig) {
-        ctx.fillStyle = sig.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(`SIGNATURE: ${sig.name}`, cx + cardW / 2, cy + cardH - 12);
+        ctx.fillStyle = sig.color; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(`★ ${sig.name}`, cx + cardW / 2, cy + cardH - 8);
       }
     }
     ctx.textAlign = 'left';
@@ -3447,22 +3450,33 @@
       // Tab or T key cycles mode
       if (keyJustPressed.has('t') || gpJustPressed.has(3)) cycleMode();
       let picked = null;
-      const classIds = ['archer', 'wizard', 'warrior'];
-      if (keyJustPressed.has('1') || gpJustPressed.has(0)) picked = 'archer';
-      else if (keyJustPressed.has('2') || gpJustPressed.has(1)) picked = 'wizard';
-      else if (keyJustPressed.has('3') || gpJustPressed.has(2)) picked = 'warrior';
-      else if (mouseClicked) {
+      const classIds = ['archer', 'wizard', 'warrior', 'rogue', 'monk', 'paladin', 'witchdoctor', 'necromancer'];
+      // Keyboard 1-8 picks a class
+      for (let ki = 0; ki < classIds.length; ki++) {
+        if (keyJustPressed.has(String(ki + 1))) { picked = classIds[ki]; break; }
+      }
+      // Gamepad face buttons pick first 4
+      if (!picked) {
+        if (gpJustPressed.has(0)) picked = 'archer';
+        else if (gpJustPressed.has(1)) picked = 'wizard';
+        else if (gpJustPressed.has(2)) picked = 'warrior';
+        else if (gpJustPressed.has(3)) picked = 'rogue';
+      }
+      if (!picked && mouseClicked) {
         // Mode toggle button (top-left)
-        if (isHovering(12, 12, 160, 22)) {
+        if (isHovering(8, 8, 140, 20)) {
           cycleMode();
         } else {
-          const cardW = 180, cardH = 230, gap = 18;
-          const totalW = cardW * 3 + gap * 2;
-          const startX = (W - totalW) / 2;
-          const cardY = 76;
-          for (let i = 0; i < 3; i++) {
-            const cx = startX + i * (cardW + gap);
-            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cardY && mouseY <= cardY + cardH) {
+          const cardW = 148, cardH = 138, gap = 6;
+          const cols = 4;
+          const totalW = cardW * cols + gap * (cols - 1);
+          const startX = Math.floor((W - totalW) / 2);
+          const startY = 48;
+          for (let i = 0; i < classIds.length; i++) {
+            const col = i % cols, row = Math.floor(i / cols);
+            const cx = startX + col * (cardW + gap);
+            const cy = startY + row * (cardH + gap);
+            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH) {
               picked = classIds[i];
               break;
             }
