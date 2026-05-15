@@ -48,15 +48,27 @@ const RARITY = {
 const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
 
 const ITEM_BASES = [
+  // Armor
   { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H' },
   { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C' },
   { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G' },
   { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F' },
   { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L' },
+  // Jewelry
   { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
   { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
+  // Weapons
   { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W' },
+  { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W' },
+  { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W' },
+  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W' },
+  { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W' },
+  { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W' },
+  { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W' },
+  // Off-hands
   { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
+  { id: 'shield', name: 'Wooden Shield',  slot: 'offhand', letter: 'O' },
+  { id: 'orb',    name: 'Magic Orb',      slot: 'offhand', letter: 'O' },
 ];
 const AFFIX_POOL = [
   { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },

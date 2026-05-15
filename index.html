@@ -89,6 +89,7 @@
 
   // Shop / blacksmith state
   let shopItems = [];
+  let shopLocked = [false, false, false, false];
   let shopRefreshCost = 5;
   let selectedInvIdx = -1;
   let levelUpRerollCost = 1;
@@ -2168,7 +2169,7 @@
     levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
     bossBannerTimer = 0; bossDefeatedBannerTimer = 0; lastBossName = '';
     goldFlashTimer = 0; biomeBannerTimer = 2.5;
-    shopItems = []; shopRefreshCost = 5; selectedInvIdx = -1; levelUpRerollCost = 1;
+    shopItems = []; shopLocked = [false,false,false,false]; shopRefreshCost = 5; selectedInvIdx = -1; levelUpRerollCost = 1;
     currentBiomeId = currentBiome().id;
     const cfg = waveConfig(currentWave);
     waveTimer = cfg.duration;
@@ -2219,8 +2220,9 @@
     if (player.gold < shopRefreshCost) return;
     player.gold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
-    shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItem());
+    for (let i = 0; i < 4; i++) {
+      if (!shopLocked[i]) shopItems[i] = generateItem();
+    }
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();
   }
@@ -2971,11 +2973,23 @@
     ctx.lineWidth = selected ? 3 : 2;
     ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
     ctx.lineWidth = 1;
-    ctx.fillStyle = item.rarity.color;
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(item.base.letter, x + size / 2, y + size / 2 + 1);
-    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    // Try sprite first, fall back to rarity letter
+    const spr = (typeof ITEM_SPRITES !== 'undefined') && ITEM_SPRITES[item.base.id];
+    if (spr && typeof drawSprite === 'function') {
+      // Tint the sprite with rarity color via a subtle overlay after drawing
+      drawSprite(ctx, spr, Math.floor(x + size / 2), Math.floor(y + size / 2), false, false, 2);
+      // Rarity color tint overlay (very faint)
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = item.rarity.color;
+      ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = item.rarity.color;
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(item.base.letter, x + size / 2, y + size / 2 + 1);
+      ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    }
   }
   function drawInventoryScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
@@ -3098,7 +3112,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-    ctx.fillText('Click=buy/select  Right-click=salvage  V=whites  B=blues  Y=rares  R=refresh', W / 2, 28);
+    ctx.fillText('Click=buy  Right-click shop item=lock  Right-click inv=salvage  V/B/Y=bulk salvage  R=refresh', W / 2, 28);
 
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
@@ -3127,16 +3141,22 @@
       ctx.strokeRect(x + 0.5, y + 0.5, SHOP_ITEM_W - 1, SHOP_ITEM_H - 1);
       ctx.lineWidth = 1;
       if (item) {
-        ctx.fillStyle = item.rarity.color;
-        ctx.font = 'bold 18px monospace';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(item.base.letter, x + SHOP_ITEM_W / 2, y + 18);
-        ctx.textBaseline = 'alphabetic';
+        drawItemInBox(item, x + (SHOP_ITEM_W - 26) / 2, y + 4, 26);
         const price = itemPrice(item);
         const canBuy = player.gold >= price && player.inventory.length < player.INVENTORY_CAP;
         ctx.fillStyle = canBuy ? '#ffd23f' : '#664020';
-        ctx.font = 'bold 9px monospace';
+        ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
         ctx.fillText(`${price}g`, x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H - 6);
+        // Lock badge
+        if (shopLocked[i]) {
+          ctx.fillStyle = 'rgba(255,220,60,0.18)';
+          ctx.fillRect(x, y, SHOP_ITEM_W, SHOP_ITEM_H);
+          ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+          ctx.fillText('🔒', x + 3, y + 10);
+        } else {
+          ctx.fillStyle = '#555'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+          ctx.fillText('🔓', x + 3, y + 10);
+        }
       } else {
         ctx.fillStyle = '#444'; ctx.font = '7px monospace';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3661,10 +3681,16 @@
             // Bulk salvage whites button
             bulkSalvage(0);
           } else {
-            // Right-click = instant salvage from shop screen
+            // Right-click on shop item = toggle lock; on inventory item = salvage
             if (rightClicked) {
-              const rIdxS = getInventoryIdxAtMouse();
-              if (rIdxS >= 0 && player.inventory[rIdxS]) { salvageInventoryItem(rIdxS); }
+              const lockIdx = getShopIdxAtMouse();
+              if (lockIdx >= 0 && shopItems[lockIdx]) {
+                shopLocked[lockIdx] = !shopLocked[lockIdx];
+                Sfx.uiConfirm();
+              } else {
+                const rIdxS = getInventoryIdxAtMouse();
+                if (rIdxS >= 0 && player.inventory[rIdxS]) salvageInventoryItem(rIdxS);
+              }
             }
             // Inventory click — select (or Shift+Click = instant salvage)
             let invHit = -1;

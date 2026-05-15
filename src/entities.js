@@ -442,11 +442,11 @@ class Player {
       ? PLAYER_SPRITES[this.class.id]
       : null;
     if (sprite && typeof drawSprite === 'function') {
-      drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 3);
+      drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
     } else {
       // Fallback: primitive draw if sprites failed to load
       ctx.fillStyle = flash ? '#ff4444' : this.class.color;
-      ctx.fillRect(px - 6, py - 3, 12, 10);
+      ctx.fillRect(px - 4, py - 2, 8, 7);
     }
   }
 }
@@ -485,7 +485,7 @@ class Enemy {
   makeElite(mods) {
     this.elite = true;
     this.eliteMods = mods;
-    this.eliteScale = 1.25;
+    this.eliteScale = 1.5;
     this.maxHp = Math.round(this.maxHp * 3);
     this.hp = this.maxHp;
     this.speed *= 1.25;
@@ -640,7 +640,7 @@ class Enemy {
       if (this.type === 'shadow') {
         ctx.globalAlpha = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
       }
-      drawSprite(ctx, sprite, px, py, false, f, 3 * sc);
+      drawSprite(ctx, sprite, px, py, false, f, 2 * sc);
       ctx.globalAlpha = 1;
       if (this.type === 'voidCaster') {
         const orbY = py + Math.sin(performance.now() * 0.005) * 2;
@@ -770,7 +770,7 @@ class BoneLord {
     const f = this.hitFlash > 0;
     const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.BoneLord : null;
     if (sprite && typeof drawSprite === 'function') {
-      drawSprite(ctx, sprite, px, py, false, f, 3);
+      drawSprite(ctx, sprite, px, py, false, f, 2);
     } else {
       // Fallback
       ctx.fillStyle = f ? '#ffffff' : '#e8e8d0';
@@ -840,7 +840,7 @@ class IceGiant {
     const f = this.hitFlash > 0;
     const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.IceGiant : null;
     if (sprite && typeof drawSprite === 'function') {
-      drawSprite(ctx, sprite, px, py, false, f, 3);
+      drawSprite(ctx, sprite, px, py, false, f, 2);
     } else {
       ctx.fillStyle = f ? '#ffffff' : '#d8e8f5';
       ctx.fillRect(px - this.r, py - this.r, this.r * 2, this.r * 2);
@@ -920,7 +920,7 @@ class Pyromancer {
     }
     const sprite = (typeof BOSS_SPRITES !== "undefined") ? BOSS_SPRITES.Pyromancer : null;
     if (sprite && typeof drawSprite === "function") {
-      drawSprite(ctx, sprite, px, py, false, f, 3);
+      drawSprite(ctx, sprite, px, py, false, f, 2);
     } else {
       ctx.fillStyle = f ? "#ffffff" : "#aa1010"; ctx.fillRect(px - 5, py - 1, 10, 8);
       ctx.fillStyle = f ? "#ffffff" : "#cc2020"; ctx.fillRect(px - 5, py - 4, 10, 4);
@@ -1013,7 +1013,7 @@ class SlayerKiller {
     ctx.globalAlpha = 1;
     const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.SlayerKiller : null;
     if (sprite && typeof drawSprite === 'function') {
-      drawSprite(ctx, sprite, px, py, false, f, 3);
+      drawSprite(ctx, sprite, px, py, false, f, 2);
     } else {
       ctx.fillStyle = f ? '#ffffff' : '#2a1a5a'; ctx.fillRect(px - 7, py - 2, 14, 10);
       ctx.fillStyle = f ? '#ffffff' : '#3a2a7a'; ctx.fillRect(px - 7, py + 4, 14, 1);
