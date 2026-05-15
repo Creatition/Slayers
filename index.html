@@ -330,13 +330,7 @@
             const finalDmg = isCrit ? dmg * 2 : dmg;
             const died = e.takeDamage(finalDmg);
             if (isCrit) player.onCrit();
-            if (died) {
-              player.kills++;
-              spawnBurst(e.x, e.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0'], 8);
-              xpGems.push(new XPGem(e.x, e.y, 1));
-              if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
-              const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
-            }
+            if (died) handleEnemyDeath(e);
           }
         }
         for (let i = 0; i < 28; i++) {
@@ -1695,6 +1689,40 @@
   }
 
   // ============================================================
+  // KILL HANDLERS — centralised so ALL kill paths get the same rewards
+  // ============================================================
+  function handleEnemyDeath(e) {
+    player.kills++;
+    const isElite = e.eliteScale > 1;
+    const burstColors = isElite
+      ? (e.eliteMods[0] ? [e.eliteMods[0].auraColor, '#ffd040', '#ffffff'] : ['#ffd040', '#ffaa00', '#ffffff'])
+      : ['#f0f0e0', '#e8e8d8', '#b0b0a0'];
+    spawnBurst(e.x, e.y, burstColors, isElite ? 20 : 8);
+    if (isElite) {
+      // Elite: big XP haul, guaranteed rare+ drop, bonus gold
+      for (let i = 0; i < 4; i++) xpGems.push(new XPGem(e.x + rngInt(-8,8), e.y + rngInt(-8,8), 2));
+      itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('yellow')));
+      const g = rngInt(6, 14); player.gold += g; goldFlashTimer = 0.8;
+      shake = Math.min(shake + 2, 6);
+    } else {
+      // Normal: 1 XP gem, 18% item chance, small gold
+      xpGems.push(new XPGem(e.x, e.y, 1));
+      if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
+      const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
+    }
+  }
+  function handleBossDeath(e) {
+    player.kills++;
+    spawnBurst(e.x, e.y, ['#ffd040', '#ff8800', '#ffffff', '#ff4400'], 36);
+    for (let i = 0; i < 8; i++) xpGems.push(new XPGem(e.x + rngInt(-20,20), e.y + rngInt(-20,20), 5));
+    // Boss always drops a legendary or set item
+    itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('orange')));
+    const g = rngInt(30, 60); player.gold += g; goldFlashTimer = 0.8;
+    shake = Math.min(shake + 6, 10);
+    bossRef = null;
+  }
+
+  // ============================================================
   // WORLD HELPERS
   // ============================================================
   function spawnEnemy(cfg) {
@@ -2035,7 +2063,7 @@
     state = STATE.SHOP;
     shopRefreshCost = 5;
     shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItem());
+    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.cls.id : 'archer'));
     selectedInvIdx = -1;
   }
   function startNextWave() {
@@ -2221,7 +2249,7 @@
     player.gold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
     for (let i = 0; i < 4; i++) {
-      if (!shopLocked[i]) shopItems[i] = generateItem();
+      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.cls.id : 'archer');
     }
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();

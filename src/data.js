@@ -107,6 +107,43 @@ function generateItem() {
   const base = rngPick(ITEM_BASES);
   return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
 }
+// Generate item with at least a minimum rarity (for elite drops)
+function generateItemMinRarity(minId) {
+  const order = { white: 0, blue: 1, yellow: 2, orange: 3, green: 4 };
+  let rarity = pickWeightedRarity();
+  // Reroll until we meet minimum (cap at 20 tries)
+  for (let i = 0; i < 20 && order[rarity.id] < order[minId]; i++) rarity = pickWeightedRarity();
+  if (order[rarity.id] < order[minId]) {
+    // Force minimum if rerolls failed (rare edge case)
+    rarity = RARITY_LIST.find(r => r.id === minId) || RARITY.YELLOW;
+  }
+  const base = rngPick(ITEM_BASES);
+  return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
+}
+// Class-biased item: prefers the class's weapon types, falls back to random
+const CLASS_PREFERRED_BASES = {
+  archer:      ['bow','quiver','dagger','ring','amulet'],
+  wizard:      ['staff','wand','orb','ring','amulet'],
+  warrior:     ['sword','axe','mace','shield','belt'],
+  rogue:       ['dagger','bow','ring','amulet','gloves'],
+  monk:        ['orb','ring','gloves','amulet','boots'],
+  paladin:     ['mace','shield','sword','belt','amulet'],
+  witchdoctor: ['staff','wand','orb','ring','amulet'],
+  necromancer: ['staff','orb','wand','ring','amulet'],
+};
+function generateItemForClass(classId) {
+  const preferred = CLASS_PREFERRED_BASES[classId] || [];
+  // 55% chance to pick from preferred bases (if any)
+  let base;
+  if (preferred.length > 0 && Math.random() < 0.55) {
+    const prefBases = ITEM_BASES.filter(b => preferred.includes(b.id));
+    base = prefBases.length > 0 ? rngPick(prefBases) : rngPick(ITEM_BASES);
+  } else {
+    base = rngPick(ITEM_BASES);
+  }
+  const rarity = pickWeightedRarity();
+  return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
+}
 function itemDisplayName(item) { return `${item.rarity.name} ${item.base.name}`; }
 
 // ============================================================
