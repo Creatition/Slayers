@@ -141,7 +141,10 @@ class XPGem {
     if (this.magnetized) {
       const sp = 200 + (1 - Math.min(d / 100, 1)) * 250;
       if (d > 0.01) { this.x += (dx / d) * sp * dt; this.y += (dy / d) * sp * dt; }
-      if (d < player.r + this.r) { player.addXp(this.value); this.dead = true; }
+      if (d < player.r + this.r) {
+        player.addXp(this.value); this.dead = true;
+        if (typeof Sfx !== 'undefined') Sfx.pickupXp();
+      }
     }
   }
   draw(ctx) {
@@ -181,6 +184,7 @@ class ItemDrop {
         spawnBurst(this.x, this.y, [this.item.rarity.color, '#ffffff'], 8);
         lootFlashTimer = 2.0;
         lastLootName = itemDisplayName(this.item);
+        if (typeof Sfx !== 'undefined') Sfx.pickupItem();
       }
     }
   }
@@ -362,11 +366,13 @@ class Player {
       this.xp -= this.xpToNext; this.level += 1; this.pendingLevelUps += 1;
       this.xpToNext = 5 + (this.level - 1) * 3;
       levelUpFlashTimer = 1.5;
+      if (typeof Sfx !== 'undefined') Sfx.levelUp();
     }
   }
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y);
     const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
+    // Buff auras (drawn behind the sprite)
     if (this.hawkEyeTimer > 0) {
       const pulse = 0.4 + 0.3 * Math.sin(performance.now() * 0.012);
       ctx.globalAlpha = pulse * 0.5;
@@ -381,30 +387,22 @@ class Player {
       ctx.fillRect(px - 8, py - 10, 16, 18);
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = flash ? '#ff4444' : this.class.color;
-    ctx.fillRect(px - 4, py - 2, 8, 7);
-    ctx.fillStyle = '#3a3a2a'; ctx.fillRect(px - 4, py + 2, 8, 1);
-    ctx.fillStyle = '#4a3a2a';
-    ctx.fillRect(px - 3, py + 5, 2, 2); ctx.fillRect(px + 1, py + 5, 2, 2);
-    ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0'; ctx.fillRect(px - 3, py - 7, 6, 5);
-    if (this.class.id === 'wizard') {
-      ctx.fillStyle = '#3366aa';
-      ctx.fillRect(px - 3, py - 8, 6, 2);
-      ctx.fillRect(px - 2, py - 10, 4, 2);
-      ctx.fillRect(px - 1, py - 11, 2, 1);
-    } else if (this.class.id === 'warrior') {
-      ctx.fillStyle = '#888888'; ctx.fillRect(px - 3, py - 8, 6, 1);
-      ctx.fillStyle = '#cccccc';
-      ctx.fillRect(px - 4, py - 9, 1, 2); ctx.fillRect(px + 3, py - 9, 1, 2);
+    // Pick the right class sprite. facing===-1 mirrors horizontally.
+    const sprite = (typeof PLAYER_SPRITES !== 'undefined')
+      ? PLAYER_SPRITES[this.class.id]
+      : null;
+    if (sprite && typeof drawSprite === 'function') {
+      drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
     } else {
-      ctx.fillStyle = '#5a3a2a'; ctx.fillRect(px - 3, py - 8, 6, 2);
+      // Fallback: primitive draw if sprites failed to load
+      ctx.fillStyle = flash ? '#ff4444' : this.class.color;
+      ctx.fillRect(px - 4, py - 2, 8, 7);
     }
-    ctx.fillStyle = '#000';
-    const eo = this.facing === 1 ? 0 : -1;
-    ctx.fillRect(px - 2 + eo, py - 5, 1, 1);
-    ctx.fillRect(px + 1 + eo, py - 5, 1, 1);
   }
 }
+
+// (Earlier `scaledDraw` helper removed — all entities now use drawSprite,
+// which handles integer pixel scaling natively.)
 
 // ============================================================
 // ENTITY: Enemy (skeleton/zombie/rat/yeti/frostWolf/imp/hellhound/shadow/voidCaster)
@@ -423,18 +421,49 @@ class Enemy {
     this.fireTimer = 1 + Math.random() * 2;
     this.slowTimer = 0;
     this.slowFactor = 1.0;
+    // Elite / Champion state
+    this.elite = false;
+    this.eliteMods = [];
+    this.eliteScale = 1;
+    this.shield = 0; this.shieldMax = 0; this.shieldFlash = 0;
+    this.auraPhase = Math.random() * Math.PI * 2;
+    this.eliteTimers = {};
   }
+
+  hasMod(id) { return this.eliteMods.some(m => m.id === id); }
+
+  makeElite(mods) {
+    this.elite = true;
+    this.eliteMods = mods;
+    this.eliteScale = 1.5;
+    this.maxHp = Math.round(this.maxHp * 3);
+    this.hp = this.maxHp;
+    this.speed *= 1.25;
+    this.contactDmg = Math.round(this.contactDmg * 1.3);
+    this.r = Math.round(this.r * 1.3);
+    if (this.hasMod('shielded')) {
+      this.shieldMax = Math.round(this.maxHp * 0.5);
+      this.shield = this.shieldMax;
+    }
+    if (this.hasMod('teleporter'))  this.eliteTimers.teleport = 3 + Math.random() * 2;
+    if (this.hasMod('arcane'))      this.eliteTimers.arcane   = 2 + Math.random();
+    if (this.hasMod('molten'))      this.eliteTimers.trail    = 0.8 + Math.random() * 0.4;
+    if (this.hasMod('plagued'))     this.eliteTimers.plague   = 2.5 + Math.random();
+  }
+
   update(dt, target) {
     const dx = target.x - this.x, dy = target.y - this.y;
     const d = Math.hypot(dx, dy);
     if (this.slowTimer > 0) this.slowTimer -= dt;
-    const effSpeed = this.slowTimer > 0 ? this.speed * this.slowFactor : this.speed;
+    const enraged = this.elite && this.hasMod('enraged') && this.hp < this.maxHp * 0.3;
+    const effSpeed = (this.slowTimer > 0 ? this.speed * this.slowFactor : this.speed) * (enraged ? 1.8 : 1);
     if (d > 0.01) { this.x += (dx / d) * effSpeed * dt; this.y += (dy / d) * effSpeed * dt; }
     const bobSpeed = (this.type === 'rat' || this.type === 'frostWolf') ? 14
                    : (this.type === 'zombie' || this.type === 'yeti') ? 5
                    : 8;
     this.bobPhase += dt * bobSpeed;
     if (this.hitFlash > 0) this.hitFlash -= dt;
+    if (this.shieldFlash > 0) this.shieldFlash -= dt;
     const t = ENEMY_TYPES[this.type];
     if (t.ranged) {
       this.fireTimer -= dt;
@@ -445,95 +474,180 @@ class Enemy {
         enemyProjectiles.push(new BoneProjectile(this.x, this.y, (dx/d)*sp, (dy/d)*sp, this.contactDmg, theme));
       }
     }
+    // ── Elite mod behaviors ──────────────────────────────────
+    if (this.elite) {
+      this.auraPhase += dt * 3;
+
+      // Vampiric: slowly regenerate HP (1.5% maxHP/s)
+      if (this.hasMod('vampiric')) {
+        this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.015 * dt);
+      }
+
+      // Teleporter: blink near the player every 3-5s
+      if (this.hasMod('teleporter')) {
+        this.eliteTimers.teleport -= dt;
+        if (this.eliteTimers.teleport <= 0) {
+          this.eliteTimers.teleport = 3 + Math.random() * 2;
+          const ang = Math.random() * Math.PI * 2;
+          const dist = 55 + Math.random() * 70;
+          this.x = Math.max(20, Math.min(W - 20, target.x + Math.cos(ang) * dist));
+          this.y = Math.max(20, Math.min(H - 20, target.y + Math.sin(ang) * dist));
+          spawnBurst(this.x, this.y, ['#aa44aa', '#ff88ff', '#ffffff'], 10);
+        }
+      }
+
+      // Arcane: fire 4 projectiles in cardinal directions every 2.5s
+      if (this.hasMod('arcane')) {
+        this.eliteTimers.arcane -= dt;
+        if (this.eliteTimers.arcane <= 0) {
+          this.eliteTimers.arcane = 2.5 + Math.random();
+          const sp = 70;
+          [[1,0],[-1,0],[0,1],[0,-1]].forEach(([vx,vy]) => {
+            enemyProjectiles.push(new BoneProjectile(this.x, this.y, vx*sp, vy*sp, Math.round(this.contactDmg * 0.5), 'void'));
+          });
+        }
+      }
+
+      // Molten: leave fire patches behind every 0.7-1.1s
+      if (this.hasMod('molten')) {
+        this.eliteTimers.trail -= dt;
+        if (this.eliteTimers.trail <= 0) {
+          this.eliteTimers.trail = 0.7 + Math.random() * 0.4;
+          groundEffects.push({ type: 'fire_patch', x: this.x, y: this.y, r: 14,
+            life: 3.0, maxLife: 3.0, damage: Math.round(this.contactDmg * 0.35), cooldowns: new Map() });
+        }
+      }
+
+      // Plagued: spawn poison cloud every 2.5-3.5s
+      if (this.hasMod('plagued')) {
+        this.eliteTimers.plague -= dt;
+        if (this.eliteTimers.plague <= 0) {
+          this.eliteTimers.plague = 2.5 + Math.random();
+          groundEffects.push({ type: 'poison_cloud', x: this.x, y: this.y, r: 26,
+            life: 4.0, maxLife: 4.0, damage: Math.round(this.contactDmg * 0.28), cooldowns: new Map() });
+        }
+      }
+    }
   }
-  takeDamage(amount) {
+
+  takeDamage(amount, opts) {
+    // Shielded elites absorb damage to shield first
+    if (this.elite && this.shield > 0) {
+      const absorbed = Math.min(this.shield, amount);
+      this.shield -= absorbed;
+      this.shieldFlash = 0.15;
+      const overflow = amount - absorbed;
+      if (overflow > 0) {
+        this.hp -= overflow;
+        this.hitFlash = 0.1;
+      }
+      if (typeof spawnDamageNumber === 'function') {
+        spawnDamageNumber(this.x, this.y - this.r, amount, { color: '#88ccff', crit: opts && opts.crit });
+      }
+      if (this.hp <= 0) { this.alive = false; return true; }
+      return false;
+    }
     this.hp -= amount; this.hitFlash = 0.1;
+    if (typeof spawnDamageNumber === 'function') {
+      const o = opts || {};
+      spawnDamageNumber(this.x, this.y - this.r, amount, {
+        color: o.crit ? '#ffe8a0' : (o.color || '#fff7a0'),
+        crit: !!o.crit,
+      });
+    }
     if (this.hp <= 0) { this.alive = false; return true; }
     return false;
   }
+
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
     const f = this.hitFlash > 0;
-    if (this.type === 'skeleton') {
-      ctx.fillStyle = f ? '#ffffff' : '#e8e8d8'; ctx.fillRect(px - 3, py - 1, 6, 4);
-      ctx.fillStyle = f ? '#dddddd' : '#b0b0a0'; ctx.fillRect(px - 2, py + 1, 4, 1);
-      ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
-      ctx.fillRect(px - 2, py + 3, 1, 2); ctx.fillRect(px + 1, py + 3, 1, 2);
-      ctx.fillStyle = f ? '#ffffff' : '#f0f0e0'; ctx.fillRect(px - 2, py - 5, 4, 4);
-      ctx.fillStyle = '#1a0a0a';
-      ctx.fillRect(px - 1, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
-    } else if (this.type === 'zombie') {
-      ctx.fillStyle = f ? '#ffffff' : '#6a8a4a'; ctx.fillRect(px - 4, py - 2, 8, 6);
-      ctx.fillStyle = f ? '#dddddd' : '#4a6535'; ctx.fillRect(px - 4, py + 2, 8, 1);
-      ctx.fillStyle = f ? '#dddddd' : '#3a4a25';
-      ctx.fillRect(px - 3, py + 4, 2, 2); ctx.fillRect(px + 1, py + 4, 2, 2);
-      ctx.fillStyle = f ? '#ffffff' : '#84a060'; ctx.fillRect(px - 3, py - 7, 6, 5);
-      ctx.fillStyle = '#1a0a0a';
-      ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-      ctx.fillStyle = '#aabb55'; ctx.fillRect(px, py - 3, 1, 1);
-    } else if (this.type === 'rat') {
-      ctx.fillStyle = f ? '#ffffff' : '#6b5034'; ctx.fillRect(px - 3, py - 1, 5, 3);
-      ctx.fillStyle = '#4a3a25'; ctx.fillRect(px + 2, py, 2, 1);
-      ctx.fillStyle = f ? '#ffffff' : '#7a5d3a'; ctx.fillRect(px - 4, py - 3, 3, 3);
-      ctx.fillStyle = '#ff3030'; ctx.fillRect(px - 3, py - 2, 1, 1);
-      ctx.fillStyle = '#4a3a25';
-      ctx.fillRect(px - 4, py - 4, 1, 1); ctx.fillRect(px - 2, py - 4, 1, 1);
-    } else if (this.type === 'yeti') {
-      ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 5, py - 2, 10, 8);
-      ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
-      ctx.fillRect(px - 5, py + 3, 10, 1); ctx.fillRect(px - 5, py + 5, 10, 1);
-      ctx.fillStyle = f ? '#dddddd' : '#88aac0';
-      ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
-      ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 4, py - 8, 8, 6);
-      ctx.fillStyle = '#5599ff';
-      ctx.fillRect(px - 2, py - 6, 2, 2); ctx.fillRect(px, py - 6, 2, 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(px - 3, py - 2, 1, 2); ctx.fillRect(px + 2, py - 2, 1, 2);
-    } else if (this.type === 'frostWolf') {
-      ctx.fillStyle = f ? '#ffffff' : '#88aac0'; ctx.fillRect(px - 4, py - 1, 7, 4);
-      ctx.fillStyle = '#5588a0'; ctx.fillRect(px + 3, py, 3, 1);
-      ctx.fillStyle = f ? '#ffffff' : '#aaccd8'; ctx.fillRect(px - 5, py - 4, 4, 4);
-      ctx.fillStyle = '#3366aa'; ctx.fillRect(px - 4, py - 3, 1, 1);
-      ctx.fillStyle = '#5588a0';
-      ctx.fillRect(px - 5, py - 5, 1, 1); ctx.fillRect(px - 3, py - 5, 1, 1);
-      ctx.fillStyle = '#88ccdd';
-      ctx.fillRect(px - 4, py + 3, 1, 2); ctx.fillRect(px + 2, py + 3, 1, 2);
-    } else if (this.type === 'imp') {
-      ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 3, py - 1, 5, 4);
-      ctx.fillStyle = '#882010'; ctx.fillRect(px - 3, py + 3, 5, 1);
-      ctx.fillStyle = f ? '#ffffff' : '#dd3030'; ctx.fillRect(px - 3, py - 5, 5, 4);
-      ctx.fillStyle = '#ffff00';
-      ctx.fillRect(px - 2, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
-      ctx.fillStyle = '#882010';
-      ctx.fillRect(px - 3, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
-      ctx.fillStyle = '#aa3030';
-      ctx.fillRect(px - 5, py - 1, 2, 2); ctx.fillRect(px + 3, py - 1, 2, 2);
-    } else if (this.type === 'hellhound') {
-      ctx.fillStyle = f ? '#ffffff' : '#3a1010'; ctx.fillRect(px - 4, py - 2, 8, 5);
-      ctx.fillStyle = '#5a2020'; ctx.fillRect(px - 4, py + 3, 8, 1);
-      ctx.fillStyle = '#ff5520';
-      ctx.fillRect(px - 3, py, 2, 1); ctx.fillRect(px + 1, py, 2, 1);
-      ctx.fillStyle = f ? '#ffffff' : '#5a2020'; ctx.fillRect(px - 5, py - 5, 4, 4);
-      ctx.fillStyle = '#ff2020'; ctx.fillRect(px - 4, py - 4, 2, 2);
-      ctx.fillStyle = '#3a1010';
-      ctx.fillRect(px - 4, py + 4, 1, 2); ctx.fillRect(px + 3, py + 4, 1, 2);
-    } else if (this.type === 'shadow') {
-      const shimmer = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
-      ctx.globalAlpha = shimmer;
-      ctx.fillStyle = f ? '#ffffff' : '#2a1a4a'; ctx.fillRect(px - 4, py - 4, 8, 9);
-      ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 3, py - 7, 6, 5);
+    const sc = this.eliteScale; // 1 for normal, 1.5 for elites
+
+    // ── Elite aura (drawn behind sprite) ────────────────────
+    if (this.elite) {
+      const primaryMod = this.eliteMods[0];
+      const auraColor = primaryMod ? primaryMod.auraColor : '#ffffff';
+      const pulse = 0.28 + 0.18 * Math.sin(this.auraPhase);
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = auraColor;
+      const ar = Math.round(this.r * sc) + 5;
+      ctx.fillRect(px - ar, py - ar, ar * 2, ar * 2);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = '#aa66ff';
-      ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-      ctx.fillStyle = '#ddaaff'; ctx.fillRect(px - 2, py - 5, 1, 1);
-    } else if (this.type === 'voidCaster') {
-      ctx.fillStyle = f ? '#ffffff' : '#3a1a5a'; ctx.fillRect(px - 4, py - 2, 8, 7);
-      ctx.fillStyle = '#5a2a7a'; ctx.fillRect(px - 4, py + 4, 8, 1);
-      ctx.fillStyle = f ? '#ffffff' : '#aa66ff'; ctx.fillRect(px - 2, py - 7, 4, 5);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(px - 1, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-      const orbY = py + Math.sin(performance.now() * 0.005) * 1;
-      ctx.fillStyle = '#aa66ff'; ctx.fillRect(px + 4, Math.floor(orbY), 2, 2);
+      // Enraged: extra red halo when below 30%
+      if (this.hasMod('enraged') && this.hp < this.maxHp * 0.3) {
+        const rage = 0.4 + 0.3 * Math.sin(this.auraPhase * 2.5);
+        ctx.globalAlpha = rage;
+        ctx.fillStyle = '#ff2200';
+        ctx.fillRect(px - ar - 3, py - ar - 3, (ar + 3) * 2, (ar + 3) * 2);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // ── Sprite ───────────────────────────────────────────────
+    const sprite = (typeof ENEMY_SPRITES !== 'undefined') ? ENEMY_SPRITES[this.type] : null;
+    if (sprite && typeof drawSprite === 'function') {
+      if (this.type === 'shadow') {
+        ctx.globalAlpha = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
+      }
+      drawSprite(ctx, sprite, px, py, false, f, 2 * sc);
+      ctx.globalAlpha = 1;
+      if (this.type === 'voidCaster') {
+        const orbY = py + Math.sin(performance.now() * 0.005) * 2;
+        ctx.fillStyle = '#aa66ff';
+        ctx.fillRect(px + 10, Math.floor(orbY) - 2, 4, 4);
+        ctx.fillStyle = '#ff60ff';
+        ctx.fillRect(px + 11, Math.floor(orbY) - 1, 2, 2);
+      }
+    } else {
+      ctx.fillStyle = f ? '#ffffff' : '#aa3030';
+      const fr = Math.round(this.r * sc);
+      ctx.fillRect(px - fr, py - fr, fr * 2, fr * 2);
+    }
+
+    // ── Shield bubble (drawn over sprite) ───────────────────
+    if (this.elite && this.shieldMax > 0 && this.shield > 0) {
+      const sf = this.shieldFlash > 0;
+      ctx.globalAlpha = sf ? 0.9 : (0.45 + 0.2 * Math.sin(this.auraPhase * 2));
+      ctx.strokeStyle = sf ? '#ffffff' : '#88ccff';
+      ctx.lineWidth = sf ? 2 : 1;
+      const sr = Math.round(this.r * sc) + 5;
+      ctx.beginPath(); ctx.arc(px, py, sr, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1; ctx.globalAlpha = 1;
+    }
+
+    // ── Elite HP bar + name label ────────────────────────────
+    if (this.elite) {
+      const barW = 32, barH = 3;
+      const bx = px - barW / 2, by = py - Math.round(this.r * sc) - 15;
+      // Background
+      ctx.fillStyle = '#1a0000';
+      ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+      // HP fill
+      const hpRatio = Math.max(0, this.hp / this.maxHp);
+      ctx.fillStyle = hpRatio > 0.5 ? '#cc3333' : (hpRatio > 0.25 ? '#ff8800' : '#ff2200');
+      ctx.fillRect(bx, by, Math.floor(barW * hpRatio), barH);
+      // Shield bar underneath (if shielded mod)
+      if (this.shieldMax > 0) {
+        const shRatio = Math.max(0, this.shield / this.shieldMax);
+        ctx.fillStyle = '#1a2a3a';
+        ctx.fillRect(bx - 1, by + barH + 1, barW + 2, 3);
+        ctx.fillStyle = '#88ccff';
+        ctx.fillRect(bx, by + barH + 2, Math.floor(barW * shRatio), 1);
+      }
+      // Name label
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillStyle = '#ffdd88';
+      ctx.fillText(ENEMY_TYPES[this.type].name, px, by - 5);
+      // Mod names (smaller, coloured)
+      if (this.eliteMods.length > 0) {
+        ctx.font = '6px monospace';
+        ctx.fillStyle = this.eliteMods[0].auraColor;
+        ctx.fillText(this.eliteMods.map(m => m.name).join(' / '), px, by - 12);
+      }
+      ctx.restore();
     }
   }
 }
@@ -589,26 +703,29 @@ class BoneLord {
       spawnBurst(this.x, this.y, ['#7755aa', '#aa88cc', '#ddccff'], 16);
     }
   }
-  takeDamage(amount) {
+  takeDamage(amount, opts) {
     this.hp -= amount; this.hitFlash = 0.12;
+    if (typeof spawnDamageNumber === 'function') {
+      const o = opts || {};
+      spawnDamageNumber(this.x, this.y - this.r, amount, {
+        color: o.crit ? '#ffe8a0' : (o.color || '#fff7a0'),
+        crit: !!o.crit, size: o.crit ? 12 : 9,
+      });
+    }
     if (this.hp <= 0) { this.alive = false; return true; }
     return false;
   }
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
     const f = this.hitFlash > 0;
-    ctx.fillStyle = f ? '#ffffff' : '#d8d8c0'; ctx.fillRect(px - 6, py - 2, 12, 8);
-    ctx.fillStyle = f ? '#dddddd' : '#a0a090';
-    ctx.fillRect(px - 4, py + 1, 8, 1); ctx.fillRect(px - 4, py + 3, 8, 1);
-    ctx.fillStyle = f ? '#dddddd' : '#bcbca0';
-    ctx.fillRect(px - 4, py + 6, 2, 4); ctx.fillRect(px + 2, py + 6, 2, 4);
-    ctx.fillStyle = f ? '#ffffff' : '#e8e8d0'; ctx.fillRect(px - 4, py - 10, 8, 8);
-    ctx.fillStyle = '#ff2020';
-    ctx.fillRect(px - 2, py - 8, 2, 2); ctx.fillRect(px + 0, py - 8, 2, 2);
-    ctx.fillStyle = '#3a3a30'; ctx.fillRect(px - 3, py - 4, 6, 1);
-    ctx.fillStyle = '#ffd040'; ctx.fillRect(px - 5, py - 12, 10, 2);
-    ctx.fillStyle = '#fff080';
-    ctx.fillRect(px - 4, py - 14, 2, 2); ctx.fillRect(px - 1, py - 14, 2, 2); ctx.fillRect(px + 2, py - 14, 2, 2);
+    const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.BoneLord : null;
+    if (sprite && typeof drawSprite === 'function') {
+      drawSprite(ctx, sprite, px, py, false, f, 2);
+    } else {
+      // Fallback
+      ctx.fillStyle = f ? '#ffffff' : '#e8e8d0';
+      ctx.fillRect(px - this.r, py - this.r, this.r * 2, this.r * 2);
+    }
   }
 }
 
@@ -667,26 +784,17 @@ class IceGiant {
       }
     }
   }
-  takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+  takeDamage(amount, opts) { this.hp -= amount; this.hitFlash = 0.12; if (typeof spawnDamageNumber === 'function') { const o = opts || {}; spawnDamageNumber(this.x, this.y - this.r, amount, { color: o.crit ? '#ffe8a0' : (o.color || '#fff7a0'), crit: !!o.crit, size: o.crit ? 12 : 9 }); } if (this.hp <= 0) { this.alive = false; return true; } return false; }
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
     const f = this.hitFlash > 0;
-    ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 9, py - 2, 18, 12);
-    ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
-    ctx.fillRect(px - 9, py + 4, 18, 1); ctx.fillRect(px - 9, py + 7, 18, 1);
-    ctx.fillStyle = f ? '#dddddd' : '#88aac0';
-    ctx.fillRect(px - 7, py + 11, 4, 4); ctx.fillRect(px + 3, py + 11, 4, 4);
-    ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 6, py - 10, 12, 8);
-    ctx.fillStyle = '#5599ff';
-    ctx.fillRect(px - 4, py - 8, 3, 2); ctx.fillRect(px + 1, py - 8, 3, 2);
-    ctx.fillStyle = '#aaccff';
-    ctx.fillRect(px - 3, py - 7, 1, 1); ctx.fillRect(px + 2, py - 7, 1, 1);
-    ctx.fillStyle = '#bbddee';
-    ctx.fillRect(px - 6, py - 13, 2, 3); ctx.fillRect(px + 4, py - 13, 2, 3);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(px - 6, py - 14, 2, 1); ctx.fillRect(px + 4, py - 14, 2, 1);
-    ctx.fillStyle = '#aaccff';
-    ctx.fillRect(px - 10, py, 1, 4); ctx.fillRect(px + 9, py, 1, 4);
+    const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.IceGiant : null;
+    if (sprite && typeof drawSprite === 'function') {
+      drawSprite(ctx, sprite, px, py, false, f, 2);
+    } else {
+      ctx.fillStyle = f ? '#ffffff' : '#d8e8f5';
+      ctx.fillRect(px - this.r, py - this.r, this.r * 2, this.r * 2);
+    }
   }
 }
 
@@ -750,26 +858,31 @@ class Pyromancer {
       }
     }
   }
-  takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+  takeDamage(amount, opts) { this.hp -= amount; this.hitFlash = 0.12; if (typeof spawnDamageNumber === 'function') { const o = opts || {}; spawnDamageNumber(this.x, this.y - this.r, amount, { color: o.crit ? '#ffe8a0' : (o.color || '#fff7a0'), crit: !!o.crit, size: o.crit ? 12 : 9 }); } if (this.hp <= 0) { this.alive = false; return true; } return false; }
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
     const f = this.hitFlash > 0;
     if (this.teleportFlash > 0) {
       ctx.globalAlpha = this.teleportFlash * 1.5;
-      ctx.fillStyle = '#ff8800';
-      ctx.fillRect(px - 8, py - 10, 16, 18);
+      ctx.fillStyle = "#ff8800";
+      ctx.fillRect(px - 22, py - 26, 44, 52);
       ctx.globalAlpha = 1;
     }
-    ctx.fillStyle = f ? '#ffffff' : '#aa1010'; ctx.fillRect(px - 5, py - 1, 10, 8);
-    ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 5, py - 4, 10, 4);
-    ctx.fillStyle = f ? '#ffffff' : '#dd3010'; ctx.fillRect(px - 4, py - 8, 8, 4);
-    ctx.fillStyle = '#ffff40';
-    ctx.fillRect(px - 2, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
-    const flamY = py - 12 + Math.sin(performance.now() * 0.008) * 1;
-    ctx.fillStyle = '#ff8800'; ctx.fillRect(px - 1, Math.floor(flamY), 2, 3);
-    ctx.fillStyle = '#ffdd00'; ctx.fillRect(px, Math.floor(flamY) + 1, 1, 1);
-    ctx.fillStyle = '#660000';
-    ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
+    const sprite = (typeof BOSS_SPRITES !== "undefined") ? BOSS_SPRITES.Pyromancer : null;
+    if (sprite && typeof drawSprite === "function") {
+      drawSprite(ctx, sprite, px, py, false, f, 2);
+    } else {
+      ctx.fillStyle = f ? "#ffffff" : "#aa1010"; ctx.fillRect(px - 5, py - 1, 10, 8);
+      ctx.fillStyle = f ? "#ffffff" : "#cc2020"; ctx.fillRect(px - 5, py - 4, 10, 4);
+      ctx.fillStyle = f ? "#ffffff" : "#dd3010"; ctx.fillRect(px - 4, py - 8, 8, 4);
+      ctx.fillStyle = "#ffff40";
+      ctx.fillRect(px - 2, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
+      const flamY = py - 12 + Math.sin(performance.now() * 0.008) * 1;
+      ctx.fillStyle = "#ff8800"; ctx.fillRect(px - 1, Math.floor(flamY), 2, 3);
+      ctx.fillStyle = "#ffdd00"; ctx.fillRect(px, Math.floor(flamY) + 1, 1, 1);
+      ctx.fillStyle = "#660000";
+      ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
+    }
   }
 }
 
@@ -839,22 +952,29 @@ class SlayerKiller {
       }
     }
   }
-  takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
+  takeDamage(amount, opts) { this.hp -= amount; this.hitFlash = 0.12; if (typeof spawnDamageNumber === 'function') { const o = opts || {}; spawnDamageNumber(this.x, this.y - this.r, amount, { color: o.crit ? '#ffe8a0' : (o.color || '#fff7a0'), crit: !!o.crit, size: o.crit ? 12 : 9 }); } if (this.hp <= 0) { this.alive = false; return true; } return false; }
   draw(ctx) {
     const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
     const f = this.hitFlash > 0;
+    const phaseColor = this.phase === 3 ? '#ff4080' : this.phase === 2 ? '#aa66ff' : '#5533aa';
     ctx.globalAlpha = 0.3;
-    ctx.fillStyle = this.phase === 3 ? '#ff4080' : this.phase === 2 ? '#aa66ff' : '#5533aa';
+    ctx.fillStyle = phaseColor;
     ctx.fillRect(px - 14, py - 14, 28, 28);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = f ? '#ffffff' : '#2a1a5a'; ctx.fillRect(px - 7, py - 2, 14, 10);
-    ctx.fillStyle = f ? '#ffffff' : '#3a2a7a'; ctx.fillRect(px - 7, py + 4, 14, 1);
-    ctx.fillStyle = '#1a0a3a';
-    ctx.fillRect(px - 5, py + 8, 3, 4); ctx.fillRect(px + 2, py + 8, 3, 4);
-    ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 5, py - 9, 10, 7);
-    ctx.fillStyle = '#aa66ff';
-    ctx.fillRect(px - 6, py - 11, 2, 3); ctx.fillRect(px + 4, py - 11, 2, 3); ctx.fillRect(px - 1, py - 12, 2, 4);
-    const eyeC = this.phase === 3 ? '#ff4080' : '#aa66ff';
+    const sprite = (typeof BOSS_SPRITES !== 'undefined') ? BOSS_SPRITES.SlayerKiller : null;
+    if (sprite && typeof drawSprite === 'function') {
+      drawSprite(ctx, sprite, px, py, false, f, 2);
+    } else {
+      ctx.fillStyle = f ? '#ffffff' : '#2a1a5a'; ctx.fillRect(px - 7, py - 2, 14, 10);
+      ctx.fillStyle = f ? '#ffffff' : '#3a2a7a'; ctx.fillRect(px - 7, py + 4, 14, 1);
+      ctx.fillStyle = '#1a0a3a';
+      ctx.fillRect(px - 5, py + 8, 3, 4); ctx.fillRect(px + 2, py + 8, 3, 4);
+      ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 5, py - 9, 10, 7);
+      ctx.fillStyle = '#aa66ff';
+      ctx.fillRect(px - 6, py - 11, 2, 3); ctx.fillRect(px + 4, py - 11, 2, 3); ctx.fillRect(px - 1, py - 12, 2, 4);
+    }
+    // Phase-shifting eyes (always drawn over sprite)
+    const eyeC = this.phase === 3 ? '#ff4080' : this.phase === 2 ? '#dd99ff' : '#aa66ff';
     ctx.fillStyle = eyeC;
     ctx.fillRect(px - 3, py - 7, 2, 2); ctx.fillRect(px + 1, py - 7, 2, 2);
     ctx.fillStyle = '#ffffff';
@@ -868,17 +988,30 @@ class SlayerKiller {
 
 // ============================================================
 // HELPERS: enemy death, boss death, AoE explosion
-// (Live here because they're tightly coupled to entity classes and spawnBurst.)
 // ============================================================
 function handleEnemyDeath(enemy) {
   player.kills++;
-  spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
-  xpGems.push(new XPGem(enemy.x, enemy.y, 1));
-  const goldAmt = rngInt(1, 3);
-  player.gold += goldAmt;
-  goldFlashTimer = 0.8;
-  if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
-  shake = Math.min(shake + 1, 3);
+  if (enemy.elite) {
+    if (enemy.hasMod('molten')) explodeAt(enemy.x, enemy.y, 48, enemy.contactDmg * 2);
+    const primaryColor = enemy.eliteMods[0] ? enemy.eliteMods[0].auraColor : '#ffdd88';
+    spawnBurst(enemy.x, enemy.y, [primaryColor, '#ffffff', '#ffdd88', primaryColor], 18);
+    xpGems.push(new XPGem(enemy.x, enemy.y, 4));
+    player.gold += rngInt(8, 18);
+    goldFlashTimer = 0.8;
+    let eliteDrop = generateItem();
+    for (let t = 0; t < 8 && eliteDrop.rarity.id === 'white'; t++) eliteDrop = generateItem();
+    itemDrops.push(new ItemDrop(enemy.x, enemy.y, eliteDrop));
+    shake = Math.min(shake + 4, 8);
+    Sfx.bossDie();
+  } else {
+    spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
+    xpGems.push(new XPGem(enemy.x, enemy.y, 1));
+    player.gold += rngInt(1, 3);
+    goldFlashTimer = 0.8;
+    if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
+    shake = Math.min(shake + 1, 3);
+    Sfx.enemyDie();
+  }
 }
 function handleBossDeath(enemy) {
   player.kills++;
@@ -894,11 +1027,14 @@ function handleBossDeath(enemy) {
   itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
   itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
   shake = Math.min(shake + 8, 12);
+  Sfx.bossDie();
   bossRef = null;
   bossDefeatedBannerTimer = 2.0;
   lastBossName = enemy.name || 'BOSS';
-  if (isFinalWave(currentWave)) state = STATE.VICTORY;
-  else enterAbilityDraft();
+  if (isFinalWave(currentWave)) {
+    state = STATE.VICTORY;
+    setTimeout(() => Sfx.victory(), 600);
+  } else enterAbilityDraft();
 }
 function explodeAt(x, y, radius, damage) {
   for (const e of enemies) {

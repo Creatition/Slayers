@@ -570,6 +570,7 @@ function castAbility(slotIdx) {
   if (ok) {
     player.resource -= slot.def.cost;
     player.abilityCooldowns[slotIdx] = slot.def.cooldown;
+    if (typeof Sfx !== 'undefined') Sfx.abilityCast();
   }
 }
 
@@ -647,4 +648,62 @@ function pickEnemyType(w) {
   if (r < 0.40) return 'shadow';
   if (r < 0.75) return 'voidCaster';
   return 'zombie';
+}
+
+// ============================================================
+// ELITE / CHAMPION MODS
+// ============================================================
+const ELITE_MODS = [
+  { id: 'vampiric',   name: 'Vampiric',   auraColor: '#ff4488', trailColor: '#cc2255' },
+  { id: 'enraged',    name: 'Enraged',    auraColor: '#ff7700', trailColor: '#cc4400' },
+  { id: 'molten',     name: 'Molten',     auraColor: '#ffaa00', trailColor: '#ff6600' },
+  { id: 'arcane',     name: 'Arcane',     auraColor: '#bb88ff', trailColor: '#8844ff' },
+  { id: 'plagued',    name: 'Plagued',    auraColor: '#66ff77', trailColor: '#33aa44' },
+  { id: 'shielded',   name: 'Shielded',   auraColor: '#88ccff', trailColor: '#4488cc' },
+  { id: 'teleporter', name: 'Teleporter', auraColor: '#ff88ff', trailColor: '#aa44aa' },
+];
+
+function rollEliteMods(count) {
+  const pool = [...ELITE_MODS];
+  const result = [];
+  for (let i = 0; i < count && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    result.push(pool.splice(idx, 1)[0]);
+  }
+  return result;
+}
+
+// Chance for a given wave to spawn an elite (0 before wave 3)
+function eliteChance(wave) {
+  if (wave < 3) return 0;
+  return Math.min(0.35, 0.10 + (wave - 3) * 0.02);
+}
+
+// ============================================================
+// ELITE / CHAMPION MODS
+// ============================================================
+const ELITE_MODS = [
+  { id: 'vampiric',   name: 'Vampiric',   auraColor: '#ff4488', trailColor: '#cc2255' },
+  { id: 'enraged',    name: 'Enraged',    auraColor: '#ff7700', trailColor: '#cc4400' },
+  { id: 'molten',     name: 'Molten',     auraColor: '#ffaa00', trailColor: '#ff6600' },
+  { id: 'arcane',     name: 'Arcane',     auraColor: '#bb88ff', trailColor: '#8844ff' },
+  { id: 'plagued',    name: 'Plagued',    auraColor: '#66ff77', trailColor: '#33aa44' },
+  { id: 'shielded',   name: 'Shielded',   auraColor: '#88ccff', trailColor: '#4488cc' },
+  { id: 'teleporter', name: 'Teleporter', auraColor: '#ff88ff', trailColor: '#aa44aa' },
+];
+
+function rollEliteMods(count) {
+  const pool = [...ELITE_MODS];
+  const result = [];
+  for (let i = 0; i < count && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    result.push(pool.splice(idx, 1)[0]);
+  }
+  return result;
+}
+
+// Chance for a given wave to spawn an elite (0 before wave 3)
+function eliteChance(wave) {
+  if (wave < 3) return 0;
+  return Math.min(0.35, 0.10 + (wave - 3) * 0.02);
 }

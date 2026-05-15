@@ -45,7 +45,9 @@
   </div>
 
 <script src="src/data.js"></script>
+<script src="src/sprites.js"></script>
 <script src="src/entities.js"></script>
+<script src="src/sfx.js"></script>
 <script>
 // =============================================================================
 // SLAYERS — index.html inline script
@@ -117,8 +119,10 @@
   let itemDrops = [];
   let particles = [];
   let groundEffects = []; // shockwaves, meteor warnings
+  let damageNumbers = []; // floating damage text
   let bossRef = null;
   let floorDecorations = [];
+  let hitPauseTimer = 0; // brief freeze-frame on crits for impact
 
   // ============================================================
   // INPUT
@@ -138,6 +142,8 @@
     const k = e.key.toLowerCase();
     if (!keys.has(k)) keyJustPressed.add(k);
     keys.add(k);
+    // Lazy-init audio on first user gesture (browsers require this).
+    Sfx.init(); Sfx.resume();
     const blocked = ['arrowup','arrowdown','arrowleft','arrowright',' ','tab','i'];
     if (blocked.includes(k)) e.preventDefault();
   });
@@ -148,7 +154,11 @@
     mouseX = (e.clientX - rect.left) * (W / rect.width);
     mouseY = (e.clientY - rect.top) * (H / rect.height);
   });
-  canvas.addEventListener('mousedown', () => { mouseClicked = true; });
+  canvas.addEventListener('mousedown', () => {
+    mouseClicked = true;
+    // Lazy-init audio on first user gesture.
+    Sfx.init(); Sfx.resume();
+  });
   window.addEventListener('gamepadconnected', (e) => { detectedGamepadType = detectGamepadType(e.gamepad.id); });
   window.addEventListener('gamepaddisconnected', () => {});
 
@@ -691,6 +701,7 @@
     if (ok) {
       player.resource -= slot.def.cost;
       player.abilityCooldowns[slotIdx] = slot.def.cooldown;
+      Sfx.abilityCast();
     }
   }
 
@@ -1486,50 +1497,49 @@
       }
     }
   }
-  // Handle a non-boss enemy death (XP gem, gold, loot drop).
-  function handleEnemyDeath(enemy) {
-    player.kills++;
-    spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
-    xpGems.push(new XPGem(enemy.x, enemy.y, 1));
-    const goldAmt = rngInt(1, 3);
-    player.gold += goldAmt;
-    goldFlashTimer = 0.8;
-    if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
-    shake = Math.min(shake + 1, 3);
+  // Floating damage number (Diablo/Brotato-style hit feedback)
+  // opts: { color, size, vy, vx, life, crit }
+  function spawnDamageNumber(x, y, amount, opts) {
+    opts = opts || {};
+    damageNumbers.push({
+      x: x + (Math.random() - 0.5) * 6,
+      y: y - 4,
+      vx: (opts.vx !== undefined) ? opts.vx : (Math.random() - 0.5) * 20,
+      vy: (opts.vy !== undefined) ? opts.vy : -38 - Math.random() * 14,
+      text: String(Math.round(amount)),
+      color: opts.color || '#fff7a0',
+      size: opts.size || (opts.crit ? 11 : 8),
+      life: opts.life || 0.65,
+      maxLife: opts.life || 0.65,
+      crit: !!opts.crit,
+      dead: false,
+    });
   }
-  // Handle boss death (extra XP/gold/loot + transition to next state).
-  function handleBossDeath(enemy) {
-    player.kills++;
-    spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 14);
-    xpGems.push(new XPGem(enemy.x, enemy.y, 8));
-    const goldAmt = rngInt(40, 80);
-    player.gold += goldAmt;
-    goldFlashTimer = 0.8;
-    let it = generateItem();
-    let tries = 0;
-    while (it.rarity.id === 'white' && tries < 6) { it = generateItem(); tries++; }
-    itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
-    itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
-    itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
-    shake = Math.min(shake + 8, 12);
-    bossRef = null;
-    bossDefeatedBannerTimer = 2.0;
-    lastBossName = enemy.name || 'BOSS';
-    if (isFinalWave(currentWave)) state = STATE.VICTORY;
-    else enterAbilityDraft();
-  }
-  // Trigger an AoE explosion at a position (used by explosive projectiles)
-  function explodeAt(x, y, radius, damage) {
-    for (const e of enemies) {
-      if (!e.alive) continue;
-      const dx = e.x - x, dy = e.y - y;
-      if (dx*dx + dy*dy < radius*radius) {
-        const died = e.takeDamage(damage);
-        if (died) handleEnemyDeath(e);
-      }
+  function updateDamageNumbers(dt) {
+    for (const n of damageNumbers) {
+      if (n.dead) continue;
+      n.x += n.vx * dt; n.y += n.vy * dt;
+      n.vy += 60 * dt;     // gentle gravity so they arc
+      n.vx *= 0.92;
+      n.life -= dt;
+      if (n.life <= 0) n.dead = true;
     }
-    spawnBurst(x, y, ['#ff5520', '#ffaa00', '#ffdd00', '#ffffff'], 18);
-    shake = Math.min(shake + 3, 6);
+    damageNumbers = damageNumbers.filter(n => !n.dead);
+  }
+  function drawDamageNumbers(ctx) {
+    for (const n of damageNumbers) {
+      const a = Math.max(0, Math.min(1, n.life / n.maxLife));
+      ctx.globalAlpha = a;
+      ctx.font = `bold ${n.size}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      // Shadow for readability
+      ctx.fillStyle = '#000';
+      ctx.fillText(n.text, Math.floor(n.x) + 1, Math.floor(n.y) + 1);
+      ctx.fillStyle = n.color;
+      ctx.fillText(n.text, Math.floor(n.x), Math.floor(n.y));
+      ctx.textAlign = 'left';
+    }
+    ctx.globalAlpha = 1;
   }
 
   // ============================================================
@@ -1690,7 +1700,13 @@
     else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
     else { x = -pad; y = Math.random() * H; }
-    enemies.push(new Enemy(x, y, pickEnemyType(currentWave), cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult));
+    const e = new Enemy(x, y, pickEnemyType(currentWave), cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    // Champion / Elite roll — scales with wave
+    if (Math.random() < eliteChance(currentWave)) {
+      const modCount = Math.random() < 0.25 ? 2 : 1; // 25% chance dual-mod champion
+      e.makeElite(rollEliteMods(modCount));
+    }
+    enemies.push(e);
   }
   function spawnBoss(cfg) {
     let boss;
@@ -1704,6 +1720,7 @@
     bossBannerTimer = 2.5;
     shake = Math.min(shake + 4, 8);
     spawnBurst(W / 2, 70, ['#7755aa', '#aa88cc', '#ffd040'], 18);
+    Sfx.bossSpawn();
   }
   function findNearestEnemy(x, y, maxRange) {
     let best = null, bestD = maxRange;
@@ -1725,6 +1742,7 @@
     const isCrit = Math.random() * 100 < crit;
     if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
     projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
+    Sfx.shoot();
   }
 
   // ============================================================
@@ -1741,7 +1759,11 @@
           const d2 = dx*dx + dy*dy;
           if (d2 < g.r * g.r && d2 > (g.r - 25) * (g.r - 25)) {
             const died = player.takeDamage(g.damage);
-            if (died) state = STATE.DEAD;
+            const dmg = Math.max(1, g.damage - player.armor);
+            spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
+            hitPauseTimer = Math.max(hitPauseTimer, 0.06);
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+            else Sfx.playerHit();
             g.hit.add(player);
           }
         }
@@ -1754,7 +1776,7 @@
               if (!e.alive) continue;
               const dx = e.x - g.x, dy = e.y - g.y;
               if (dx*dx + dy*dy < g.maxR * g.maxR) {
-                const died = e.takeDamage(g.damage);
+                const died = e.takeDamage(g.damage, { color: '#ffaa44' });
                 if (died) handleEnemyDeath(e);
               }
             }
@@ -1762,16 +1784,50 @@
             const dx = player.x - g.x, dy = player.y - g.y;
             if (dx*dx + dy*dy < g.maxR * g.maxR) {
               const died = player.takeDamage(g.damage);
-              if (died) state = STATE.DEAD;
+              const dmg = Math.max(1, g.damage - player.armor);
+              spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
+              hitPauseTimer = Math.max(hitPauseTimer, 0.07);
+              if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+              else Sfx.playerHit();
             }
           }
           spawnBurst(g.x, g.y, ['#ff4400', '#ff8800', '#ffdd00', '#ffffff'], 24);
           shake = Math.min(shake + 5, 10);
         }
+      } else if (g.type === 'fire_patch') {
+        g.life -= dt;
+        // Tick damage to player if standing in it (once per 0.8s)
+        const fpDx = player.x - g.x, fpDy = player.y - g.y;
+        if (fpDx*fpDx + fpDy*fpDy < g.r * g.r && player.iframeTimer <= 0) {
+          const now = performance.now();
+          const last = g.cooldowns.get('player') || 0;
+          if (now - last > 800) {
+            g.cooldowns.set('player', now);
+            const died = player.takeDamage(g.damage);
+            spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#ff7700', size: 9 });
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
+          }
+        }
+      } else if (g.type === 'poison_cloud') {
+        g.life -= dt;
+        // Tick damage to player if inside cloud (once per 0.6s)
+        const pcDx = player.x - g.x, pcDy = player.y - g.y;
+        if (pcDx*pcDx + pcDy*pcDy < g.r * g.r && player.iframeTimer <= 0) {
+          const now = performance.now();
+          const last = g.cooldowns.get('player') || 0;
+          if (now - last > 600) {
+            g.cooldowns.set('player', now);
+            const died = player.takeDamage(g.damage);
+            spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#55ff66', size: 9 });
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
+          }
+        }
       }
     }
     for (let i = groundEffects.length - 1; i >= 0; i--) {
-      if (groundEffects[i].life <= 0 && (groundEffects[i].type !== 'meteor' || groundEffects[i].exploded)) groundEffects.splice(i, 1);
+      const g = groundEffects[i];
+      const expired = g.life <= 0;
+      if (expired && (g.type !== 'meteor' || g.exploded)) groundEffects.splice(i, 1);
     }
   }
   function drawGroundEffects(ctx) {
@@ -1791,6 +1847,26 @@
         ctx.globalAlpha = (1 - a) * 0.3;
         ctx.beginPath(); ctx.arc(g.x, g.y, g.maxR * (1 - a), 0, Math.PI * 2); ctx.fill();
         ctx.lineWidth = 1; ctx.globalAlpha = 1;
+      } else if (g.type === 'fire_patch') {
+        const lifeRatio = Math.max(0, g.life / g.maxLife);
+        const flicker = 0.45 + 0.2 * Math.sin(performance.now() * 0.018 + g.x);
+        ctx.globalAlpha = lifeRatio * flicker;
+        ctx.fillStyle = '#ff6600';
+        ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+        ctx.globalAlpha = lifeRatio * flicker * 0.7;
+        ctx.fillStyle = '#ffcc00';
+        ctx.fillRect(g.x - g.r + 4, g.y - g.r + 4, g.r * 2 - 8, g.r * 2 - 8);
+        ctx.globalAlpha = 1;
+      } else if (g.type === 'poison_cloud') {
+        const lifeRatio = Math.max(0, g.life / g.maxLife);
+        const pulse = 0.35 + 0.15 * Math.sin(performance.now() * 0.006 + g.y);
+        ctx.globalAlpha = lifeRatio * pulse;
+        ctx.fillStyle = '#22cc44';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * pulse * 0.6;
+        ctx.fillStyle = '#88ff99';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.55, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
       }
     }
   }
@@ -1810,10 +1886,19 @@
         const dx = enemy.x - proj.x, dy = enemy.y - proj.y;
         const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
-          const died = enemy.takeDamage(proj.damage);
+          const died = enemy.takeDamage(proj.damage, { crit: proj.isCrit });
           if (proj.piercing) proj.hitSet.add(enemy);
           else proj.dead = true;
           spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
+          // Damage-scaled screenshake + hit-pause on crit
+          if (proj.isCrit) {
+            shake = Math.min(shake + 2.5, 8);
+            hitPauseTimer = Math.max(hitPauseTimer, 0.045);
+            Sfx.crit();
+          } else {
+            shake = Math.min(shake + 0.5, 4);
+            Sfx.hit();
+          }
           if (proj.explosive && !proj.piercing) {
             explodeAt(proj.x, proj.y, proj.explosionRadius, proj.explosionDamage);
           }
@@ -1833,7 +1918,11 @@
         if (dx * dx + dy * dy < rr * rr) {
           ep.dead = true;
           const died = player.takeDamage(ep.damage);
-          if (died) state = STATE.DEAD;
+          const dmg = Math.max(1, ep.damage - player.armor);
+          spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
+          hitPauseTimer = Math.max(hitPauseTimer, 0.06);
+          if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+          else Sfx.playerHit();
           break;
         }
       }
@@ -1845,7 +1934,11 @@
         const rr = enemy.r + player.r;
         if (dx * dx + dy * dy < rr * rr) {
           const died = player.takeDamage(enemy.contactDmg);
-          if (died) state = STATE.DEAD;
+          const dmg = Math.max(1, enemy.contactDmg - player.armor);
+          spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
+          hitPauseTimer = Math.max(hitPauseTimer, 0.06);
+          if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+          else Sfx.playerHit();
           break;
         }
       }
@@ -1857,6 +1950,7 @@
   // ============================================================
   function endWave() {
     enemies = []; enemyProjectiles = []; bossRef = null; groundEffects = [];
+    Sfx.waveComplete();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
   }
@@ -1869,6 +1963,7 @@
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
+    Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
   }
@@ -1895,6 +1990,7 @@
     }
     if (target < 0) target = 1;
     player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity };
+    Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
   }
@@ -2029,7 +2125,7 @@
   function resetWorld() {
     player = new Player(W / 2, H / 2, selectedClassId);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = [];
-    groundEffects = []; bossRef = null; shake = 0;
+    groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     levelUpChoices = []; abilityDraftChoices = [];
@@ -2061,6 +2157,7 @@
     player.recomputeStats();
     if (selectedInvIdx === idx) selectedInvIdx = -1;
     else if (selectedInvIdx > idx) selectedInvIdx -= 1;
+    Sfx.uiConfirm();
   }
   function unequipSlot(slotKey) {
     const item = player.equipped[slotKey];
@@ -2080,6 +2177,7 @@
     player.inventory.push(item);
     shopItems[idx] = null;
     goldFlashTimer = 0.8;
+    Sfx.shopBuy();
   }
   function doRefreshShop() {
     if (player.gold < shopRefreshCost) return;
@@ -2088,6 +2186,7 @@
     shopItems = [];
     for (let i = 0; i < 4; i++) shopItems.push(generateItem());
     goldFlashTimer = 0.8;
+    Sfx.uiConfirm();
   }
   function salvageInventoryItem(idx) {
     const item = player.inventory[idx];
@@ -2100,6 +2199,7 @@
     if (selectedInvIdx === idx) selectedInvIdx = -1;
     else if (selectedInvIdx > idx) selectedInvIdx -= 1;
     goldFlashTimer = 0.8;
+    Sfx.shopSell();
   }
   function rerollInventoryItem(idx) {
     const item = player.inventory[idx];
@@ -2112,6 +2212,26 @@
     player.mats[spec.mat] -= spec.count;
     item.affixes = rollAffixes(rngInt(item.rarity.affixMin, item.rarity.affixMax));
     goldFlashTimer = 0.8;
+    Sfx.uiConfirm();
+  }
+  // Salvage every inventory item at or below the given rarity tier (white=0, blue=1, yellow=2, orange=3, green=4).
+  // Default: only White ('common') items.
+  function bulkSalvage(maxTier) {
+    if (maxTier === undefined) maxTier = 0;
+    const order = { white: 0, blue: 1, yellow: 2, orange: 3, green: 4 };
+    let count = 0;
+    for (let i = player.inventory.length - 1; i >= 0; i--) {
+      const item = player.inventory[i];
+      if (item && order[item.rarity.id] !== undefined && order[item.rarity.id] <= maxTier) {
+        salvageInventoryItem(i);
+        count++;
+      }
+    }
+    if (count > 0) {
+      lootFlashTimer = 2.0;
+      lastLootName = `Salvaged ${count} item${count === 1 ? '' : 's'}`;
+    }
+    return count;
   }
   function doRerollLevelUp() {
     if (player.gold < levelUpRerollCost) return;
@@ -2215,6 +2335,12 @@
     ctx.fillStyle = currentBiome().decoColors[3] || '#557755';
     ctx.font = '7px monospace';
     ctx.fillText(currentBiome().name.toUpperCase(), W / 2, H - 86);
+
+    // Audio mute indicator (small, bottom-right of the HUD)
+    if (Sfx.muted) {
+      ctx.fillStyle = '#ff6060'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'right';
+      ctx.fillText('MUTED [M]', W - 8, H - 4);
+    }
 
     ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
     ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
@@ -2839,7 +2965,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
-    ctx.fillText('Click inventory item to equip - click equipped to unequip - Tab/I/Esc to close', W / 2, 32);
+    ctx.fillText('Click=equip  -  Shift+Click=salvage  -  V=salvage all whites  -  Tab/I/Esc=close', W / 2, 32);
 
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
     ctx.fillText('EQUIPPED', 30, 44);
@@ -2913,7 +3039,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-    ctx.fillText('Click shop item to buy - click inventory item to select - then use action buttons - READY to start next wave', W / 2, 28);
+    ctx.fillText('Click to buy/select  -  Shift+Click inventory = instant salvage  -  V = salvage all whites  -  R = refresh', W / 2, 28);
 
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
@@ -2970,6 +3096,19 @@
     ctx.fillText('REFRESH', refX + 45, refY + 22);
     ctx.fillStyle = canRefresh ? '#ffd23f' : '#664020';
     ctx.fillText(`${shopRefreshCost}g`, refX + 45, refY + 36);
+    // Salvage Whites button (quick bulk salvage of all white/common items)
+    const salvX = refX + 95;
+    const salvY = refY;
+    const whiteCount = player.inventory.filter(it => it && it.rarity.id === 'white').length;
+    const canSalvageWhites = whiteCount > 0;
+    drawButton(salvX, salvY, 95, SHOP_ITEM_H, '', canSalvageWhites, '#cccccc');
+    ctx.fillStyle = canSalvageWhites ? '#eee' : '#555';
+    ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('SALVAGE', salvX + 47, salvY + 16);
+    ctx.fillText('WHITES', salvX + 47, salvY + 28);
+    ctx.fillStyle = canSalvageWhites ? '#cccccc' : '#555';
+    ctx.font = '7px monospace';
+    ctx.fillText(`(${whiteCount})  [V]`, salvX + 47, salvY + 42);
 
     // Equipped paper-doll (smaller layout)
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 8px monospace';
@@ -3157,6 +3296,9 @@
     lastTime = now;
     updateInput();
 
+    // Global audio mute toggle (M key) — works in any state.
+    if (keyJustPressed.has('m')) Sfx.toggleMute();
+
     if ((keyJustPressed.has('tab') || keyJustPressed.has('i') ||
          gpJustPressed.has(8) || gpJustPressed.has(9)) &&
         (state === STATE.PLAYING || state === STATE.INVENTORY)) {
@@ -3171,23 +3313,29 @@
       if (keyJustPressed.has('3') || gpJustPressed.has(2)) castAbility(2);
       if (keyJustPressed.has('4') || gpJustPressed.has(3)) castAbility(3);
 
+      // Hit-pause: freeze world for a few frames after a crit/big hit.
+      // Damage numbers continue animating so the popup is visible during the freeze.
+      const frozen = hitPauseTimer > 0;
+      if (frozen) hitPauseTimer -= dt;
+      const wdt = frozen ? 0 : dt;
+
       const cfg = waveConfig(currentWave);
-      waveTimer -= dt;
+      waveTimer -= wdt;
       if (!isBossWave(currentWave) && waveTimer > 0) {
-        spawnTimer += dt;
+        spawnTimer += wdt;
         while (spawnTimer >= cfg.spawnInterval) {
           spawnTimer -= cfg.spawnInterval;
           spawnEnemy(cfg);
         }
       }
-      player.update(dt);
-      for (const e of enemies) if (e.alive) e.update(dt, player);
-      for (const p of projectiles) if (!p.dead) p.update(dt);
-      for (const ep of enemyProjectiles) if (!ep.dead) ep.update(dt);
-      for (const g of xpGems) if (!g.dead) g.update(dt, player);
-      for (const d of itemDrops) if (!d.dead) d.update(dt, player);
-      updateGroundEffects(dt);
-      checkCollisions();
+      player.update(wdt);
+      for (const e of enemies) if (e.alive) e.update(wdt, player);
+      for (const p of projectiles) if (!p.dead) p.update(wdt);
+      for (const ep of enemyProjectiles) if (!ep.dead) ep.update(wdt);
+      for (const g of xpGems) if (!g.dead) g.update(wdt, player);
+      for (const d of itemDrops) if (!d.dead) d.update(wdt, player);
+      updateGroundEffects(wdt);
+      if (!frozen) checkCollisions();
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
       enemyProjectiles = enemyProjectiles.filter(p => !p.dead);
@@ -3368,12 +3516,17 @@
       if (gpJustPressed.has(0)) mouseClicked = true;
       // B button = close
       if (gpJustPressed.has(1)) toggleInventory();
+      // V = bulk-salvage all white items
+      if (keyJustPressed.has('v')) bulkSalvage(0);
       if (mouseClicked) {
         const eqSlot = getEquippedSlotAtMouse();
         if (eqSlot && player.equipped[eqSlot]) unequipSlot(eqSlot);
         else {
           const idx = getInventoryIdxAtMouse();
-          if (idx >= 0 && player.inventory[idx]) equipFromInventory(idx);
+          if (idx >= 0 && player.inventory[idx]) {
+            if (keys.has('shift')) salvageInventoryItem(idx);
+            else equipFromInventory(idx);
+          }
         }
       }
     }
@@ -3386,6 +3539,8 @@
       }
       // Refresh shortcut: R key
       if (keyJustPressed.has('r')) doRefreshShop();
+      // Bulk-salvage whites shortcut: V key
+      if (keyJustPressed.has('v')) bulkSalvage(0);
       if (mouseClicked) {
         // Shop item buy
         const shopIdx = getShopIdxAtMouse();
@@ -3395,10 +3550,14 @@
           // Refresh button
           const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
           const refY = SHOP_Y;
+          const salvBtnX = refX + 95;
           if (isHovering(refX, refY, 90, SHOP_ITEM_H)) {
             doRefreshShop();
+          } else if (isHovering(salvBtnX, refY, 95, SHOP_ITEM_H)) {
+            // Bulk salvage whites button
+            bulkSalvage(0);
           } else {
-            // Inventory click — select
+            // Inventory click — select (or Shift+Click = instant salvage)
             let invHit = -1;
             for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
               const col = i % INV_COLS;
@@ -3408,7 +3567,12 @@
               if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) { invHit = i; break; }
             }
             if (invHit >= 0 && player.inventory[invHit]) {
-              selectedInvIdx = (selectedInvIdx === invHit) ? -1 : invHit;
+              if (keys.has('shift')) {
+                // Shift+Click = instant salvage (salvageInventoryItem also adjusts selectedInvIdx)
+                salvageInventoryItem(invHit);
+              } else {
+                selectedInvIdx = (selectedInvIdx === invHit) ? -1 : invHit;
+              }
             } else {
               // Action buttons (only when selection)
               if (selectedInvIdx >= 0 && player.inventory[selectedInvIdx]) {
@@ -3432,6 +3596,7 @@
 
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
+    updateDamageNumbers(dt);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
     if (bossBannerTimer > 0) bossBannerTimer -= dt;
@@ -3455,6 +3620,7 @@
     for (const p of projectiles) p.draw(ctx);
     for (const ep of enemyProjectiles) ep.draw(ctx);
     if (state !== STATE.DEAD) player.draw(ctx);
+    drawDamageNumbers(ctx);
     ctx.restore();
 
     drawHud();
