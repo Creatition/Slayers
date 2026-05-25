@@ -1219,6 +1219,7 @@ const STAT_POOL = [
   { id: 'armor_1',       tier: 1, name: '+2 Armor',            desc: 'Shrug off small hits',     apply: (p) => { p.baseArmor += 2;            p.recomputeStats(); } },
   { id: 'dodge_1',       tier: 1, name: '+3% Dodge',           desc: 'Chance to avoid a hit',    apply: (p) => { p.baseDodge += 3;            p.recomputeStats(); } },
   { id: 'critdmg_1',     tier: 1, name: '+25% Crit Damage',    desc: 'Crits hit harder',         apply: (p) => { p.baseCritDmg += 0.25;       p.recomputeStats(); } },
+  { id: 'overpower_1',   tier: 1, name: '+2% Overpower',       desc: 'Rare HP-scaled nuke',      apply: (p) => { p.baseOverpowerChance += 2;  p.recomputeStats(); } },
 
   // ── UNCOMMON ─────────────────────────────────────────────────
   { id: 'maxhp_2',       tier: 2, name: '+35 Max HP',          desc: 'Solid health boost + heal',apply: (p) => { p.baseMaxHp += 35;          p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 35); } },
@@ -1232,6 +1233,7 @@ const STAT_POOL = [
   { id: 'armor_2',       tier: 2, name: '+4 Armor',            desc: 'Decent damage reduction',  apply: (p) => { p.baseArmor += 4;            p.recomputeStats(); } },
   { id: 'dodge_2',       tier: 2, name: '+6% Dodge',           desc: 'Noticeable evasion',       apply: (p) => { p.baseDodge += 6;            p.recomputeStats(); } },
   { id: 'critdmg_2',     tier: 2, name: '+50% Crit Damage',    desc: 'Crits really sting',       apply: (p) => { p.baseCritDmg += 0.50;       p.recomputeStats(); } },
+  { id: 'overpower_2',   tier: 2, name: '+4% Overpower',       desc: 'HP-scaled hits land harder',apply: (p) => { p.baseOverpowerChance += 4; p.recomputeStats(); } },
 
   // ── RARE ─────────────────────────────────────────────────────
   { id: 'maxhp_3',       tier: 3, name: '+70 Max HP',          desc: 'Big health pool + heal',   apply: (p) => { p.baseMaxHp += 70;          p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 70); } },
@@ -1245,6 +1247,7 @@ const STAT_POOL = [
   { id: 'armor_3',       tier: 3, name: '+7 Armor',            desc: 'Tanky',                    apply: (p) => { p.baseArmor += 7;            p.recomputeStats(); } },
   { id: 'dodge_3',       tier: 3, name: '+10% Dodge',          desc: 'Hard to pin down',         apply: (p) => { p.baseDodge += 10;           p.recomputeStats(); } },
   { id: 'critdmg_3',     tier: 3, name: '+75% Crit Damage',    desc: 'Crits are devastating',    apply: (p) => { p.baseCritDmg += 0.75;       p.recomputeStats(); } },
+  { id: 'overpower_3',   tier: 3, name: '+7% Overpower',       desc: 'Your HP is a weapon',      apply: (p) => { p.baseOverpowerChance += 7;  p.recomputeStats(); } },
 
   // ── LEGENDARY ────────────────────────────────────────────────
   { id: 'maxhp_4',       tier: 4, name: '+130 Max HP',         desc: 'Godlike health + heal',    apply: (p) => { p.baseMaxHp += 130;         p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 130); } },
@@ -1258,6 +1261,7 @@ const STAT_POOL = [
   { id: 'armor_4',       tier: 4, name: '+12 Armor',           desc: 'Damage? What damage?',     apply: (p) => { p.baseArmor += 12;           p.recomputeStats(); } },
   { id: 'dodge_4',       tier: 4, name: '+18% Dodge',          desc: 'You are the ghost',        apply: (p) => { p.baseDodge += 18;           p.recomputeStats(); } },
   { id: 'critdmg_4',     tier: 4, name: '+125% Crit Damage',   desc: 'Crits are execution',      apply: (p) => { p.baseCritDmg += 1.25;       p.recomputeStats(); } },
+  { id: 'overpower_4',   tier: 4, name: '+12% Overpower',      desc: 'Unstoppable force',        apply: (p) => { p.baseOverpowerChance += 12; p.recomputeStats(); } },
 ];
 
 function rollLevelUpChoices() {

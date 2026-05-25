@@ -758,6 +758,8 @@
         const dx = enemy.x - proj.x, dy = enemy.y - proj.y;
         const rr = enemy.r + proj.r;
         if (dx * dx + dy * dy < rr * rr) {
+          // Overpower check — fires before damage so enemy is still alive for the bonus hit
+          const isOverpower = player.overpowerChance > 0 && Math.random() * 100 < player.overpowerChance;
           const died = enemy.takeDamage(proj.damage, { crit: proj.isCrit });
           if (proj.onHit) proj.onHit(enemy);
           if (proj.piercing) proj.hitSet.add(enemy);
@@ -771,6 +773,16 @@
           } else {
             shake = Math.min(shake + 0.5, 4);
             Sfx.hit();
+          }
+          // Overpower proc — bonus damage equal to overpowerMult * current HP
+          if (isOverpower && enemy.alive) {
+            const opDmg = Math.floor(player.hp * player.overpowerMult);
+            enemy.takeDamage(opDmg, { crit: false, color: '#ffffff' });
+            spawnBurst(enemy.x, enemy.y, ['#ffffff', '#fffad0', '#ffdd88', '#ff8800'], 14);
+            spawnDamageNumber(enemy.x, enemy.y - enemy.r - 12, opDmg, { color: '#ffffff', crit: true, size: 16 });
+            spawnDamageNumber(enemy.x, enemy.y - enemy.r - 26, 'OVERPOWER', { color: '#ffdd44', crit: false, size: 10, vy: -55, life: 1.1 });
+            shake = Math.min(shake + 5, 12);
+            hitPauseTimer = Math.max(hitPauseTimer, 0.08);
           }
           if (proj.explosive && !proj.piercing) {
             explodeAt(proj.x, proj.y, proj.explosionRadius, proj.explosionDamage);
