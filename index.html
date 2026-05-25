@@ -129,6 +129,7 @@
   let talentPoints = 0;      // unspent points available to spend
   let spentTalents = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
+  let charTreeTab = 'talents'; // 'talents' or 'abilities'
   let paragonLevel = 0, paragonXp = 0, paragonPoints = 0;
   let spentParagon = {};          // nodeId -> true
   let paragonTreeCat = 'offense'; // active category tab in paragon view
@@ -685,6 +686,7 @@
     groundEffects = [];
     runBossesKilled++;
     runWavesCompleted++;
+    if (player) player.skillPoints = (player.skillPoints || 0) + 1; // +1 SP per boss
     // Wave transition — final boss → victory; act bosses → shop/levelup
     if (isFinalWave(currentWave)) {
       Sfx.waveComplete();
@@ -1098,6 +1100,7 @@
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
+    if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Skill Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
     Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
@@ -1105,40 +1108,67 @@
   // Boss ability draft — design: class-filtered with 10% cross-class spice, stack up to 6 slots.
   // Slot 0 is the class signature ability and is never drafted into. Drafted abilities fill
   // slots 1-5. When all 6 are full, the draft is skipped with a brief banner.
+  // D4+PoE2 inspired ability draft:
+  // • Unowned class abilities → UNLOCK (fills slots 1-5)
+  // • Owned abilities below maxRank → RANK UP (★ Notable at 3, ★ Capstone at 5)
+  // • 10% chance of cross-class wild pick
   function enterAbilityDraft() {
-    // Skip entirely when slots are full (cap = 6 total: signature + 5 drafted)
-    const filledSlots = player.abilities.filter(a => a).length;
-    if (filledSlots >= 6) {
-      lastLootName = 'Ability slots full!';
-      lootFlashTimer = 2.0;
-      if (player.pendingLevelUps > 0) enterLevelUp();
-      else enterShop();
-      return;
+    const owned = new Map(); // abilityId → slot object
+    for (const a of player.abilities) if (a) owned.set(a.id, a);
+    const filledSlots = owned.size;
+
+    const classPool   = classAbilities(player.class.id);
+    const offClassPool = ABILITY_LIST.filter(a => a.classOf && a.classOf !== player.class.id);
+
+    // Rankable: owned abilities below maxRank
+    const rankUpPool = [];
+    for (const [, slot] of owned) {
+      const maxR = (slot.def.maxRank || 5);
+      if ((slot.rank || 1) < maxR) rankUpPool.push(slot);
     }
-    // Build the two pools, excluding abilities already owned
-    const owned = new Set();
-    for (const a of player.abilities) if (a) owned.add(a.id);
-    const classPool   = classAbilities(player.class.id).filter(a => !owned.has(a.id));
-    const offClassPool = ABILITY_LIST.filter(a => a.classOf && a.classOf !== player.class.id && !owned.has(a.id));
+    // New: unowned class abilities (and maybe offclass)
+    const newPool = classPool.filter(a => !owned.has(a.id));
 
     const out = [];
     const offered = new Set();
     let attempts = 0;
-    while (out.length < 3 && attempts < 50) {
+    while (out.length < 3 && attempts < 80) {
       attempts++;
-      // 10% chance this slot rolls an off-class "rare find"
-      const crossRoll = Math.random() < 0.10;
-      const primary  = (crossRoll && offClassPool.length > 0) ? offClassPool : classPool;
-      const fallback = (crossRoll && offClassPool.length > 0) ? classPool    : offClassPool;
-      const pool = primary.length > 0 ? primary : fallback;
-      if (pool.length === 0) break; // Nothing left to offer
-      const def = pool[rngInt(0, pool.length - 1)];
-      if (offered.has(def.id)) continue;
-      offered.add(def.id);
-      out.push({ def, rarity: pickWeightedRarity() });
+      const crossRoll = Math.random() < 0.10 && offClassPool.length > 0;
+      // 50% chance to offer a rank-up if any available, else a new ability
+      const wantRankUp = rankUpPool.length > 0 && Math.random() < 0.50;
+
+      if (wantRankUp && !crossRoll) {
+        const slot = rankUpPool[rngInt(0, rankUpPool.length - 1)];
+        const key = 'rankup_' + slot.id;
+        if (offered.has(key)) continue;
+        offered.add(key);
+        out.push({ isRankUp: true, slot, def: slot.def, rarity: slot.rarity });
+      } else if (crossRoll && offClassPool.filter(a => !owned.has(a.id)).length > 0) {
+        const offNew = offClassPool.filter(a => !owned.has(a.id));
+        const def = offNew[rngInt(0, offNew.length - 1)];
+        const key = 'new_' + def.id;
+        if (offered.has(key)) continue;
+        if (filledSlots >= 6) continue; // no slots
+        offered.add(key);
+        out.push({ isRankUp: false, def, rarity: pickWeightedRarity(), isOffClass: true });
+      } else if (newPool.length > 0 && filledSlots < 6) {
+        const def = newPool[rngInt(0, newPool.length - 1)];
+        const key = 'new_' + def.id;
+        if (offered.has(key)) continue;
+        offered.add(key);
+        out.push({ isRankUp: false, def, rarity: pickWeightedRarity() });
+      } else if (rankUpPool.length > 0) {
+        const slot = rankUpPool[rngInt(0, rankUpPool.length - 1)];
+        const key = 'rankup_' + slot.id;
+        if (offered.has(key)) continue;
+        offered.add(key);
+        out.push({ isRankUp: true, slot, def: slot.def, rarity: slot.rarity });
+      }
     }
     if (out.length === 0) {
-      // Player owns everything available — skip without a banner
+      lastLootName = 'All abilities maxed!';
+      lootFlashTimer = 2.0;
       if (player.pendingLevelUps > 0) enterLevelUp();
       else enterShop();
       return;
@@ -1149,13 +1179,19 @@
   function pickAbilityDraft(idx) {
     if (idx < 0 || idx >= abilityDraftChoices.length) return;
     const choice = abilityDraftChoices[idx];
-    // Find first empty slot in 1..5 (slot 0 reserved for class signature)
-    let target = -1;
-    for (let i = 1; i < 6; i++) {
-      if (!player.abilities[i]) { target = i; break; }
+    if (choice.isRankUp) {
+      // Rank up existing ability
+      choice.slot.rank = Math.min((choice.slot.rank || 1) + 1, choice.def.maxRank || 5);
+      const newRank = choice.slot.rank;
+      const label = newRank >= 5 ? '★CAPSTONE' : newRank >= 3 ? '★Notable' : `Rank ${newRank}`;
+      spawnDamageNumber(player.x, player.y - 28, `${choice.def.name} ${label}`, { color: choice.def.color, size: 11, vy: -55, life: 2.0 });
+    } else {
+      // Unlock new ability — find empty slot 1..5
+      let target = -1;
+      for (let i = 1; i < 6; i++) { if (!player.abilities[i]) { target = i; break; } }
+      if (target < 0) target = 1;
+      player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity, rank: 1 };
     }
-    if (target < 0) target = 1; // Safety net (enterAbilityDraft already skips when full)
-    player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity };
     Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
@@ -2008,48 +2044,88 @@
   // RENDER — Ability Draft screen
   // ============================================================
   function drawAbilityDraftScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
-    ctx.fillText('ABILITY DRAFT', W / 2, 50);
+    ctx.fillText('ABILITY DRAFT', W / 2, 46);
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
-    ctx.fillText(`${lastBossName || 'Boss'} defeated. Choose one ability.`, W / 2, 68);
-    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
-    ctx.fillText('Pick: 1 / 2 / 3, click, or face button', W / 2, 82);
-    const cardW = 150, cardH = 170, gap = 18;
+    ctx.fillText(`${lastBossName || 'Boss'} defeated. Unlock or rank up an ability.`, W / 2, 62);
+    ctx.fillStyle = '#666'; ctx.font = '8px monospace';
+    ctx.fillText('Pick: 1 / 2 / 3 or click', W / 2, 74);
+    const cardW = 158, cardH = 190, gap = 12;
     const totalW = cardW * 3 + gap * 2;
-    const startX = (W - totalW) / 2;
-    const cardY = (H - cardH) / 2 + 10;
+    const startX = Math.floor((W - totalW) / 2);
+    const cardY = 86;
     for (let i = 0; i < abilityDraftChoices.length; i++) {
       const ch = abilityDraftChoices[i];
       const cx = startX + i * (cardW + gap); const cy = cardY;
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
-      ctx.fillStyle = hovered ? '#33333d' : '#22222a'; ctx.fillRect(cx, cy, cardW, cardH);
-      ctx.strokeStyle = ch.rarity.color; ctx.lineWidth = hovered ? 4 : 3;
+      // Card bg - rank-ups glow differently
+      ctx.fillStyle = ch.isRankUp ? (hovered ? '#1a1a30' : '#12122a') : (hovered ? '#33333d' : '#1a1a22');
+      ctx.fillRect(cx, cy, cardW, cardH);
+      const borderCol = ch.isRankUp ? '#aaffaa' : ch.rarity.color;
+      ctx.strokeStyle = borderCol; ctx.lineWidth = hovered ? 4 : 2;
       ctx.strokeRect(cx + 2, cy + 2, cardW - 4, cardH - 4); ctx.lineWidth = 1;
-      ctx.fillStyle = '#666'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`[${i + 1}]`, cx + 8, cy + 16);
-      ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
-      ctx.fillText(ch.rarity.name.toUpperCase(), cx + cardW - 8, cy + 16);
-      ctx.fillStyle = ch.def.color; ctx.font = 'bold 36px monospace';
+      // Key hint
+      ctx.fillStyle = '#555'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 7, cy + 15);
+      // RANK UP badge or rarity
+      if (ch.isRankUp) {
+        const newRank = (ch.slot.rank || 1) + 1;
+        const label = newRank >= 5 ? '★ CAPSTONE' : newRank >= 3 ? '★ NOTABLE' : 'RANK UP';
+        ctx.fillStyle = '#aaffaa'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(label, cx + cardW - 7, cy + 15);
+      } else {
+        ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'right';
+        ctx.fillText((ch.isOffClass ? '✦ ' : '') + ch.rarity.name.toUpperCase(), cx + cardW - 7, cy + 15);
+      }
+      // Ability letter / icon
+      ctx.fillStyle = ch.def.color; ctx.font = 'bold 34px monospace';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(ch.def.letter, cx + cardW / 2, cy + 50);
+      ctx.fillText(ch.def.letter, cx + cardW / 2, cy + 54);
       ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = ch.rarity.color; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(ch.def.name, cx + cardW / 2, cy + 90);
-      ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
-      ctx.fillText(ch.def.desc, cx + cardW / 2, cy + 108);
-      ctx.fillStyle = '#888'; ctx.font = '7px monospace';
-      ctx.fillText(`Cost ${ch.def.cost} - CD ${ch.def.cooldown}s - dmg x${ch.rarity.dmgMult.toFixed(2)}`, cx + cardW / 2, cy + 124);
-      if (ch.rarity.id === 'orange') {
-        ctx.fillStyle = '#ff8000'; ctx.font = 'bold 7px monospace';
-        ctx.fillText('LEGENDARY MOD', cx + cardW / 2, cy + 140);
-        ctx.fillStyle = '#ffaa44'; ctx.font = '7px monospace';
-        const legend = ch.def.id === 'multishot' ? '5 arrows instead of 3' :
-                       ch.def.id === 'rainOfArrows' ? 'Bigger radius' :
-                       ch.def.id === 'hawkEye' ? 'Lasts 8s instead of 5' :
-                       ch.def.id === 'arrowVolley' ? '12 arrows instead of 8' :
-                       '+50% projectile size';
-        ctx.fillText(legend, cx + cardW / 2, cy + 152);
+      // Name
+      ctx.fillStyle = ch.def.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(ch.def.name, cx + cardW / 2, cy + 88);
+      // Rank pips
+      const maxR = ch.def.maxRank || 5;
+      const curR = ch.isRankUp ? (ch.slot.rank || 1) : 0;
+      const newR = ch.isRankUp ? curR + 1 : 1;
+      const pipW = 10, pipGap = 4, pipTotalW = maxR * pipW + (maxR - 1) * pipGap;
+      const pipX0 = cx + (cardW - pipTotalW) / 2;
+      for (let p = 0; p < maxR; p++) {
+        const px = pipX0 + p * (pipW + pipGap);
+        const filled = p < curR;
+        const isNew  = p === curR && ch.isRankUp;
+        ctx.fillStyle = isNew ? '#aaffaa' : filled ? ch.def.color : '#333';
+        ctx.fillRect(px, cy + 96, pipW, 5);
+        if (isNew) { ctx.strokeStyle = '#aaffaa'; ctx.lineWidth = 1; ctx.strokeRect(px, cy + 96, pipW, 5); ctx.lineWidth = 1; }
+      }
+      // Description for the incoming rank
+      const rankIdx = ch.isRankUp ? (ch.slot.rank || 1) : 0; // 0-based index for rankDesc
+      const rankDescArr = ch.def.rankDesc || [];
+      const descText = rankDescArr[rankIdx] || ch.def.desc;
+      ctx.fillStyle = ch.isRankUp ? '#aaffcc' : '#aaa'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      // Wrap text across 2 lines if needed
+      const maxW = cardW - 14;
+      const words = descText.split(' '); let line = '';
+      let lineY = cy + 114;
+      for (const w of words) {
+        const test = line + (line ? ' ' : '') + w;
+        if (ctx.measureText(test).width > maxW && line) {
+          ctx.fillText(line, cx + cardW / 2, lineY); line = w; lineY += 11;
+        } else { line = test; }
+      }
+      if (line) ctx.fillText(line, cx + cardW / 2, lineY);
+      // Stats
+      ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+      ctx.fillText(`Cost ${ch.def.cost}  CD ${ch.def.cooldown}s`, cx + cardW / 2, cy + 148);
+      if (!ch.isRankUp && ch.rarity.dmgMult > 1) {
+        ctx.fillStyle = ch.rarity.color;
+        ctx.fillText(`dmg ×${ch.rarity.dmgMult.toFixed(2)}`, cx + cardW / 2, cy + 160);
+      }
+      if (ch.isRankUp) {
+        ctx.fillStyle = '#aaffaa'; ctx.font = 'bold 7px monospace';
+        ctx.fillText(`Rank ${(ch.slot.rank||1)} → ${(ch.slot.rank||1)+1}`, cx + cardW / 2, cy + 172);
       }
     }
     ctx.textAlign = 'left';
@@ -2434,9 +2510,24 @@
     ctx.font = 'bold 8px monospace';
     ctx.fillText(talentPoints > 0 ? `${talentPoints} TALENT POINT${talentPoints > 1 ? 'S' : ''} UNSPENT` : 'No unspent points', W / 2, 42);
 
+    // ── View toggle: TALENTS / ABILITIES ──────────────────────
+    const toggleY = 46;
+    const tlnBtn = { x: W/2 - 82, y: toggleY, w: 78, h: 14 };
+    const ablBtn = { x: W/2 + 4,  y: toggleY, w: 78, h: 14 };
+    ctx.fillStyle = charTreeTab === 'talents' ? '#5599ff' : '#222'; ctx.fillRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
+    ctx.strokeStyle = '#5599ff'; ctx.lineWidth = 1; ctx.strokeRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
+    ctx.fillStyle = charTreeTab === 'talents' ? '#000' : '#5599ff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('TALENTS', tlnBtn.x + tlnBtn.w/2, tlnBtn.y + 10);
+    ctx.fillStyle = charTreeTab === 'abilities' ? '#ffaa44' : '#222'; ctx.fillRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
+    ctx.strokeStyle = '#ffaa44'; ctx.lineWidth = 1; ctx.strokeRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
+    ctx.fillStyle = charTreeTab === 'abilities' ? '#000' : '#ffaa44'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    const spLabel = player ? `ABILITIES  [${player.skillPoints||0}SP]` : 'ABILITIES';
+    ctx.fillText(spLabel, ablBtn.x + ablBtn.w/2, ablBtn.y + 10);
+    ctx.lineWidth = 1;
+
     // ── Class tabs ─────────────────────────────────────────────
     const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
-    const tabW = Math.floor((W - 16) / allClasses.length), tabH = 16, tabY = 48;
+    const tabW = Math.floor((W - 16) / allClasses.length), tabH = 14, tabY = 63;
     for (let i = 0; i < allClasses.length; i++) {
       const cid = allClasses[i]; const tx = 8 + i * tabW;
       const active = cid === charTreeClass;
@@ -2445,14 +2536,104 @@
       ctx.strokeStyle = cl.color; ctx.lineWidth = active ? 2 : 1;
       ctx.strokeRect(tx, tabY, tabW - 2, tabH); ctx.lineWidth = 1;
       ctx.fillStyle = active ? '#000' : cl.color; ctx.font = `bold 7px monospace`; ctx.textAlign = 'center';
-      ctx.fillText(cl.name.substring(0, 6).toUpperCase(), tx + (tabW - 2) / 2, tabY + 11);
+      ctx.fillText(cl.name.substring(0, 6).toUpperCase(), tx + (tabW - 2) / 2, tabY + 10);
     }
 
-    // ── Talent tree ────────────────────────────────────────────
+    // ── Talent tree or Abilities view ────────────────────────
     const tree = TALENT_TREES[charTreeClass];
     const cl   = getClassById(charTreeClass);
     const spent = spentTalents[charTreeClass] || {};
-    const treeStartY = 72;
+    const treeStartY = 80; // shifted down for toggle row
+    if (charTreeTab === 'abilities') {
+      // ── ABILITIES VIEW ─────────────────────────────────────
+      const viewCl = getClassById(charTreeClass);
+      const allAbl = classAbilities(charTreeClass);
+      const cardW2 = 116, cardH2 = 110, gap2 = 8;
+      const ablPerRow = 3;
+      const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
+      const ablX0 = Math.floor((W - totalAblW) / 2);
+      const ablY0 = 82;
+      // Skill point display
+      ctx.fillStyle = (player && player.skillPoints > 0) ? '#aaffaa' : '#666';
+      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(player ? `Skill Points: ${player.skillPoints || 0}  (spend below to rank up)` : '', W / 2, ablY0 - 4);
+      for (let ai = 0; ai < allAbl.length; ai++) {
+        const adef = allAbl[ai];
+        const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
+        const ax = ablX0 + col * (cardW2 + gap2);
+        const ay = ablY0 + row * (cardH2 + gap2);
+        // Find if player owns this ability
+        const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        const curRank = owned2 ? (owned2.rank || 1) : 0;
+        const maxRank = adef.maxRank || 5;
+        const canRankUp = player && owned2 && curRank < maxRank && (player.skillPoints || 0) >= 1;
+        const isMaxed = owned2 && curRank >= maxRank;
+        const hovered2 = mouseX >= ax && mouseX <= ax + cardW2 && mouseY >= ay && mouseY <= ay + cardH2;
+        // Card bg
+        ctx.fillStyle = owned2 ? (isMaxed ? '#1a180a' : '#0e1410') : '#111';
+        ctx.fillRect(ax, ay, cardW2, cardH2);
+        ctx.strokeStyle = owned2 ? (isMaxed ? '#ffd040' : viewCl.color) : '#333';
+        ctx.lineWidth = (hovered2 && canRankUp) ? 3 : 1;
+        ctx.strokeRect(ax, ay, cardW2, cardH2); ctx.lineWidth = 1;
+        // Letter icon
+        ctx.fillStyle = owned2 ? adef.color : '#444'; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(adef.letter, ax + 16, ay + cardH2 / 2 - 8);
+        ctx.textBaseline = 'alphabetic';
+        // Name
+        ctx.fillStyle = owned2 ? adef.color : '#555'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(adef.name, ax + 32, ay + 14);
+        // Rank pips
+        const pipW2 = 8, pipGap2 = 3;
+        for (let p = 0; p < maxRank; p++) {
+          const px2 = ax + 32 + p * (pipW2 + pipGap2);
+          const milestoneCol = (p === 2) ? '#aaffaa' : (p === 4) ? '#ffd040' : (owned2 ? adef.color : '#333');
+          ctx.fillStyle = p < curRank ? milestoneCol : '#2a2a2a';
+          ctx.fillRect(px2, ay + 19, pipW2, 4);
+          if (p === 2 || p === 4) { ctx.strokeStyle = milestoneCol; ctx.lineWidth = 1; ctx.strokeRect(px2, ay + 19, pipW2, 4); ctx.lineWidth = 1; }
+        }
+        // Rank label
+        ctx.fillStyle = owned2 ? '#aaa' : '#444'; ctx.font = '6px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(owned2 ? (isMaxed ? 'MAXED' : `Rank ${curRank}/${maxRank}`) : 'LOCKED', ax + 32, ay + 33);
+        // Current rank desc (or lock desc)
+        const descIdx = curRank > 0 ? curRank - 1 : 0;
+        const descTxt = owned2 ? ((adef.rankDesc || [])[descIdx] || adef.desc) : adef.desc;
+        ctx.fillStyle = owned2 ? '#999' : '#444'; ctx.font = '6px monospace'; ctx.textAlign = 'left';
+        // wrap text in 2 lines max
+        const dWords = descTxt.split(' '); let dLine = ''; let dY = ay + 46;
+        for (const dw of dWords) {
+          const dt = dLine + (dLine ? ' ' : '') + dw;
+          if (ctx.measureText(dt).width > cardW2 - 36 && dLine) {
+            ctx.fillText(dLine, ax + 32, dY); dLine = dw; dY += 9; if (dY > ay + 65) break;
+          } else { dLine = dt; }
+        }
+        if (dLine && dY <= ay + 65) ctx.fillText(dLine, ax + 32, dY);
+        // Next rank preview (if owned and not maxed)
+        if (owned2 && !isMaxed && adef.rankDesc) {
+          const nextDesc = adef.rankDesc[curRank] || '';
+          if (nextDesc) {
+            ctx.fillStyle = '#445544'; ctx.font = '6px monospace';
+            ctx.fillText('Next: ' + nextDesc.substring(0, 22) + (nextDesc.length > 22 ? '…' : ''), ax + 4, ay + 82);
+          }
+        }
+        // [+] rank up button
+        if (canRankUp) {
+          const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
+          ctx.fillStyle = hovered2 ? '#aaffaa' : '#225522'; ctx.fillRect(btnX, btnY, 18, 12);
+          ctx.strokeStyle = '#aaffaa'; ctx.lineWidth = 1; ctx.strokeRect(btnX, btnY, 18, 12);
+          ctx.fillStyle = '#aaffaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('+1', btnX + 9, btnY + 9);
+        } else if (isMaxed) {
+          ctx.fillStyle = '#ffd040'; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('★MAX', ax + cardW2 - 11, ay + cardH2 - 6);
+        }
+      }
+      // Hint
+      ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('Hover ability card and click [+] to rank up (costs 1 Skill Point)', W / 2, ablY0 + 3 * (cardH2 + gap2) + 6);
+      drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
+      ctx.textAlign = 'left';
+      return; // skip talent tree rendering
+    }
     const rowH = 46, colW = 155;
     const treeW = 3 * colW, treeX = Math.floor((W - treeW) / 2) + 20;
     const nodeW = 130, nodeH = 32;
@@ -2631,7 +2812,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('INVENTORY', W / 2, 20);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
-    ctx.fillText('Click=equip  Right-click=salvage  V=whites  B=blues  Y=rares  Tab/I/Esc=close', W / 2, 32);
+    ctx.fillText('Click=select  Right-click/Square=equip  Del/Triangle=salvage  E=equip selected  V/B/Y=bulk salvage  Tab/I/Esc=close', W / 2, 32);
 
     ctx.fillStyle = '#aaa'; ctx.textAlign = 'left'; ctx.font = 'bold 9px monospace';
     ctx.fillText('EQUIPPED', 30, 44);
@@ -2747,7 +2928,7 @@
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText(`MARKET  -  WAVE ${currentWave + 1} PREP`, W / 2, 16);
     ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-    ctx.fillText('Click=buy  Right-click shop item=lock  Right-click inv=salvage  V/B/Y=bulk salvage  R=refresh', W / 2, 28);
+    ctx.fillText('Click=buy  Right-click shop=lock  Right-click inv/Square=equip  V/B/Y=bulk salvage  R=refresh  Space=ready', W / 2, 28);
 
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
@@ -3686,23 +3867,55 @@
       if (mouseClicked) {
         // Back button
         if (isHovering(8, H - 26, 80, 20)) { state = STATE.CLASS_SELECT; }
+        // View toggle buttons (TALENTS / ABILITIES)
+        if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'talents'; }
+        if (isHovering(W/2 + 4,  46, 78, 14)) { charTreeTab = 'abilities'; }
         // Class tabs
         const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
         const tabW = Math.floor((W - 16) / allClasses.length);
         for (let i = 0; i < allClasses.length; i++) {
-          if (isHovering(8 + i * tabW, 48, tabW - 2, 16)) { charTreeClass = allClasses[i]; break; }
+          if (isHovering(8 + i * tabW, 63, tabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
         }
-        // Talent node clicks
-        const tree = TALENT_TREES[charTreeClass];
-        if (tree) {
-          const treeStartY = 72, rowH = 46, colW = 155, nodeW = 130, nodeH = 32;
-          const treeX = Math.floor((W - 3 * colW) / 2) + 20;
-          for (const node of tree.nodes) {
-            const nx = treeX + (node.col - 1) * colW;
-            const ny = treeStartY + (node.row - 1) * rowH;
-            if (isHovering(nx, ny, nodeW, nodeH)) {
-              spendTalent(charTreeClass, node);
+        if (charTreeTab === 'abilities') {
+          // ── ABILITIES tab click — rank-up buttons ──────────────
+          const viewAbl = classAbilities(charTreeClass);
+          const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
+          const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
+          const ablX0 = Math.floor((W - totalAblW) / 2);
+          const ablY0 = 82;
+          for (let ai = 0; ai < viewAbl.length; ai++) {
+            const adef = viewAbl[ai];
+            const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
+            const ax = ablX0 + col * (cardW2 + gap2);
+            const ay = ablY0 + row * (cardH2 + gap2);
+            // [+] button in bottom-right corner of card
+            const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
+            if (isHovering(btnX, btnY, 18, 12)) {
+              const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+              const curRank = owned2 ? (owned2.rank || 1) : 0;
+              if (owned2 && curRank < (adef.maxRank || 5) && player && (player.skillPoints || 0) >= 1) {
+                player.skillPoints--;
+                owned2.rank = curRank + 1;
+                const label = owned2.rank >= 5 ? '★CAPSTONE!' : owned2.rank >= 3 ? '★Notable!' : `Rank ${owned2.rank}`;
+                spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${label}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
+                Sfx.uiConfirm();
+              }
               break;
+            }
+          }
+        } else {
+          // ── TALENTS tab click — talent nodes ────────────────────
+          const tree = TALENT_TREES[charTreeClass];
+          if (tree) {
+            const treeStartY = 80, rowH = 46, colW = 155, nodeW = 130, nodeH = 32;
+            const treeX = Math.floor((W - 3 * colW) / 2) + 20;
+            for (const node of tree.nodes) {
+              const nx = treeX + (node.col - 1) * colW;
+              const ny = treeStartY + (node.row - 1) * rowH;
+              if (isHovering(nx, ny, nodeW, nodeH)) {
+                spendTalent(charTreeClass, node);
+                break;
+              }
             }
           }
         }
@@ -3768,6 +3981,163 @@
         }
       }
     }
+    // ── INVENTORY input handler ──────────────────────────────────────
+    if (state === STATE.INVENTORY) {
+      updateVirtualCursor(dt);
+      // Gamepad: Square(2)=equip hovered item, Triangle(3)=salvage hovered
+      const gpEquip  = gpJustPressed.has(2);
+      const gpSalvage = gpJustPressed.has(3);
+
+      // Bulk salvage shortcuts
+      if (keyJustPressed.has('v')) { bulkSalvage(0); Sfx.uiClick(); }
+      if (keyJustPressed.has('b')) { bulkSalvage(1); Sfx.uiClick(); }
+      if (keyJustPressed.has('y')) { bulkSalvage(2); Sfx.uiClick(); }
+
+      const invIdx = getInventoryIdxAtMouse();
+      const eqSlot = getEquippedSlotAtMouse();
+
+      // Square or E key = instant equip hovered inv item
+      if ((gpEquip || keyJustPressed.has('e')) && invIdx >= 0 && player.inventory[invIdx]) {
+        equipFromInventory(invIdx);
+      }
+      // Triangle or Del = salvage hovered inv item
+      if ((gpSalvage || keyJustPressed.has('delete')) && invIdx >= 0 && player.inventory[invIdx]) {
+        salvageInventoryItem(invIdx);
+      }
+
+      if (mouseClicked) {
+        // Click equipped slot → unequip back to inventory
+        if (eqSlot) {
+          unequipSlot(eqSlot); Sfx.uiClick();
+        }
+        // Click inventory item → select it
+        else if (invIdx >= 0 && player.inventory[invIdx]) {
+          selectedInvIdx = (selectedInvIdx === invIdx) ? -1 : invIdx;
+          Sfx.uiClick();
+        } else {
+          // EQUIP button
+          const btnX = W - 130, btnH = 18;
+          if (selectedInvIdx >= 0 && isHovering(btnX, 200, 120, btnH)) {
+            equipFromInventory(selectedInvIdx);
+          }
+          // SALVAGE button
+          else if (selectedInvIdx >= 0 && isHovering(btnX, 222, 120, btnH)) {
+            salvageInventoryItem(selectedInvIdx);
+          }
+          // REROLL button
+          else if (selectedInvIdx >= 0 && isHovering(btnX, 244, 120, btnH)) {
+            rerollInventoryItem(selectedInvIdx);
+          }
+          else { selectedInvIdx = -1; }
+        }
+      }
+      // RIGHT-CLICK on inventory item = instant equip (new behaviour)
+      if (rightClicked) {
+        if (invIdx >= 0 && player.inventory[invIdx]) {
+          equipFromInventory(invIdx);
+        } else if (eqSlot) {
+          unequipSlot(eqSlot); Sfx.uiClick();
+        }
+      }
+    }
+
+    // ── SHOP input handler ────────────────────────────────────────────────
+    if (state === STATE.SHOP) {
+      updateVirtualCursor(dt);
+      const gpEquip   = gpJustPressed.has(2);  // Square = buy+equip shop item
+      const gpSalvage = gpJustPressed.has(3);  // Triangle = salvage hovered inv item
+
+      // Keyboard shortcuts
+      if (keyJustPressed.has('v')) { bulkSalvage(0); Sfx.uiClick(); }
+      if (keyJustPressed.has('b')) { bulkSalvage(1); Sfx.uiClick(); }
+      if (keyJustPressed.has('y')) { bulkSalvage(2); Sfx.uiClick(); }
+      if (keyJustPressed.has('r')) doRefreshShop();
+      // Space/Enter/A = advance wave (same as READY button)
+      if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(0)) {
+        state = STATE.PLAYING; selectedInvIdx = -1;
+      }
+
+      const shopIdx = getShopIdxAtMouse();
+      // Inventory in shop uses offset coords
+      const invIdxShop = (() => {
+        const invYOff = 70;
+        for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
+          const col = i % INV_COLS, row = Math.floor(i / INV_COLS);
+          const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
+          const y = INV_START_Y + invYOff + row * (INV_SLOT_SIZE + INV_GAP);
+          if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) return i;
+        }
+        return -1;
+      })();
+      // Equipped slot in shop (shifted by eqYOffset=70)
+      const eqSlotShop = (() => {
+        for (const k of SLOT_ORDER) {
+          const p = EQ_LAYOUT[k];
+          const sy = p.y + 70;
+          if (mouseX >= p.x && mouseX < p.x + EQ_SLOT_SIZE && mouseY >= sy && mouseY < sy + EQ_SLOT_SIZE) return k;
+        }
+        return null;
+      })();
+
+      // Square = buy & immediately equip hovered shop item
+      if (gpEquip && shopIdx >= 0 && shopItems[shopIdx]) {
+        buyShopItem(shopIdx);
+        // equip the item that just went to inventory
+        const justAdded = player.inventory.length - 1;
+        if (justAdded >= 0) equipFromInventory(justAdded);
+      }
+      // Triangle = salvage hovered inv item
+      if (gpSalvage && invIdxShop >= 0 && player.inventory[invIdxShop]) {
+        salvageInventoryItem(invIdxShop);
+      }
+
+      if (mouseClicked) {
+        if (shopIdx >= 0 && shopItems[shopIdx]) {
+          // Left-click shop item → buy it
+          buyShopItem(shopIdx);
+        } else if (invIdxShop >= 0 && player.inventory[invIdxShop]) {
+          selectedInvIdx = (selectedInvIdx === invIdxShop) ? -1 : invIdxShop;
+          Sfx.uiClick();
+        } else if (eqSlotShop) {
+          unequipSlot(eqSlotShop); Sfx.uiClick();
+        } else {
+          // Buttons (action panel for selected inv item)
+          const btnX = W - 130, btnH = 18;
+          if (selectedInvIdx >= 0 && isHovering(btnX, 200, 120, btnH)) {
+            equipFromInventory(selectedInvIdx);
+          } else if (selectedInvIdx >= 0 && isHovering(btnX, 222, 120, btnH)) {
+            salvageInventoryItem(selectedInvIdx);
+          } else if (selectedInvIdx >= 0 && isHovering(btnX, 244, 120, btnH)) {
+            rerollInventoryItem(selectedInvIdx);
+          }
+          // Salvage buttons row
+          const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP);
+          const salvX = refX + 95, salvY = SHOP_Y;
+          if (isHovering(salvX, salvY, 90, SHOP_ITEM_H))      { bulkSalvage(0); Sfx.uiClick(); }
+          else if (isHovering(salvX+94, salvY, 90, SHOP_ITEM_H)) { bulkSalvage(1); Sfx.uiClick(); }
+          else if (isHovering(salvX+188, salvY, 90, SHOP_ITEM_H)) { bulkSalvage(2); Sfx.uiClick(); }
+          // Refresh button
+          else if (isHovering(refX, SHOP_Y, 90, SHOP_ITEM_H)) { doRefreshShop(); }
+          // READY button
+          else if (isHovering(W - 130, H - 30, 120, 24)) {
+            state = STATE.PLAYING; selectedInvIdx = -1;
+          }
+          else { selectedInvIdx = -1; }
+        }
+      }
+      // RIGHT-CLICK: shop item → lock/unlock | inv item → instant equip
+      if (rightClicked) {
+        if (shopIdx >= 0) {
+          shopLocked[shopIdx] = !shopLocked[shopIdx];
+          Sfx.uiClick();
+        } else if (invIdxShop >= 0 && player.inventory[invIdxShop]) {
+          equipFromInventory(invIdxShop);
+        } else if (eqSlotShop) {
+          unequipSlot(eqSlotShop); Sfx.uiClick();
+        }
+      }
+    }
+
     // HUB state input
     if (state === STATE.HUB) {
       updateVirtualCursor(dt);

@@ -507,8 +507,9 @@ class Player {
     // 6 slots total: slot 0 = signature (auto-assigned below), slots 1-5 = drafted from bosses
     this.abilities = [null, null, null, null, null, null];
     this.abilityCooldowns = [0, 0, 0, 0, 0, 0];
+    this.skillPoints = 0; // earned on level-up every 2 levels + boss kill
     if (this.class.signature && ABILITIES[this.class.signature]) {
-      this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE };
+      this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE, rank: 1 };
     }
     this.equipped = {
       helm: null, chest: null, gloves: null, boots: null, belt: null,

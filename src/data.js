@@ -627,22 +627,29 @@ const ABILITIES = {
   multishot: {
     id: 'multishot', name: 'Multishot', letter: 'M', classOf: 'archer',
     desc: '3 arrows in spread (+20% dmg)',
+    maxRank: 5, rankDesc: ['3 arrows +20% dmg', '4 arrows +30% dmg', '4 arrows piercing +50% dmg ★Notable', '5 arrows pierce-all +70% dmg', '6 arrows pierce-all +100% dmg ★Capstone: AoE burst per arrow'],
     cost: 25, cooldown: 1.8, color: '#ffd23f',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
       if (!target) return false;
       const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
-      const arrows = slot && slot.rarity && slot.rarity.id === 'orange' ? 5 : 3;
+      const arrowBase = isLegend ? 5 : 3;
+      const arrows = rank >= 5 ? 6 : rank >= 4 ? 5 : rank >= 2 ? Math.min(arrowBase + 1, 5) : arrowBase;
       const halfSpread = arrows > 3 ? 0.46 : 0.35;
       for (let i = 0; i < arrows; i++) {
         const t = arrows === 1 ? 0 : (i / (arrows - 1)) * 2 - 1;
         const a = baseAngle + t * halfSpread;
         const sp = player.weaponProjSpeed;
-        let dmg = player.weaponDamage * player.dmgMult * 1.20 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 1.20 * rDmg * rScale * rScale;
         const isCrit = Math.random() * 100 < player.critChance;
         if (isCrit) { dmg *= 2; player.onCrit(); }
-        projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.15, isCrit));
+        const proj = new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.15, isCrit);
+        if (rank >= 3) proj.piercing = true; // Notable: piercing
+        if (rank >= 5) { proj.explosive = true; proj.explosionRadius = 22; proj.explosionDamage = dmg * 0.5; } // Capstone
+        projectiles.push(proj);
       }
       spawnBurst(player.x, player.y, ['#ffd040', '#fff7a0', '#ffffff'], 8);
       shake = Math.min(shake + 1.5, 5);
@@ -652,14 +659,18 @@ const ABILITIES = {
   rainOfArrows: {
     id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R', classOf: 'archer',
     desc: 'AoE rain on target (3x dmg)',
+    maxRank: 5, rankDesc: ['AoE rain 3× dmg r=50', '3× dmg r=60 +20% power', '3.5× dmg r=70 ★Notable: burning ground 2s', '4× dmg r=80', '5× dmg r=100 ★Capstone: chains to 2nd target'],
     cost: 40, cooldown: 4.0, color: '#ffaa44',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 280);
       if (!target) return false;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const radius = isLegend ? 70 : 50;
-      const dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
+      const radiusBase = isLegend ? 70 : 50;
+      const radius = radiusBase + (rank - 1) * 10;
+      const dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg * rScale * rScale;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - target.x, dy = e.y - target.y;
@@ -678,6 +689,9 @@ const ABILITIES = {
           spawnBurst(target.x + offX, target.y + offY, ['#fff7a0', '#ffd040'], 2);
         }
       }
+      if (rank >= 3 && target) { // Notable: burning ground
+        groundEffects.push({ type: 'shockwave', x: target.x, y: target.y, r: 5, maxR: radius, damage: player.weaponDamage * player.dmgMult * 0.3 * rScale, life: 3.0, maxLife: 3.0, color: '#ff8800', hit: new Set(), target: 'enemy' });
+      }
       shake = Math.min(shake + 3, 6);
       return true;
     },
@@ -685,8 +699,11 @@ const ABILITIES = {
   piercingShot: {
     id: 'piercingShot', name: 'Piercing Shot', letter: 'P', classOf: 'archer',
     desc: 'Pierces all enemies (+150% dmg)',
+    maxRank: 5, rankDesc: ['+250% dmg piercing', '300% dmg faster proj', '350% dmg ★Notable: slows hit enemies 2s', '425% dmg bigger hitbox', '500% dmg ★Capstone: shatters into 3 arcs'],
     cost: 30, cooldown: 2.5, color: '#5599ff',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
       if (!target) return false;
@@ -694,12 +711,14 @@ const ABILITIES = {
       const d = Math.hypot(dx, dy);
       if (d < 0.01) return false;
       const sp = player.weaponProjSpeed * 1.4;
-      let dmg = player.weaponDamage * player.dmgMult * 2.5 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 2.5 * rDmg * rScale * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 1.2, isCrit);
       proj.piercing = true;
-      proj.r = 4;
+      proj.r = 4 + rank;
+      if (rank >= 3) { proj.onHitSlow = 2.0; } // Notable: slow
+      if (rank >= 5) { proj.splitOnKill = 3; } // Capstone: shatter
       projectiles.push(proj);
       spawnBurst(player.x, player.y, ['#5599ff', '#aaccff'], 8);
       return true;
@@ -708,10 +727,15 @@ const ABILITIES = {
   hawkEye: {
     id: 'hawkEye', name: 'Hawk Eye', letter: 'E', classOf: 'archer',
     desc: '+30% crit & atk speed (5s)',
+    maxRank: 5, rankDesc: ['+30% crit+spd 5s', '+35% crit+spd 6s', '+40% crit+spd 7s ★Notable: +50% crit dmg', '50% crit+spd 8s', '60% crit+spd 10s ★Capstone: auto-crits for duration'],
     cost: 50, cooldown: 12.0, color: '#33cc55',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      player.hawkEyeTimer = isLegend ? 8 : 5;
+      const baseDur = isLegend ? 8 : 5;
+      player.hawkEyeTimer = baseDur + (rank - 1) * 1.5;
+      if (rank >= 5) player.hawkEyeAutoCrit = true; // Capstone: auto-crits
       spawnBurst(player.x, player.y, ['#33cc55', '#88ff88', '#ffffff'], 12);
       return true;
     },
@@ -719,15 +743,18 @@ const ABILITIES = {
   arrowVolley: {
     id: 'arrowVolley', name: 'Arrow Volley', letter: 'V', classOf: 'archer',
     desc: '8 arrows in full circle',
+    maxRank: 5, rankDesc: ['8 arrows full circle', '10 arrows', '12 arrows ★Notable: arrows return once', '14 arrows return', '16 arrows ★Capstone: arrows orbit + homing'],
     cost: 35, cooldown: 3.0, color: '#ff8000',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const arrows = isLegend ? 12 : 8;
-      for (let i = 0; i < arrows; i++) {
-        const a = (i / arrows) * Math.PI * 2;
+      const arrowCountV = isLegend ? 12 : [8,10,12,14,16][rank-1] || 8;
+      for (let i = 0; i < arrowCountV; i++) {
+        const a = (i / arrowCountV) * Math.PI * 2;
         const sp = player.weaponProjSpeed;
-        let dmg = player.weaponDamage * player.dmgMult * 1.0 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 1.0 * rDmg * rScale * rScale;
         const isCrit = Math.random() * 100 < player.critChance;
         if (isCrit) { dmg *= 2; player.onCrit(); }
         projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.1, isCrit));
@@ -740,7 +767,10 @@ const ABILITIES = {
   fireball: {
     id: 'fireball', name: 'Fireball', letter: 'F', classOf: 'wizard',
     desc: 'Big projectile, explodes on impact', cost: 30, cooldown: 1.5, color: '#ff5520',
+    maxRank: 5, rankDesc: ['Explodes r=40 1.4× dmg', '1.6× dmg r=50', '1.8× dmg r=60 ★Notable: explosion chains 1', '2.1× dmg r=70', '2.5× dmg r=80 ★Capstone: leaves 3s fire puddle'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.6);
@@ -749,15 +779,16 @@ const ABILITIES = {
       const d = Math.hypot(dx, dy);
       if (d < 0.01) return false;
       const sp = player.weaponProjSpeed;
-      let dmg = player.weaponDamage * player.dmgMult * 1.4 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 1.4 * rDmg * rScale * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, d / sp + 0.15, isCrit);
-      proj.r = 5;
+      proj.r = 5 + rank;
       proj.theme = 'fire';
       proj.explosive = true;
-      proj.explosionRadius = isLegend ? 60 : 40;
-      proj.explosionDamage = dmg * 0.9;
+      proj.explosionRadius = (isLegend ? 60 : 40) + (rank - 1) * 8;
+      proj.explosionDamage = dmg * 0.9 * rScale;
+      if (rank >= 5) proj.fireGround = true; // Capstone: fire puddle
       projectiles.push(proj);
       spawnBurst(player.x, player.y, ['#ff5520', '#ffaa00', '#ffdd00'], 8);
       return true;
@@ -766,23 +797,34 @@ const ABILITIES = {
   frostNova: {
     id: 'frostNova', name: 'Frost Nova', letter: 'N', classOf: 'wizard',
     desc: 'AoE around player, slows enemies', cost: 50, cooldown: 5.0, color: '#aaccff',
+    maxRank: 5, rankDesc: ['AoE freeze r=80 1.8× slow', '2.0× dmg wider', '2.2× dmg ★Notable: full freeze 1.5s', '2.6× dmg', '3.0× dmg ★Capstone: ice shards burst outward'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
       const radius = 80;
-      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
-      const slowDur = isLegend ? 4 : 2.5;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg * rScale;
+      const slowDur = (isLegend ? 4 : 2.5) + (rank - 1) * 0.4;
+      const freezeFactor = rank >= 3 ? 0.05 : 0.4; // Notable: near-freeze
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
         if (dx*dx + dy*dy < radius*radius) {
           const isCrit = Math.random() * 100 < player.critChance;
-          const finalDmg = isCrit ? dmg * 2 : dmg;
+          const finalDmg = isCrit ? (dmg * rScale) * 2 : dmg * rScale;
           const died = e.takeDamage(finalDmg);
           if (isCrit) player.onCrit();
-          e.slowTimer = slowDur;
-          e.slowFactor = 0.4;
+          e.slowTimer = rank >= 3 ? Math.max(e.slowTimer || 0, 1.5) : slowDur;
+          e.slowFactor = freezeFactor;
           if (died) handleEnemyDeath(e);
+        }
+      }
+      if (rank >= 5) { // Capstone: ice shards burst
+        for (let _i = 0; _i < 8; _i++) {
+          const _a = (_i / 8) * Math.PI * 2;
+          const _sp = player.weaponProjSpeed * 1.2;
+          projectiles.push(new Projectile(player.x, player.y, Math.cos(_a)*_sp, Math.sin(_a)*_sp, dmg * 0.6 * rScale, 0.6, false));
         }
       }
       for (let i = 0; i < 36; i++) {
@@ -798,22 +840,26 @@ const ABILITIES = {
   chainLightning: {
     id: 'chainLightning', name: 'Chain Lightning', letter: 'L', classOf: 'wizard',
     desc: 'Hits target, chains to 3 nearby', cost: 40, cooldown: 2.5, color: '#ffff80',
+    maxRank: 5, rankDesc: ['Chains 3 targets 1.8× dmg', 'Chains 4 1.9×', 'Chains 6 2.0× ★Notable: +2 chains', 'Chains 7 2.3×', 'Chains 8 2.8× ★Capstone: stun each jump 0.5s'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const maxChains = isLegend ? 5 : 3;
+      const maxChains = (isLegend ? 5 : 3) + Math.max(0, rank - 2) * 2; // rank3=+2 chains
       let target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.4);
       if (!target) return false;
       const hit = new Set();
       let lastX = player.x, lastY = player.y;
-      let dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg * rScale;
       for (let i = 0; i <= maxChains; i++) {
         if (!target || hit.has(target) || !target.alive) break;
         hit.add(target);
         const isCrit = Math.random() * 100 < player.critChance;
         const finalDmg = isCrit ? dmg * 2 : dmg;
-        const died = target.takeDamage(finalDmg);
+        const died = target.takeDamage(finalDmg * rScale);
         if (isCrit) player.onCrit();
+        if (rank >= 5) { target.slowTimer = Math.max(target.slowTimer||0, 0.6); target.slowFactor = 0.1; } // Capstone: stun
         const steps = 8;
         for (let s = 0; s <= steps; s++) {
           const lx = lastX + (target.x - lastX) * (s / steps) + (Math.random() - 0.5) * 6;
@@ -839,7 +885,10 @@ const ABILITIES = {
   arcaneOrb: {
     id: 'arcaneOrb', name: 'Arcane Orb', letter: 'O', classOf: 'wizard',
     desc: 'Slow piercing orb, big damage', cost: 45, cooldown: 3.0, color: '#aa66ff',
+    maxRank: 5, rankDesc: ['Slow piercing 3.0× dmg', '3.3× bigger orb', '3.6× ★Notable: splits into 2 on expiry', '4.0×', '5.0× ★Capstone: splits into 4 seeking orbs'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
@@ -848,13 +897,14 @@ const ABILITIES = {
       const d = Math.hypot(dx, dy);
       if (d < 0.01) return false;
       const sp = player.weaponProjSpeed * 0.5;
-      let dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg * rScale * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 2.5, isCrit);
       proj.piercing = true;
-      proj.r = isLegend ? 8 : 6;
+      proj.r = (isLegend ? 8 : 6) + rank;
       proj.theme = 'arcane';
+      if (rank >= 5) proj.splitOnExpire = 4; // Capstone: splits into 4
       projectiles.push(proj);
       spawnBurst(player.x, player.y, ['#aa66ff', '#dd99ff', '#ffffff'], 10);
       return true;
@@ -863,11 +913,14 @@ const ABILITIES = {
   whirlwind: {
     id: 'whirlwind', name: 'Whirlwind', letter: 'W', classOf: 'warrior',
     desc: 'Spin attack, big AoE around you', cost: 30, cooldown: 2.0, color: '#ff6060',
+    maxRank: 5, rankDesc: ['AoE spin 2.4× dmg r=75', '2.6× r=80', '2.8× r=90 ★Notable: lifesteal 6% per hit', '3.2×', '4.0× ★Capstone: pulls enemies in while spinning'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const radius = isLegend ? 95 : 75;
-      const dmg = player.weaponDamage * player.dmgMult * 2.4 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+      const radius = (isLegend ? 95 : 75) + (rank - 1) * 8;
+      const dmg = player.weaponDamage * player.dmgMult * 2.4 * rDmg * rScale * rScale * (player.warCryTimer > 0 ? 1.4 : 1);
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
@@ -877,6 +930,8 @@ const ABILITIES = {
           const died = e.takeDamage(finalDmg);
           spawnBurst(e.x, e.y, ['#cc4040', '#ff6060', '#ffaa40'], 4);
           if (isCrit) player.onCrit();
+          if (rank >= 3) player.hp = Math.min(player.maxHp, player.hp + finalDmg * 0.06); // Notable: lifesteal
+          if (rank >= 5 && !died) { e.x += dx * -0.12; e.y += dy * -0.12; } // Capstone: pull
           if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
         }
       }
@@ -892,12 +947,15 @@ const ABILITIES = {
   cleave: {
     id: 'cleave', name: 'Cleave', letter: 'C', classOf: 'warrior',
     desc: 'Massive forward swing (250% dmg)', cost: 25, cooldown: 2.0, color: '#ffaa40',
+    maxRank: 5, rankDesc: ['Cone 2.6× dmg', '2.8× wider cone', '3.0× ★Notable: applies bleed 3s', '3.5× wide', '4.0× ★Capstone: 180° sweep + 2s knockback'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const cone = isLegend ? 1.6 : 1.2;
-      const range = 90;
-      const dmg = player.weaponDamage * player.dmgMult * 2.6 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+      const cone = (isLegend ? 1.6 : 1.2) + (rank >= 5 ? 1.5 : 0); // Capstone: 180deg
+      const range = 90 + (rank - 1) * 6;
+      const dmg = player.weaponDamage * player.dmgMult * 2.6 * rDmg * rScale * rScale * (player.warCryTimer > 0 ? 1.4 : 1);
       const faceAngle = player.facing >= 0 ? 0 : Math.PI;
       let hitAny = false;
       for (const e of enemies) {
@@ -914,6 +972,7 @@ const ABILITIES = {
           const died = e.takeDamage(finalDmg);
           spawnBurst(e.x, e.y, ['#ffaa40', '#ff6020', '#ffffff'], 6);
           if (isCrit) player.onCrit();
+          if (rank >= 3) { e.bleedTimer = (e.bleedTimer || 0) + 3.0; e.bleedDmg = dmg * 0.15; } // Notable: bleed
           if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
         }
       }
@@ -925,9 +984,18 @@ const ABILITIES = {
   warCry: {
     id: 'warCry', name: 'War Cry', letter: 'Y', classOf: 'warrior',
     desc: '+40% damage for 6s', cost: 50, cooldown: 14.0, color: '#cc4040',
+    maxRank: 5, rankDesc: ['+40% dmg 6s', '+40% dmg+speed 7s', '+50% dmg+spd 8s ★Notable: resets lowest CD', '60% 9s', '70% 12s ★Capstone: instantly fills resource'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      player.warCryTimer = isLegend ? 10 : 6;
+      player.warCryTimer = (isLegend ? 10 : 6) + (rank - 1) * 1.2;
+      if (rank >= 3) { // Notable: reset lowest ability CD
+        let lowestIdx = -1, lowestVal = 0;
+        for (let _si = 1; _si < 6; _si++) { if (player.abilityCooldowns[_si] > lowestVal) { lowestVal = player.abilityCooldowns[_si]; lowestIdx = _si; } }
+        if (lowestIdx >= 0) player.abilityCooldowns[lowestIdx] = 0;
+      }
+      if (rank >= 5) player.resource = player.maxResource; // Capstone
       spawnBurst(player.x, player.y, ['#cc4040', '#ff6060', '#ffaa40', '#ffffff'], 16);
       return true;
     },
@@ -935,7 +1003,10 @@ const ABILITIES = {
   charge: {
     id: 'charge', name: 'Charge', letter: 'H', classOf: 'warrior',
     desc: 'Dash to enemy, damage path (200% dmg)', cost: 35, cooldown: 3.0, color: '#ffaa40',
+    maxRank: 5, rankDesc: ['Dash+path 2.0× dmg', '2.2× wider path', '2.5× ★Notable: stuns hit enemies 1.5s', '3.0×', '3.5× ★Capstone: triple charge + reset on kill'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 250);
       if (!target) return false;
@@ -945,7 +1016,7 @@ const ABILITIES = {
       if (d < 1) return false;
       const stepX = dx / d, stepY = dy / d;
       const pathW = 30;
-      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale * rScale * (player.warCryTimer > 0 ? 1.4 : 1);
       for (const e of enemies) {
         if (!e.alive) continue;
         const ex = e.x - startX, ey = e.y - startY;
@@ -958,6 +1029,7 @@ const ABILITIES = {
           const died = e.takeDamage(finalDmg);
           spawnBurst(e.x, e.y, ['#ff6020', '#ffaa40'], 5);
           if (isCrit) player.onCrit();
+          if (rank >= 3) { e.slowTimer = Math.max(e.slowTimer||0, 1.5); e.slowFactor = 0.05; } // Notable: stun
           if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
         }
       }
@@ -975,12 +1047,15 @@ const ABILITIES = {
   groundSlam: {
     id: 'groundSlam', name: 'Ground Slam', letter: 'S', classOf: 'warrior',
     desc: 'AoE slam, slows enemies', cost: 45, cooldown: 4.5, color: '#cc6020',
+    maxRank: 5, rankDesc: ['AoE slow 2.2× dmg r=90', '2.4× r=100', '2.6× r=110 ★Notable: cracks persist 3s', '3.0×', '3.5× ★Capstone: 2× radius shockwave'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-      const radius = isLegend ? 115 : 90;
-      const dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
-      const slowDur = isLegend ? 3.5 : 2.5;
+      const radius = (isLegend ? 115 : 90) + (rank - 1) * 8;
+      const dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * rScale * rScale * (player.warCryTimer > 0 ? 1.4 : 1);
+      const slowDur = (isLegend ? 3.5 : 2.5) + (rank - 1) * 0.3;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
@@ -995,6 +1070,7 @@ const ABILITIES = {
         }
       }
       groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.55, maxLife: 0.55, color: '#cc6020', hit: new Set(), target: 'none' });
+      if (rank >= 5) groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius * 1.8, damage: dmg * 0.4, life: 0.9, maxLife: 0.9, color: '#ff8800', hit: new Set(), target: 'enemy' }); // Capstone
       spawnBurst(player.x, player.y, ['#cc6020', '#ffaa40', '#ffffff'], 20);
       shake = Math.min(shake + 5, 9);
       return true;
@@ -1003,13 +1079,16 @@ const ABILITIES = {
   meteor: {
     id: 'meteor', name: 'Meteor', letter: 'T', classOf: 'wizard',
     desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
+    maxRank: 5, rankDesc: ['Meteor 4.0× dmg r=60', '4.5× r=70', '5.0× r=80 ★Notable: scorches ground 3s', '5.8×', '7.0× ★Capstone: 2 simultaneous meteors'],
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
       const target = findNearestEnemy(player.x, player.y, 280);
       if (!target) return false;
       const meteors = isLegend ? 2 : 1;
-      const dmg = player.weaponDamage * player.dmgMult * 4.0 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 4.0 * rDmg * rScale;
       for (let i = 0; i < meteors; i++) {
         const offX = i === 0 ? 0 : (Math.random() - 0.5) * 60;
         const offY = i === 0 ? 0 : (Math.random() - 0.5) * 60;
@@ -1024,6 +1103,7 @@ const ABILITIES = {
   shadowStrike: {
     id: 'shadowStrike', name: 'Shadow Strike', letter: 'S', classOf: 'rogue',
     desc: 'Blink behind nearest enemy, 350% dmg + brief iframe',
+    maxRank: 5, rankDesc: ['Blink+stab 2.5× dmg', '2.8× leaves shadow', '3.0× ★Notable: shadow copy fights 3s', '3.5×', '4.5× ★Capstone: 2 copies + vanish 1s'],
     cost: 20, cooldown: 4.0, color: '#cc88ff',
     cast: (player) => {
       const target = findNearestEnemy(player.x, player.y, 300);
@@ -1047,8 +1127,11 @@ const ABILITIES = {
   bladeFlurry: {
     id: 'bladeFlurry', name: 'Blade Flurry', letter: 'F', classOf: 'rogue',
     desc: '5 daggers in a forward arc',
+    maxRank: 5, rankDesc: ['6-hit flurry 1.5× each', '7 hits 1.6×', '8 hits ★Notable: applies poison 3s', '9 hits 2.0×', '12 hits ★Capstone: triggers again on dodge'],
     cost: 30, cooldown: 2.5, color: '#dd99ff',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 200);
       const baseAngle = target ? Math.atan2(target.y - player.y, target.x - player.x) : 0;
@@ -1056,7 +1139,7 @@ const ABILITIES = {
         const t = (i / 4) * 2 - 1;
         const a = baseAngle + t * 0.55;
         const sp = player.weaponProjSpeed * 1.1;
-        let dmg = player.weaponDamage * player.dmgMult * 1.1 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 1.1 * rDmg * rScale;
         const isCrit = Math.random() * 100 < player.critChance;
         if (isCrit) { dmg *= 2; player.onCrit(); }
         projectiles.push(new Projectile(player.x, player.y, Math.cos(a)*sp, Math.sin(a)*sp, dmg, 0.5, isCrit));
@@ -1069,6 +1152,7 @@ const ABILITIES = {
   smokeBomb: {
     id: 'smokeBomb', name: 'Smoke Bomb', letter: 'B', classOf: 'rogue',
     desc: 'Slow nearby enemies, gain +40% speed for 4s',
+    maxRank: 5, rankDesc: ['AoE slow 1.5× dmg', '1.6× + bigger', '1.8× ★Notable: invulnerable 1s on entry', '2.0×', '2.5× ★Capstone: explodes on exit dealing 3×'],
     cost: 35, cooldown: 8.0, color: '#887799',
     cast: (player) => {
       const radius = 100;
@@ -1086,12 +1170,15 @@ const ABILITIES = {
   backstab: {
     id: 'backstab', name: 'Backstab', letter: 'K', classOf: 'rogue',
     desc: 'Guaranteed crit for 450% dmg on nearest',
+    maxRank: 5, rankDesc: ['Rear 3.0× dmg', '3.3× from any angle', '3.6× ★Notable: stuns 1.5s', '4.0× bleeds', '5.0× ★Capstone: guaranteed crit + triggers dodge'],
     cost: 40, cooldown: 5.0, color: '#ff66cc',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 220);
       if (!target) return false;
-      const dmg = player.weaponDamage * player.dmgMult * 4.5 * rDmg * 2;
+      const dmg = player.weaponDamage * player.dmgMult * 4.5 * rDmg * rScale * 2;
       const died = target.takeDamage(dmg, { crit: true });
       player.onCrit();
       spawnBurst(target.x, target.y, ['#ff66cc', '#ff88ff', '#ffffff'], 16);
@@ -1104,6 +1191,7 @@ const ABILITIES = {
   evasion: {
     id: 'evasion', name: 'Evasion', letter: 'E', classOf: 'rogue',
     desc: 'Dash away from nearest threat, 0.5s iframe',
+    maxRank: 5, rankDesc: ['Dodge +2 charges', 'Dodge +3 faster', 'Dodge ★Notable: leaves afterimage decoy', 'Afterimage taunts', '★Capstone: counter-attack after each dodge'],
     cost: 15, cooldown: 3.0, color: '#aa66cc',
     cast: (player) => {
       const target = findNearestEnemy(player.x, player.y, 250);
@@ -1122,15 +1210,18 @@ const ABILITIES = {
   fistsOfThunder: {
     id: 'fistsOfThunder', name: 'Fists of Thunder', letter: 'F', classOf: 'monk',
     desc: '5 rapid strikes on nearest for 120% dmg each',
+    maxRank: 5, rankDesc: ['5-hit lightning 1.2×', '6-hit 1.4×', '7-hit ★Notable: knockback + stun last hit', '8-hit 1.8×', '10-hit ★Capstone: lightning chain on final blow'],
     cost: 25, cooldown: 2.0, color: '#ffaa44',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 140);
       if (!target) return false;
       let died = false;
       for (let i = 0; i < 5; i++) {
         const isCrit = Math.random() * 100 < player.critChance;
-        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg * rScale;
         if (isCrit) { dmg *= 2; player.onCrit(); }
         if (!died && target.alive) { died = target.takeDamage(dmg, { crit: isCrit }); }
         spawnBurst(target.x + (Math.random()-0.5)*10, target.y + (Math.random()-0.5)*10, ['#ffaa44','#ffffff'], 3);
@@ -1144,6 +1235,7 @@ const ABILITIES = {
   innerSanctuary: {
     id: 'innerSanctuary', name: 'Inner Sanctuary', letter: 'I', classOf: 'monk',
     desc: 'Heal 25% max HP',
+    maxRank: 5, rankDesc: ['Shield zone 3s 2.5× dmg', '3.5s bigger', '4s ★Notable: regen 8 hp/s inside', '4.5s regen+speed', '5s ★Capstone: reflects projectiles 50%'],
     cost: 40, cooldown: 8.0, color: '#ffe0a0',
     cast: (player) => {
       const heal = Math.round(player.maxHp * 0.25);
@@ -1155,11 +1247,14 @@ const ABILITIES = {
   cycloneStrike: {
     id: 'cycloneStrike', name: 'Cyclone Strike', letter: 'C', classOf: 'monk',
     desc: 'Pull enemies in 120px toward you, then deal AoE',
+    maxRank: 5, rankDesc: ['Pull+AoE 2.2×', '2.4× wider pull', '2.6× ★Notable: pulls 2× harder', '3.0× stun center', '3.5× ★Capstone: leaves tornado 3s'],
     cost: 35, cooldown: 4.0, color: '#ffcc66',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const radius = 120;
-      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = player.x - e.x, dy = player.y - e.y;
@@ -1182,12 +1277,15 @@ const ABILITIES = {
   sevenSidedStrike: {
     id: 'sevenSidedStrike', name: 'Seven-Sided Strike', letter: 'V', classOf: 'monk',
     desc: '7 hits distributed among nearby enemies',
+    maxRank: 5, rankDesc: ['7 strikes 1.8× each', '7 hits 2.0×', '9 hits ★Notable: each hit stuns 0.3s', '11 hits 2.5×', '14 hits ★Capstone: last hit AoE explosion'],
     cost: 50, cooldown: 5.0, color: '#ff8822',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const nearby = enemies.filter(e => e.alive && Math.hypot(e.x-player.x, e.y-player.y) < 130);
       if (!nearby.length) return false;
-      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg * rScale;
       for (let i = 0; i < 7; i++) {
         const e = nearby[Math.floor(Math.random() * nearby.length)];
         if (!e.alive) continue;
@@ -1205,6 +1303,7 @@ const ABILITIES = {
   mantraOfHealing: {
     id: 'mantraOfHealing', name: 'Mantra of Healing', letter: 'M', classOf: 'monk',
     desc: '+4 HP/s regen for 8s',
+    maxRank: 5, rankDesc: ['Heal 20% HP', '25% HP + regen 3s', '30% ★Notable: HoT 8 hp/s for 6s', '35% + stronger HoT', '50% ★Capstone: full heal + invuln 1.5s'],
     cost: 30, cooldown: 12.0, color: '#ffeeaa',
     cast: (player) => {
       player.mantraTimer = 8.0;
@@ -1217,11 +1316,14 @@ const ABILITIES = {
   holyNova: {
     id: 'holyNova', name: 'Holy Nova', letter: 'N', classOf: 'paladin',
     desc: 'AoE blast: damage enemies, heal 4 HP each hit',
+    maxRank: 5, rankDesc: ['AoE holy 2.0× heal 5%', '2.2× heal 7%', '2.5× ★Notable: blinds enemies 1.5s', '3.0× heal 10%', '4.0× ★Capstone: leaves holy ground 4s'],
     cost: 40, cooldown: 5.0, color: '#ffe866',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const radius = 90;
-      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale;
       let healed = 0;
       for (const e of enemies) {
         if (!e.alive) continue;
@@ -1244,6 +1346,7 @@ const ABILITIES = {
   consecration: {
     id: 'consecration', name: 'Consecration', letter: 'C', classOf: 'paladin',
     desc: 'Holy ground burns enemies for 5s',
+    maxRank: 5, rankDesc: ['Holy ground 5s slow', '6s + dmg', '7s ★Notable: slows 50% + ignites', '8s heal on ground', '10s ★Capstone: doubles holy ground + heals nearby'],
     cost: 50, cooldown: 8.0, color: '#ffdd44',
     cast: (player, slot) => {
       const dmg = Math.round(player.weaponDamage * player.dmgMult * 0.4);
@@ -1255,6 +1358,7 @@ const ABILITIES = {
   divineShield: {
     id: 'divineShield', name: 'Divine Shield', letter: 'D', classOf: 'paladin',
     desc: '2s full invincibility + knockback pulse',
+    maxRank: 5, rankDesc: ['Invuln 2.5s', '3s + counter', '3.5s ★Notable: reflects 100% dmg taken', '4s + AoE on end', '5s ★Capstone: AoE holy explosion on exit'],
     cost: 60, cooldown: 15.0, color: '#ffffff',
     cast: (player) => {
       player.iframeTimer = Math.max(player.iframeTimer, 2.0);
@@ -1277,15 +1381,18 @@ const ABILITIES = {
   hammerOfJustice: {
     id: 'hammerOfJustice', name: 'Hammer of Justice', letter: 'H', classOf: 'paladin',
     desc: 'Heavy projectile slows on impact (220% dmg)',
+    maxRank: 5, rankDesc: ['Slow hammer 2.5×', '2.8× faster', '3.0× ★Notable: pierces + stuns 1s', '3.5× splits', '4.5× ★Capstone: 3 hammers + chain stun'],
     cost: 30, cooldown: 3.0, color: '#ffcc44',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
       if (!target) return false;
       const dx = target.x - player.x, dy = target.y - player.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = player.weaponProjSpeed * 0.55;
-      let dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, d/sp + 0.1, isCrit);
@@ -1299,6 +1406,7 @@ const ABILITIES = {
   layOnHands: {
     id: 'layOnHands', name: 'Lay on Hands', letter: 'L', classOf: 'paladin',
     desc: 'Restore 70% max HP',
+    maxRank: 5, rankDesc: ['Full heal', '+ cleanse debuffs', '★Notable: invuln 1.5s after cast', '+ AoE heal nearby', '★Capstone: heal + burst of holy energy 5×'],
     cost: 80, cooldown: 20.0, color: '#fffacc',
     cast: (player) => {
       const heal = Math.round(player.maxHp * 0.70);
@@ -1312,14 +1420,17 @@ const ABILITIES = {
   plagueFrogs: {
     id: 'plagueFrogs', name: 'Plague of Frogs', letter: 'T', classOf: 'witchdoctor',
     desc: '8 piercing toad projectiles in a ring',
+    maxRank: 5, rankDesc: ['3 frogs bounce 1.5×', '4 frogs 1.6×', '5 frogs ★Notable: frogs leave poison pool', '6 chain frogs', '8 frogs ★Capstone: frogs spawn on kill chains'],
     cost: 25, cooldown: 3.0, color: '#55dd66',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const count = 8;
       for (let i = 0; i < count; i++) {
         const a = (i / count) * Math.PI * 2;
         const sp = player.weaponProjSpeed * 0.75;
-        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg * rScale;
         const isCrit = Math.random() * 100 < player.critChance;
         if (isCrit) { dmg *= 2; player.onCrit(); }
         const proj = new Projectile(player.x, player.y, Math.cos(a)*sp, Math.sin(a)*sp, dmg, 1.2, isCrit);
@@ -1334,11 +1445,14 @@ const ABILITIES = {
   soulHarvest: {
     id: 'soulHarvest', name: 'Soul Harvest', letter: 'H', classOf: 'witchdoctor',
     desc: 'AoE damage, heal 4 HP per enemy hit',
+    maxRank: 5, rankDesc: ['Drain souls 2.0×', '2.2× more', '2.5× ★Notable: 5% lifesteal per hit', '3.0× bigger', '4.0× ★Capstone: stacking buff 5 charges'],
     cost: 35, cooldown: 5.0, color: '#22aa44',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const radius = 100;
-      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg * rScale;
       let hits = 0;
       for (const e of enemies) {
         if (!e.alive) continue;
@@ -1361,6 +1475,7 @@ const ABILITIES = {
   bigBadVoodoo: {
     id: 'bigBadVoodoo', name: 'Big Bad Voodoo', letter: 'V', classOf: 'witchdoctor',
     desc: '+35% dmg & +15% speed for 8s',
+    maxRank: 5, rankDesc: ['+30% all stats 20s', '35% 25s', '40% 30s ★Notable: 45s duration', '50% 40s', '70% 60s ★Capstone: doubles effect of all buffs'],
     cost: 60, cooldown: 15.0, color: '#aaff44',
     cast: (player) => {
       player.bigBadVoodooTimer = 8.0;
@@ -1371,14 +1486,17 @@ const ABILITIES = {
   corpseSpiders: {
     id: 'corpseSpiders', name: 'Corpse Spiders', letter: 'S', classOf: 'witchdoctor',
     desc: 'Explosive projectile splits into 3 fast piercers',
+    maxRank: 5, rankDesc: ['3 spiders 1.2×', '4 spiders', '5 spiders ★Notable: webs slow 50% 2s', '6 venomous', '8 spiders ★Capstone: explode on death AoE'],
     cost: 30, cooldown: 3.5, color: '#885522',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, 260);
       if (!target) return false;
       const dx = target.x - player.x, dy = target.y - player.y;
       const d = Math.hypot(dx, dy) || 1;
-      let dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d)*player.weaponProjSpeed*0.8, (dy/d)*player.weaponProjSpeed*0.8, dmg, d/(player.weaponProjSpeed*0.8)+0.1, isCrit);
@@ -1404,11 +1522,14 @@ const ABILITIES = {
   locustSwarm: {
     id: 'locustSwarm', name: 'Locust Swarm', letter: 'L', classOf: 'witchdoctor',
     desc: 'Slow + damage all enemies in 130px',
+    maxRank: 5, rankDesc: ['Swarm 1.5× DoT', '1.7× spreads', '2.0× ★Notable: spreads on kill', '2.4× 2 swarms', '3.0× ★Capstone: 3 swarms + double spread'],
     cost: 40, cooldown: 6.0, color: '#66aa22',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const radius = 130;
-      const dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 1.5 * rDmg * rScale;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
@@ -1430,15 +1551,18 @@ const ABILITIES = {
   boneSpear: {
     id: 'boneSpear', name: 'Bone Spear', letter: 'B', classOf: 'necromancer',
     desc: 'Fast piercing bone lance (280% dmg)',
+    maxRank: 5, rankDesc: ['Bone spear 2.0×', '2.3× faster', '2.6× ★Notable: piercing spear', '3.0× bigger', '4.0× ★Capstone: shatters into 5 bone shards'],
     cost: 30, cooldown: 2.0, color: '#ccbbee',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
       if (!target) return false;
       const dx = target.x - player.x, dy = target.y - player.y;
       const d = Math.hypot(dx, dy) || 1;
       const sp = player.weaponProjSpeed * 1.6;
-      let dmg = player.weaponDamage * player.dmgMult * 2.8 * rDmg;
+      let dmg = player.weaponDamage * player.dmgMult * 2.8 * rDmg * rScale;
       const isCrit = Math.random() * 100 < player.critChance;
       if (isCrit) { dmg *= 2; player.onCrit(); }
       const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, 1.0, isCrit);
@@ -1451,11 +1575,14 @@ const ABILITIES = {
   deathNova: {
     id: 'deathNova', name: 'Death Nova', letter: 'N', classOf: 'necromancer',
     desc: 'Bone explosion AoE around player (200% dmg)',
+    maxRank: 5, rankDesc: ['Death ring 2.5×', '2.8× wider', '3.0× ★Notable: bone zone persists 3s', '3.5×', '4.5× ★Capstone: 2× radius + slows 70%'],
     cost: 40, cooldown: 4.0, color: '#7766aa',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const radius = 85;
-      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+      const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
@@ -1475,6 +1602,7 @@ const ABILITIES = {
   boneArmor: {
     id: 'boneArmor', name: 'Bone Armor', letter: 'R', classOf: 'necromancer',
     desc: 'Absorb the next 3 hits',
+    maxRank: 5, rankDesc: ['5 bone stacks absorb', '6 stacks + thorns', '7 stacks ★Notable: thorns reflect 30% dmg', '8 stacks spike AoE', '10 stacks ★Capstone: spikes detonate on 0'],
     cost: 35, cooldown: 10.0, color: '#d0c8ee',
     cast: (player) => {
       player.boneArmorCharges = 3;
@@ -1485,14 +1613,17 @@ const ABILITIES = {
   bloodNova: {
     id: 'bloodNova', name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
     desc: 'Sacrifice 15% max HP for massive AoE',
+    maxRank: 5, rankDesc: ['Blood ring 2.0×', '2.3× bigger', '2.6× ★Notable: 8% lifesteal per hit', '3.0×', '4.0× ★Capstone: leaves blood puddle 4s'],
     cost: 0, cooldown: 6.0, color: '#cc2244',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const sacrifice = Math.round(player.maxHp * 0.15);
       if (player.hp <= sacrifice) return false; // refuse if fatal
       player.hp -= sacrifice;
       const radius = 110;
-      const dmg = player.weaponDamage * player.dmgMult * 3.5 * rDmg + sacrifice * 0.5;
+      const dmg = player.weaponDamage * player.dmgMult * 3.5 * rDmg * rScale + sacrifice * 0.5;
       for (const e of enemies) {
         if (!e.alive) continue;
         const dx = e.x - player.x, dy = e.y - player.y;
@@ -1513,8 +1644,11 @@ const ABILITIES = {
   corpseLance: {
     id: 'corpseLance', name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
     desc: 'Fire bone lances at 3 nearest enemies',
+    maxRank: 5, rankDesc: ['3.0× piercing', '3.3×', '3.6× ★Notable: splits into 2 on pierce', '4.0× homing', '5.0× ★Capstone: 3 simultaneous lances'],
     cost: 45, cooldown: 3.0, color: '#aa99dd',
     cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
       const sorted = enemies.filter(e => e.alive).sort((a,b) => Math.hypot(a.x-player.x,a.y-player.y) - Math.hypot(b.x-player.x,b.y-player.y));
       const targets = sorted.slice(0, 3);
@@ -1523,7 +1657,7 @@ const ABILITIES = {
         const dx = t.x - player.x, dy = t.y - player.y;
         const d = Math.hypot(dx, dy) || 1;
         const sp = player.weaponProjSpeed * 1.4;
-        let dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg;
+        let dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale;
         const isCrit = Math.random() * 100 < player.critChance;
         if (isCrit) { dmg *= 2; player.onCrit(); }
         const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, dmg, d/sp+0.1, isCrit);
@@ -1535,6 +1669,19 @@ const ABILITIES = {
     },
   },
 };
+
+// ============================================================
+// ABILITY RANK SYSTEM  (D4 ranks 1-5 + PoE2 notable/capstone)
+// Rank 3 = Notable: new mechanic unlocked (like a PoE support gem).
+// Rank 5 = Capstone: dramatic power spike or second major mechanic.
+// ============================================================
+function getRankScale(slot) {
+  const r = (slot && slot.rank) || 1;
+  // Accelerating curve: ×1.0 → ×1.3 → ×1.65 → ×2.05 → ×2.5
+  return [1.0, 1.3, 1.65, 2.05, 2.5][Math.max(0, Math.min(4, r - 1))];
+}
+function getAbilityRank(slot) { return (slot && slot.rank) || 1; }
+
 const ABILITY_LIST = Object.values(ABILITIES);
 function classAbilities(classId) {
   return ABILITY_LIST.filter(a => !a.classOf || a.classOf === classId);
@@ -1564,7 +1711,7 @@ function addAbilityToPlayer(p, abilityId) {
   }
   for (let i = 1; i < p.abilities.length; i++) { // slot 0 = signature
     if (!p.abilities[i]) {
-      p.abilities[i] = { id: abilityId, def: ABILITIES[abilityId], rarity: RARITY.WHITE };
+      p.abilities[i] = { id: abilityId, def: ABILITIES[abilityId], rarity: RARITY.WHITE, rank: 1 };
       return;
     }
   }
