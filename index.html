@@ -750,6 +750,14 @@
     const isCrit = razorwind4th || Math.random() * 100 < crit;
     if (isCrit) { dmg *= (shooter.critDmg || 2); if (shooter.onCrit) shooter.onCrit(); }
     const newProj = new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit);
+    // Assign class-specific visual theme
+    const _CLASS_THEME_MAP = {
+      archer: 'arrow', wizard: 'arcane', rogue: 'shadow',
+      monk: 'chi', paladin: 'holy', witchdoctor: 'poison', necromancer: 'bone',
+    };
+    if (shooter.class && _CLASS_THEME_MAP[shooter.class.id]) {
+      newProj.theme = _CLASS_THEME_MAP[shooter.class.id];
+    }
     // Set effect + unique: pierce projectiles
     if (shooter === player && (
       (player.activeSetEffects && player.activeSetEffects.includes('pierce_one')) ||
@@ -976,7 +984,16 @@
           }
           if (proj.piercing) proj.hitSet.add(enemy);
           else proj.dead = true;
-          spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
+          const _HIT_PAL = {
+            arrow:  ['#e8c890','#c8a060','#ffffff'], arcane: ['#aa66ff','#dd99ff','#ffffff'],
+            shadow: ['#cc88ff','#661199','#ffffff'], chi:    ['#ffaa00','#ffee88','#ffffff'],
+            holy:   ['#ffffff','#fffff0','#ffee66'], poison: ['#44cc44','#aaffaa','#88ff44'],
+            bone:   ['#e8e8c8','#aaaaaa','#ffffff'], fire:   ['#ff5520','#ffaa00','#ffdd00'],
+            frost:  ['#aaccff','#eef8ff','#ffffff'],
+          };
+          const _hitCols = (proj.theme && _HIT_PAL[proj.theme]) ? _HIT_PAL[proj.theme]
+            : (proj.isCrit ? ['#ff8800','#ffd040','#ffffff'] : ['#fff7a0','#ffd040']);
+          spawnBurst(enemy.x, enemy.y, _hitCols, proj.isCrit ? 8 : 4);
           // Damage-scaled screenshake + hit-pause on crit
           if (proj.isCrit) {
             shake = Math.min(shake + 2.5, 8);
@@ -3160,10 +3177,16 @@
         ctx.fillRect(px, panY, panW, panH);
         ctx.strokeStyle = p.color; ctx.lineWidth = hov ? 2 : 1;
         ctx.strokeRect(px + 0.5, panY + 0.5, panW - 1, panH - 1);
-        ctx.fillStyle = p.color; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(p.icon, px + panW / 2, panY + 36);
-        ctx.font = 'bold 9px monospace';
-        ctx.fillText(p.label, px + panW / 2, panY + 52);
+        // Draw NPC sprite if available, else fall back to text icon
+        const npcSpr = (typeof NPC_SPRITES !== 'undefined') ? NPC_SPRITES[p.id] : null;
+        if (npcSpr) {
+          drawSprite(ctx, npcSpr, Math.floor(px + panW / 2), panY + 34, false, false, 2);
+        } else {
+          ctx.fillStyle = p.color; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
+          ctx.fillText(p.icon, px + panW / 2, panY + 36);
+        }
+        ctx.fillStyle = p.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(p.label, px + panW / 2, panY + 54);
         ctx.fillStyle = '#888'; ctx.font = '8px monospace';
         ctx.fillText(p.desc, px + panW / 2, panY + 66);
         // Store hitbox

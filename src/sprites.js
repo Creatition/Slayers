@@ -993,6 +993,131 @@ SPRITE_SLAYERKILLER.rows[21] = '0660..........066...';
 SPRITE_SLAYERKILLER.rows[22] = '.0.............0....';
 SPRITE_SLAYERKILLER.rows[23] = '....................';
 
+
+// ============================================================
+// NPC SPRITES — Hub screen characters.
+// All 10×14 like the player sprites; drawn at scale=2 in drawHubScreen.
+// ============================================================
+
+const SPRITE_NPC_BLACKSMITH = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-dk 2=skin 3=beard/hair-dk
+  // 4=apron-dk 5=apron-mid 6=hammer-wood 7=hammer-metal
+  // 8=leather-shirt 9=fire-orange
+  palette: [
+    '#1a0e08', '#8a5030', '#c07848', '#2a1005',
+    '#6a3010', '#a05030', '#7a6858', '#c0b8a8',
+    '#d06030', '#ff8800',
+  ],
+  rows: [
+    '..03330...',  // 0  hair
+    '.0322230..',  // 1  head/hair
+    '.0302030..',  // 2  eyes (0=dark pupils)
+    '.0322230..',  // 3  face
+    '.0333330..',  // 4  full beard
+    '0085558500',  // 5  wide shoulders (8=leather, 5=apron-mid)
+    '0085558500',  // 6  upper body
+    '0085558560',  // 7  body + hammer shaft (6=wood at col 8)
+    '0085558577',  // 8  hammer head (7=metal at cols 8-9)
+    '0084448500',  // 9  lower body (4=apron-dk belt)
+    '0084448500',  // 10 lower
+    '.0404040..',  // 11 legs
+    '.0404040..',  // 12 legs
+    '.0808080..',  // 13 boots
+  ],
+};
+
+const SPRITE_NPC_JEWELER = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-dk 2=skin 3=hat/robe-dk-purple
+  // 4=hat-mid-purple 5=robe-lt-purple 6=gem-blue 7=gem-glow
+  // 8=gold-chain/monocle 9=accent
+  palette: [
+    '#1a0a18', '#8a5030', '#c07848', '#3a2070',
+    '#6644aa', '#9966dd', '#44aaff', '#88ccff',
+    '#ffdd00', '#cc44cc',
+  ],
+  rows: [
+    '.....4....',  // 0  hat tip (1px)
+    '....0440..',  // 1  hat upper
+    '...04440..',  // 2  hat
+    '..044440..',  // 3  hat brim
+    '.0322230..',  // 4  face
+    '.0302030..',  // 5  eyes
+    '.0322830..',  // 6  face + gold monocle (8=gold at col 5)
+    '.0355530..',  // 7  collar
+    '.0355530..',  // 8  slim robe body
+    '.0356530..',  // 9  body + gem (6=blue)
+    '.0357530..',  // 10 gem highlight (7=bright blue)
+    '.0355530..',  // 11 lower robe
+    '.0355530..',  // 12 lower robe
+    '.0353530..',  // 13 robe hem/boots
+  ],
+};
+
+const SPRITE_NPC_STASH = {
+  w: 10, h: 14,
+  // 0=outline 1=armor-dk 2=armor-mid 3=armor-lt
+  // 4=hood-dk-blue 5=hood-mid-blue 6=chain-mail 7=metal-shine
+  // 8=gold-trim 9=red-eyes
+  palette: [
+    '#101020', '#303848', '#506070', '#8090a8',
+    '#2030a0', '#4060d0', '#c0c8d8', '#e8f0ff',
+    '#ffd040', '#cc2020',
+  ],
+  rows: [
+    '...04440..',  // 0  hood top
+    '..044440..',  // 1  hood upper
+    '..044440..',  // 2  hood (face fully shadowed)
+    '..049940..',  // 3  glowing red eyes (9) under hood
+    '..044440..',  // 4  lower hood shadow
+    '.0323230..',  // 5  armored shoulders (3=light, 2=mid)
+    '.0226220..',  // 6  chest (6=chain-mail center)
+    '0023662200',  // 7  wider chest plate
+    '0023662200',  // 8  armor torso
+    '0023882200',  // 9  gold trim (8=gold at cols 4-5)
+    '0023662200',  // 10 lower armor
+    '.0202020..',  // 11 greaves (plated legs)
+    '.0202020..',  // 12 greaves
+    '.0606060..',  // 13 sabatons/boots
+  ],
+};
+
+const SPRITE_NPC_SHOPKEEPER = {
+  w: 10, h: 14,
+  // 0=outline 1=skin-dk 2=skin 3=hat-dk-brown
+  // 4=hat-mid-brown 5=hat-lt-tan 6=cloth-dk 7=cloth-mid
+  // 8=gold-coin 9=red-vest-accent
+  palette: [
+    '#1a0e08', '#8a5030', '#c07848', '#3a2008',
+    '#7a5020', '#b07828', '#6a4018', '#9a6830',
+    '#ffd040', '#cc4040',
+  ],
+  rows: [
+    '0044444400',  // 0  wide merchant hat brim (edge to edge)
+    '..044440..',  // 1  hat crown
+    '..044440..',  // 2  hat crown
+    '...0440...',  // 3  hat top
+    '.0322230..',  // 4  face
+    '.0302030..',  // 5  eyes
+    '.0322230..',  // 6  face (cheeks)
+    '.0329930..',  // 7  smile (9=red mouth, 2px)
+    '.0677670..',  // 8  collar/vest
+    '.0677870..',  // 9  vest + coin (8=gold at col 5)
+    '.0678870..',  // 10 more coin (big fat gold piece)
+    '.0677670..',  // 11 lower body
+    '.0677670..',  // 12 lower body
+    '.0737070..',  // 13 boots
+  ],
+};
+
+const NPC_SPRITES = {
+  blacksmith: SPRITE_NPC_BLACKSMITH,
+  jeweler:    SPRITE_NPC_JEWELER,
+  stash:      SPRITE_NPC_STASH,
+  shop:       SPRITE_NPC_SHOPKEEPER,
+};
+
 const BOSS_SPRITES = {
   BoneLord:     SPRITE_BONELORD,
   IceGiant:     SPRITE_ICEGIANT,

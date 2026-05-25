@@ -266,4 +266,23 @@ const Sfx = {
     this._tone({ type: 'triangle', freq: 800, dur: 0.06, vol: 0.18 });
     this._tone({ type: 'triangle', freq: 1200, dur: 0.10, vol: 0.18, when: 0.05 });
   },
+
+  // Legendary / Unique drop — dramatic rising shimmer + bass thud
+  rareDrop() {
+    this._tone({ type: 'sine',     freq: 80,   freqEnd: 40,   dur: 0.35, vol: 0.55, attack: 0.005 });
+    this._tone({ type: 'triangle', freq: 440,  freqEnd: 880,  dur: 0.30, vol: 0.28, when: 0.05, attack: 0.02 });
+    this._tone({ type: 'triangle', freq: 554,  freqEnd: 1108, dur: 0.28, vol: 0.22, when: 0.08, attack: 0.02 });
+    this._tone({ type: 'triangle', freq: 659,  freqEnd: 1318, dur: 0.26, vol: 0.18, when: 0.11, attack: 0.02 });
+    this._tone({ type: 'sine',     freq: 2200, freqEnd: 3200, dur: 0.18, vol: 0.12, when: 0.22 });
+    this._noise({ filterType: 'bandpass', filterFreq: 3000, dur: 0.10, vol: 0.06, when: 0.22, q: 4 });
+  },
+
+  // Set item drop — ethereal harmonic bloom, distinct from legendary
+  setDrop() {
+    this._tone({ type: 'sine',     freq: 110, freqEnd: 55,  dur: 0.40, vol: 0.40, attack: 0.01 });
+    [523.25, 659.25, 783.99, 1046.50].forEach((f, i) =>
+      this._tone({ type: 'triangle', freq: f, freqEnd: f * 1.5, dur: 0.22, vol: 0.20, when: 0.04 + i * 0.06, attack: 0.015 })
+    );
+    this._tone({ type: 'sine', freq: 1800, freqEnd: 2800, dur: 0.22, vol: 0.10, when: 0.28 });
+  },
 };

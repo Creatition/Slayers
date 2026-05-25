@@ -9,10 +9,18 @@
 // ENTITY: Projectile (player)
 // ============================================================
 const PROJ_THEMES = {
-  fire:   { outer: '#ff5520', inner: '#ffdd00' },
-  frost:  { outer: '#aaccff', inner: '#ffffff' },
-  arcane: { outer: '#aa66ff', inner: '#dd99ff' },
-  light:  { outer: '#ffff80', inner: '#ffffff' },
+  // Generic themes (abilities / fallback)
+  fire:   { outer: '#ff5520', inner: '#ffdd00', trail: '#ff8800' },
+  frost:  { outer: '#aaccff', inner: '#ffffff',  trail: '#88aaee' },
+  arcane: { outer: '#aa66ff', inner: '#dd99ff',  trail: '#8844cc' },
+  light:  { outer: '#ffff80', inner: '#ffffff',  trail: '#ffdd44' },
+  // Class-specific themes
+  arrow:  { outer: '#8a6430', inner: '#e8c890',  trail: '#6a4820', elongated: true },
+  shadow: { outer: '#4a1870', inner: '#cc88ff',  trail: '#6633aa', elongated: true },
+  chi:    { outer: '#ff9900', inner: '#ffeeaa',  trail: '#ff6600' },
+  holy:   { outer: '#fff4a0', inner: '#ffffff',  trail: '#ffdd44' },
+  poison: { outer: '#44cc44', inner: '#aaffaa',  trail: '#228822' },
+  bone:   { outer: '#d8d8b0', inner: '#ffffff',  trail: '#aaa880', elongated: true },
 };
 class Projectile {
   constructor(x, y, vx, vy, damage, life, isCrit) {
@@ -30,24 +38,67 @@ class Projectile {
     if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
   }
   draw(ctx) {
+    const px = Math.floor(this.x), py = Math.floor(this.y);
+    const spd = Math.hypot(this.vx, this.vy);
+    const nx = spd > 0.1 ? this.vx / spd : 1;
+    const ny = spd > 0.1 ? this.vy / spd : 0;
+
     if (this.theme && PROJ_THEMES[this.theme]) {
       const t = PROJ_THEMES[this.theme];
-      const r = this.r || 4;
+      const r = this.r || 2;
+
+      if (t.elongated) {
+        // Directional streak: tip bright, shaft darker, fading trail
+        ctx.fillStyle = t.inner;
+        ctx.fillRect(px, py, 2, 2);
+        ctx.fillStyle = t.outer;
+        for (let i = 1; i <= 4; i++) {
+          ctx.fillRect(Math.floor(px - nx * i * 1.5), Math.floor(py - ny * i * 1.5), 2, 2);
+        }
+        if (t.trail) {
+          ctx.globalAlpha = 0.25;
+          ctx.fillStyle = t.trail;
+          ctx.fillRect(Math.floor(px - nx * 7), Math.floor(py - ny * 7), 2, 2);
+          ctx.globalAlpha = 1;
+        }
+        return;
+      }
+
+      // Standard round projectile + velocity trail
       ctx.fillStyle = t.outer;
-      ctx.fillRect(Math.floor(this.x - r), Math.floor(this.y - r), r * 2, r * 2);
+      ctx.fillRect(px - r, py - r, r * 2, r * 2);
       ctx.fillStyle = t.inner;
-      ctx.fillRect(Math.floor(this.x - r/2), Math.floor(this.y - r/2), Math.max(1, r), Math.max(1, r));
+      ctx.fillRect(px - (r >> 1), py - (r >> 1), Math.max(1, r), Math.max(1, r));
+      if (t.trail && spd > 0.1) {
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = t.trail;
+        ctx.fillRect(Math.floor(px - nx * 4), Math.floor(py - ny * 4), r, r);
+        ctx.globalAlpha = 0.2;
+        ctx.fillRect(Math.floor(px - nx * 7), Math.floor(py - ny * 7), Math.max(1, r - 1), Math.max(1, r - 1));
+        ctx.globalAlpha = 1;
+      }
       return;
     }
+
+    // Fallback (no theme): piercing / crit / normal
     if (this.piercing) {
-      ctx.fillStyle = '#5599ff'; ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
-      ctx.fillStyle = '#aaccff'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+      // Blue-white piercing bolt with trail
+      ctx.fillStyle = '#5599ff'; ctx.fillRect(px - 3, py - 3, 7, 7);
+      ctx.fillStyle = '#aaccff'; ctx.fillRect(px - 1, py - 1, 3, 3);
+      ctx.globalAlpha = 0.35; ctx.fillStyle = '#3366cc';
+      ctx.fillRect(Math.floor(px - nx * 5), Math.floor(py - ny * 5), 4, 4);
+      ctx.globalAlpha = 1;
     } else if (this.isCrit) {
-      ctx.fillStyle = '#ff8800'; ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
-      ctx.fillStyle = '#ffe080'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
+      // Orange crit burst + trail
+      ctx.fillStyle = '#ff8800'; ctx.fillRect(px - 2, py - 2, 5, 5);
+      ctx.fillStyle = '#ffe080'; ctx.fillRect(px - 1, py - 1, 3, 3);
+      ctx.globalAlpha = 0.4; ctx.fillStyle = '#ff5500';
+      ctx.fillRect(Math.floor(px - nx * 4), Math.floor(py - ny * 4), 3, 3);
+      ctx.globalAlpha = 1;
     } else {
-      ctx.fillStyle = '#fff7a0'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-      ctx.fillStyle = '#ffe040'; ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
+      // Default yellow bolt
+      ctx.fillStyle = '#fff7a0'; ctx.fillRect(px - 1, py - 1, 3, 3);
+      ctx.fillStyle = '#ffe040'; ctx.fillRect(px, py, 1, 1);
     }
   }
 }
@@ -77,10 +128,23 @@ class BoneProjectile {
     const t = ENEMY_SHOT_THEMES[this.theme] || ENEMY_SHOT_THEMES.bone;
     const px = Math.floor(this.x), py = Math.floor(this.y);
     const flicker = Math.floor(this.rot) % 2;
+    const spd = Math.hypot(this.vx, this.vy);
+    const nx = spd > 0.1 ? this.vx / spd : 1;
+    const ny = spd > 0.1 ? this.vy / spd : 0;
+    // Trail behind enemy shot
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = t.outer;
+    ctx.fillRect(Math.floor(px - nx * 4), Math.floor(py - ny * 4), 3, 3);
+    ctx.globalAlpha = 0.15;
+    ctx.fillRect(Math.floor(px - nx * 7), Math.floor(py - ny * 7), 2, 2);
+    ctx.globalAlpha = 1;
+    // Core + flicker
     ctx.fillStyle = flicker ? t.spark : t.outer; ctx.fillRect(px - 2, py - 2, 4, 4);
     ctx.fillStyle = t.inner; ctx.fillRect(px - 1, py - 1, 2, 2);
+    // Side sparks (cross pattern)
     ctx.fillStyle = t.spark;
     ctx.fillRect(px - 3, py, 1, 1); ctx.fillRect(px + 2, py, 1, 1);
+    ctx.fillRect(px, py - 3, 1, 1); ctx.fillRect(px, py + 2, 1, 1);
   }
 }
 
@@ -232,10 +296,20 @@ class XPGem {
     }
   }
   draw(ctx) {
-    const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
-    ctx.fillStyle = '#9b59ff'; ctx.fillRect(px - 1, py - 2, 3, 4);
+    const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.2);
+    // Diamond pixel shape
+    ctx.fillStyle = '#6a20cc';
+    ctx.fillRect(px - 1, py - 3, 3, 1);  // top point
+    ctx.fillRect(px - 2, py - 2, 5, 1);
+    ctx.fillRect(px - 3, py - 1, 7, 2);  // widest
+    ctx.fillRect(px - 2, py + 1, 5, 1);
+    ctx.fillRect(px - 1, py + 2, 3, 1);  // bottom point
+    // Highlight facet
     ctx.fillStyle = '#c89aff';
-    ctx.fillRect(px, py - 1, 1, 1); ctx.fillRect(px - 1, py - 2, 1, 1);
+    ctx.fillRect(px - 1, py - 2, 2, 2);
+    // Inner gleam
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(px - 1, py - 2, 1, 1);
   }
 }
 
@@ -251,6 +325,17 @@ class ItemDrop {
     this.dead = false; this.settled = false;
     this.bobPhase = Math.random() * Math.PI * 2;
     this.glowPhase = Math.random() * Math.PI * 2;
+    // Loot beam for rare+ items
+    const rid = item.rarity ? item.rarity.id : 'white';
+    const isSpecial = rid === 'orange' || rid === 'green' || item.uniqueId;
+    const isSet = rid === 'green';
+    this.beamColor  = item.uniqueId ? '#ffd040' : (isSet ? '#44ff88' : '#ff8800');
+    this.beamColor2 = item.uniqueId ? '#ffffff'  : (isSet ? '#aaffcc' : '#ffdd44');
+    this.hasBeam    = isSpecial;
+    if (isSpecial && typeof Sfx !== 'undefined') {
+      if (isSet) Sfx.setDrop();
+      else Sfx.rareDrop();
+    }
   }
   update(dt, player) {
     this.bobPhase += dt * 3; this.glowPhase += dt * 4;
@@ -273,18 +358,94 @@ class ItemDrop {
     }
   }
   draw(ctx) {
-    const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
-    const glow = 0.4 + 0.2 * Math.sin(this.glowPhase);
+    const bob = Math.sin(this.bobPhase) * 1.5;
+    const px = Math.floor(this.x);
+    const py = Math.floor(this.y + bob);
+    const t = performance.now() * 0.001;
+
+    // ── Loot beam (legendary / unique / set) ──────────────────────
+    if (this.hasBeam) {
+      const beamW  = 6;
+      const beamH  = py + 4;   // from top of screen to item
+      const phase  = t * 2.5;
+      const flicker= 0.55 + 0.30 * Math.sin(phase);
+
+      // Outer beam column
+      ctx.globalAlpha = flicker * 0.25;
+      ctx.fillStyle = this.beamColor;
+      ctx.fillRect(px - beamW, 0, beamW * 2, beamH);
+
+      // Inner bright core
+      ctx.globalAlpha = flicker * 0.50;
+      ctx.fillStyle = this.beamColor2;
+      ctx.fillRect(px - 2, 0, 4, beamH);
+
+      // Bright core line
+      ctx.globalAlpha = flicker * 0.80;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(px - 1, 0, 2, beamH);
+
+      // Sparkling motes along beam
+      ctx.globalAlpha = flicker;
+      ctx.fillStyle = this.beamColor2;
+      for (let si = 0; si < 5; si++) {
+        const sy = (((t * 60 + si * 37) % beamH) + beamH) % beamH;
+        ctx.fillRect(px - 1 + (si % 2 === 0 ? -2 : 2), Math.floor(sy), 2, 2);
+      }
+
+      // Ground halo ring
+      ctx.globalAlpha = flicker * 0.35;
+      ctx.fillStyle = this.beamColor;
+      for (let hr = 0; hr < 12; hr++) {
+        const ang = (hr / 12) * Math.PI * 2 + t;
+        const hx = px + Math.round(Math.cos(ang) * (8 + 2 * Math.sin(t * 3 + hr)));
+        const hy = py + Math.round(Math.sin(ang) * 3);
+        ctx.fillRect(hx, hy + 4, 2, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Outer glow pulse ─────────────────────────────────────────
+    const glow = 0.35 + 0.20 * Math.sin(this.glowPhase);
     ctx.globalAlpha = glow;
-    ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 6, py - 6, 12, 12);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 4, py - 4, 8, 8);
-    ctx.fillStyle = '#1a1a22'; ctx.fillRect(px - 3, py - 3, 6, 6);
     ctx.fillStyle = this.item.rarity.color;
-    ctx.font = 'bold 7px monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(this.item.base.letter, px, py + 1);
-    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    const glowR = this.hasBeam ? 10 : 7;
+    ctx.fillRect(px - glowR, py - glowR, glowR * 2, glowR * 2);
+    ctx.globalAlpha = 1;
+
+    // ── Item sprite (from ITEM_SPRITES table) ─────────────────────
+    const baseId = this.item.base ? this.item.base.id : null;
+    const spr = (typeof ITEM_SPRITES !== 'undefined' && baseId) ? ITEM_SPRITES[baseId] : null;
+    if (spr) {
+      // Rarity-tinted border box
+      ctx.fillStyle = '#111118';
+      ctx.fillRect(px - 6, py - 6, 12, 12);
+      ctx.strokeStyle = this.item.rarity.color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px - 6 + 0.5, py - 6 + 0.5, 11, 11);
+      drawSprite(ctx, spr, px, py, false, false, 1);
+    } else {
+      // Fallback letter box
+      ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 5, py - 5, 10, 10);
+      ctx.fillStyle = '#1a1a22'; ctx.fillRect(px - 4, py - 4, 8, 8);
+      ctx.fillStyle = this.item.rarity.color;
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(this.item.base ? this.item.base.letter : '?', px, py + 1);
+      ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+    }
+
+    // ── Unique crown sparkle ──────────────────────────────────────
+    if (this.item.uniqueId) {
+      ctx.fillStyle = '#ffd040';
+      const starPhase = t * 3;
+      for (let si = 0; si < 3; si++) {
+        const ang = starPhase + (si * Math.PI * 2 / 3);
+        const sx = px + Math.round(Math.cos(ang) * 9);
+        const sy2 = py - 4 + Math.round(Math.sin(ang) * 4);
+        ctx.fillRect(sx - 1, sy2 - 1, 2, 2);
+      }
+    }
   }
 }
 
