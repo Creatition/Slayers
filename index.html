@@ -1354,14 +1354,6 @@
         // Fallback: solid fill while image loads
         ctx.fillStyle = '#15181a'; ctx.fillRect(0, 0, W, H);
       }
-      // Dark gradient across top ~55px to bury the baked-in static torches from the image.
-      // The procedural animated torch glow below renders on top of this.
-      const topMask = ctx.createLinearGradient(0, 0, 0, 55);
-      topMask.addColorStop(0,   'rgba(0,0,0,0.92)');
-      topMask.addColorStop(0.6, 'rgba(0,0,0,0.55)');
-      topMask.addColorStop(1,   'rgba(0,0,0,0)');
-      ctx.fillStyle = topMask; ctx.fillRect(0, 0, W, 55);
-
       // Torch glow at 4 corners (animated flicker)
       const torchPositions = [[20, 20], [W-20, 20], [20, H-20], [W-20, H-20]];
       for (const [tx, ty] of torchPositions) {
