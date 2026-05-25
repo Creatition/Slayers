@@ -322,6 +322,8 @@ class Player {
     this.overpowerChance = 0; this.overpowerMult = this.baseOverpowerMult;
     this.maxResource = this.baseMaxResource; this.resourceRegen = this.baseResourceRegen;
     this.resource = this.maxResource;
+    this.activeSetEffects = []; this.legendaryEffects = []; this.uniqueEffects = [];
+    this.abilityCostMult = 1.0; this.goldFindBonus = 1.0; this.bonusDmgReduction = 0;
     this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
     this.hawkEyeTimer = 0;
     this.warCryTimer = 0;
@@ -366,6 +368,7 @@ class Player {
     let s = this.speed;
     if (this.smokeBombTimer > 0) s *= 1.4;
     if (this.bigBadVoodooTimer > 0) s *= 1.15;
+    if ((this.stormriderSpeedTimer || 0) > 0) s += 60; // stormrider / kill_speed_burst
     return s;
   }
   effectiveDmgMult() {
@@ -380,10 +383,35 @@ class Player {
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
     this.bonusDodge = 0; this.bonusCritDmg = 0;
     this.bonusOverpowerChance = 0; this.bonusOverpowerMult = 0;
+    this.abilityCostMult = 1.0; this.goldFindBonus = 1.0; this.bonusDmgReduction = 0;
+    this.activeSetEffects = []; this.legendaryEffects = []; this.uniqueEffects = [];
     for (const k in this.equipped) {
       const it = this.equipped[k];
       if (!it) continue;
       for (const aff of it.affixes) aff.def.apply(this, aff.value);
+    }
+    // Set synergies
+    if (typeof SET_DEFS !== 'undefined') {
+      const setBonuses = getActiveSetBonuses(this.equipped);
+      for (const { def, bonus2, bonus4 } of setBonuses) {
+        if (bonus2) { def.bonus2.apply(this); if (def.bonus2.effect) this.activeSetEffects.push(def.bonus2.effect); }
+        if (bonus4) { def.bonus4.apply(this); if (def.bonus4.effect) this.activeSetEffects.push(def.bonus4.effect); }
+      }
+    }
+    // Legendary effect IDs (dispatched in index.html hit/kill handlers)
+    for (const k in this.equipped) {
+      const it = this.equipped[k];
+      if (it && it.legendaryEffectId) this.legendaryEffects.push(it.legendaryEffectId);
+    }
+    // Unique item stat passives + effect IDs
+    for (const k in this.equipped) {
+      const it = this.equipped[k];
+      if (!it || !it.uniqueId) continue;
+      const def = typeof UNIQUE_ITEMS !== 'undefined' ? UNIQUE_ITEMS.find(u => u.id === it.uniqueId) : null;
+      if (def && def.uniqueEffect) {
+        if (def.uniqueEffect.apply) def.uniqueEffect.apply(this);
+        if (def.uniqueEffect.id) this.uniqueEffects.push(def.uniqueEffect.id);
+      }
     }
     const oldMax = this.maxHp;
     const ratio = oldMax > 0 ? this.hp / oldMax : 1;
@@ -488,6 +516,15 @@ class Player {
   }
   takeDamage(amount) {
     if (this.iframeTimer > 0) return false;
+    // Unique: bonecage — 25% damage reduction below 40% HP
+    if ((this.uniqueEffects || []).includes('bonecage_low_hp_shield') && this.hp < this.maxHp * 0.4)
+      amount = Math.ceil(amount * 0.75);
+    // Unique: shadowcloak — first hit each wave auto-dodged
+    if ((this.uniqueEffects || []).includes('shadowcloak_first_dodge') && this.shadowcloakReady) {
+      this.shadowcloakReady = false;
+      if (typeof spawnDamageNumber === 'function') spawnDamageNumber(this.x, this.y - this.r, 'CLOAK', { color: '#aaddff', crit: false, size: 11 });
+      this.iframeTimer = this.IFRAME; return false;
+    }
     if (this.dodge > 0 && Math.random() * 100 < this.dodge) {
       if (typeof spawnDamageNumber === 'function') spawnDamageNumber(this.x, this.y - this.r, 'DODGE', { color: '#4ecdc4', crit: false, size: 11 });
       this.iframeTimer = this.IFRAME;
@@ -1288,7 +1325,6 @@ function handleBossDeath(enemy) {
   let tries = 0;
   while (it.rarity.id === 'white' && tries < 6) { it = generateItem(); tries++; }
   itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
-  itemDrops.push(new ItemDrop(enemy.x + 12, enemy.y, generateItem()));
   itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
   shake = Math.min(shake + 8, 12);
   Sfx.bossDie();

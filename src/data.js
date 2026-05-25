@@ -102,10 +102,17 @@ function rollAffixes(count) {
   return out;
 }
 let nextItemId = 1;
+function _tagItem(item) {
+  if (item.rarity.id === 'green' && typeof SET_DEFS !== 'undefined' && SET_DEFS.length)
+    item.setId = rngPick(SET_DEFS).id;
+  if (item.rarity.id === 'orange' && typeof LEGENDARY_EFFECTS !== 'undefined' && LEGENDARY_EFFECTS.length)
+    item.legendaryEffectId = rngPick(LEGENDARY_EFFECTS).id;
+  return item;
+}
 function generateItem() {
   const rarity = pickWeightedRarity();
   const base = rngPick(ITEM_BASES);
-  return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
+  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) });
 }
 // Generate item with at least a minimum rarity (for elite drops)
 function generateItemMinRarity(minId) {
@@ -118,7 +125,7 @@ function generateItemMinRarity(minId) {
     rarity = RARITY_LIST.find(r => r.id === minId) || RARITY.YELLOW;
   }
   const base = rngPick(ITEM_BASES);
-  return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
+  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) });
 }
 // Class-biased item: prefers the class's weapon types, falls back to random
 const CLASS_PREFERRED_BASES = {
@@ -144,7 +151,282 @@ function generateItemForClass(classId) {
   const rarity = pickWeightedRarity();
   return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
 }
-function itemDisplayName(item) { return `${item.rarity.name} ${item.base.name}`; }
+function itemDisplayName(item) {
+  if (item.uniqueId) {
+    const u = typeof UNIQUE_ITEMS !== 'undefined' ? UNIQUE_ITEMS.find(u => u.id === item.uniqueId) : null;
+    return u ? u.name : `Unique ${item.base.name}`;
+  }
+  if (item.setId) {
+    const s = typeof SET_DEFS !== 'undefined' ? SET_DEFS.find(s => s.id === item.setId) : null;
+    return s ? `${s.name} ${item.base.name}` : `Set ${item.base.name}`;
+  }
+  if (item.legendaryEffectId) {
+    const e = typeof LEGENDARY_EFFECTS !== 'undefined' ? LEGENDARY_EFFECTS.find(e => e.id === item.legendaryEffectId) : null;
+    return e ? `${e.name} ${item.base.name}` : `${item.rarity.name} ${item.base.name}`;
+  }
+  return `${item.rarity.name} ${item.base.name}`;
+}
+
+// ============================================================
+// SET PIECE SYNERGIES
+// ============================================================
+// bonus2/bonus4: { desc, apply(p), effect? }
+// effect string is pushed into player.activeSetEffects for game-loop dispatch
+const SET_DEFS = [
+  {
+    id: 'stormcaller', name: "Stormcaller's",
+    desc: "Stormcaller's Regalia",
+    bonus2: { desc: '+15% Crit Chance', apply: (p) => { p.bonusCritChance += 15; } },
+    bonus4: { desc: '+30% Crit Dmg — Crits chain to 2 nearby enemies', apply: (p) => { p.bonusCritDmg += 0.3; }, effect: 'chain_crit' },
+  },
+  {
+    id: 'ironclad', name: "Ironclad",
+    desc: "Ironclad Panoply",
+    bonus2: { desc: '+20 Armor', apply: (p) => { p.bonusArmor += 20; } },
+    bonus4: { desc: '+20% Damage Reduction — Reflect 40% blocked damage', apply: (p) => { p.bonusDmgReduction = (p.bonusDmgReduction || 0) + 0.20; }, effect: 'damage_reflect' },
+  },
+  {
+    id: 'shadowstrike', name: "Shadowstrike",
+    desc: "Shadowstrike Garb",
+    bonus2: { desc: '+20% Attack Speed', apply: (p) => { p.bonusFireRatePct += 20; } },
+    bonus4: { desc: '+15% Move Speed — Kills grant 2s speed burst', apply: (p) => { p.bonusMoveSpeed += 15; }, effect: 'kill_speed_burst' },
+  },
+  {
+    id: 'arcane_mastery', name: "Arcane",
+    desc: "Arcane Mastery",
+    bonus2: { desc: '+20% Damage', apply: (p) => { p.bonusDmgPct += 20; } },
+    bonus4: { desc: '+30 Max Resource — Projectiles pierce 1 extra target', apply: (p) => { p.bonusMaxResource += 30; }, effect: 'pierce_one' },
+  },
+  {
+    id: 'bloodlust', name: "Bloodlust",
+    desc: "Bloodlust Warplate",
+    bonus2: { desc: '+40 Max HP', apply: (p) => { p.bonusMaxHp += 40; } },
+    bonus4: { desc: '+2 HP Regen — Kills restore 3% Max HP', apply: (p) => { p.bonusRegen += 2; }, effect: 'kill_heal' },
+  },
+  {
+    id: 'wraithwalker', name: "Wraithwalker",
+    desc: "Wraithwalker's Veil",
+    bonus2: { desc: '+10% Dodge', apply: (p) => { p.bonusDodge += 10; } },
+    bonus4: { desc: '+10% Dodge — Dodging triggers a projectile volley', apply: (p) => { p.bonusDodge += 10; }, effect: 'dodge_volley' },
+  },
+];
+function getSetDef(id) { return SET_DEFS.find(s => s.id === id) || null; }
+function getActiveSetBonuses(equipped) {
+  const counts = {};
+  for (const k in equipped) {
+    const it = equipped[k];
+    if (it && it.setId) counts[it.setId] = (counts[it.setId] || 0) + 1;
+  }
+  const result = []; // { def, piecesEquipped, bonus2Active, bonus4Active }
+  for (const id in counts) {
+    const def = getSetDef(id);
+    if (!def) continue;
+    result.push({ def, count: counts[id], bonus2: counts[id] >= 2, bonus4: counts[id] >= 4 });
+  }
+  return result;
+}
+
+// ============================================================
+// LEGENDARY EFFECTS
+// ============================================================
+// procType: 'onHit' | 'onKill' | 'onCrit' | 'passive'
+// procChance: 0-100 (ignored for passive)
+// desc shown in tooltip; actual logic dispatched by id in index.html
+const LEGENDARY_EFFECTS = [
+  { id: 'searing',       name: 'Searing',       procType: 'onHit',   procChance: 25,
+    desc: '25% on-hit: Burn 4 dmg/s for 3s' },
+  { id: 'vampiric',      name: 'Vampiric',       procType: 'onKill',  procChance: 100,
+    desc: 'On kill: Restore 8 HP' },
+  { id: 'thunderclap',   name: 'Thunderclap',    procType: 'onCrit',  procChance: 100,
+    desc: 'On crit: AoE explosion (50 dmg)' },
+  { id: 'frostbite',     name: 'Frostbite',      procType: 'onHit',   procChance: 20,
+    desc: '20% on-hit: Slow enemy 50% for 2s' },
+  { id: 'berserker',     name: 'Berserker',      procType: 'onKill',  procChance: 100,
+    desc: 'On kill: +20% damage for 3s (stacks 3×)' },
+  { id: 'soul_harvest',  name: 'Soul Harvest',   procType: 'onKill',  procChance: 100,
+    desc: 'On kill: Restore 18 resource' },
+  { id: 'executioner',   name: 'Executioner',    procType: 'passive', procChance: 0,
+    desc: 'Passive: +8% of enemy missing HP as bonus dmg' },
+  { id: 'shrapnel',      name: 'Shrapnel',       procType: 'onHit',   procChance: 15,
+    desc: '15% on-hit: Spawn 3 shrapnel projectiles' },
+];
+function getLegendaryEffect(id) { return LEGENDARY_EFFECTS.find(e => e.id === id) || null; }
+
+// ============================================================
+// UNIQUE ITEMS
+// ============================================================
+// Fixed-stat named items. uniqueEffect: { id, desc, apply(p) } for persistent stat passives.
+// Gameplay ability hooks (stormrider speed burst etc.) dispatched by uniqueEffect.id in index.html.
+const UNIQUE_ITEMS = [
+  {
+    id: 'deathwhisper', name: "Deathwhisper", baseId: 'bow', rarityId: 'orange',
+    lore: 'Each arrow carries a sliver of the void.',
+    affixes: [
+      { defId: 'crit_chance', value: 15 },
+      { defId: 'firerate_pct', value: 12 },
+      { defId: 'dmg_pct', value: 10 },
+    ],
+    uniqueEffect: { id: 'deathwhisper_extra_arrows', desc: 'Multishot gains 2 extra projectiles permanently.' },
+  },
+  {
+    id: 'soulreaper', name: "Soulreaper", baseId: 'staff', rarityId: 'orange',
+    lore: 'Forged from the bones of a forgotten god.',
+    affixes: [
+      { defId: 'dmg_pct', value: 20 },
+      { defId: 'max_focus', value: 25 },
+      { defId: 'crit_chance', value: 8 },
+    ],
+    uniqueEffect: { id: 'soulreaper_pierce', desc: 'All projectiles pierce through enemies.' },
+  },
+  {
+    id: 'razorwind', name: "Razorwind", baseId: 'sword', rarityId: 'orange',
+    lore: 'The blade never dulls. Neither does its hunger.',
+    affixes: [
+      { defId: 'firerate_pct', value: 20 },
+      { defId: 'armor', value: 10 },
+      { defId: 'dmg_pct', value: 15 },
+    ],
+    uniqueEffect: { id: 'razorwind_4th_crit', desc: 'Every 4th attack is a guaranteed critical hit.' },
+  },
+  {
+    id: 'eclipse', name: "Eclipse", baseId: 'orb', rarityId: 'orange',
+    lore: 'The orb devours light, returning power to its bearer.',
+    affixes: [
+      { defId: 'max_focus', value: 30 },
+      { defId: 'focus_regen', value: 4 },
+      { defId: 'dmg_pct', value: 10 },
+    ],
+    uniqueEffect: { id: 'eclipse_cheap_abilities', desc: 'Active abilities cost 30% less resource.', apply: (p) => { p.abilityCostMult = (p.abilityCostMult || 1) * 0.70; } },
+  },
+  {
+    id: 'bonecage', name: "Bonecage", baseId: 'cap', rarityId: 'orange',
+    lore: 'The dead protect those who walk among them.',
+    affixes: [
+      { defId: 'maxhp', value: 50 },
+      { defId: 'armor', value: 12 },
+      { defId: 'regen', value: 2 },
+    ],
+    uniqueEffect: { id: 'bonecage_low_hp_shield', desc: 'Below 40% HP, take 25% less damage.' },
+  },
+  {
+    id: 'heartseeker', name: "Heartseeker", baseId: 'amulet', rarityId: 'orange',
+    lore: 'It beats in time with every heartbeat nearby.',
+    affixes: [
+      { defId: 'regen', value: 3 },
+      { defId: 'maxhp', value: 20 },
+      { defId: 'crit_chance', value: 8 },
+    ],
+    uniqueEffect: { id: 'heartseeker_double_regen', desc: 'HP Regen is doubled.', apply: (p) => { p.bonusRegen += p.regen; } },
+  },
+  {
+    id: 'shadowcloak', name: "Shadowcloak", baseId: 'tunic', rarityId: 'orange',
+    lore: 'Woven from shadows that never quite settled.',
+    affixes: [
+      { defId: 'armor', value: 10 },
+      { defId: 'movespeed', value: 8 },
+      { defId: 'pickup', value: 10 },
+    ],
+    uniqueEffect: { id: 'shadowcloak_first_dodge', desc: 'First hit each wave is always dodged.' },
+  },
+  {
+    id: 'stormrider', name: "Stormrider", baseId: 'boots', rarityId: 'orange',
+    lore: 'The lightning chose you. Keep moving.',
+    affixes: [
+      { defId: 'movespeed', value: 15 },
+      { defId: 'crit_chance', value: 6 },
+      { defId: 'firerate_pct', value: 8 },
+    ],
+    uniqueEffect: { id: 'stormrider_kill_speed', desc: 'Killing an enemy grants 60 Move Speed for 1.5s.' },
+  },
+];
+function getUniqueDef(id) { return UNIQUE_ITEMS.find(u => u.id === id) || null; }
+// Build a live item object from a unique definition
+function generateUniqueItem(uniqueId) {
+  const def = getUniqueDef(uniqueId);
+  if (!def) return generateItemMinRarity('orange');
+  const base = ITEM_BASES.find(b => b.id === def.baseId) || rngPick(ITEM_BASES);
+  const rarity = RARITY.ORANGE;
+  const affixes = (def.affixes || []).map(a => {
+    const afxDef = AFFIX_POOL.find(d => d.id === a.defId);
+    return afxDef ? { def: afxDef, value: a.value } : null;
+  }).filter(Boolean);
+  return { id: nextItemId++, base, rarity, affixes, uniqueId: def.id };
+}
+
+// ============================================================
+// PARAGON BOARD
+// ============================================================
+const PARAGON_LEVEL_CAP = 100;
+// 4 categories × 10 nodes each. apply(p) runs each session on resetWorld.
+const PARAGON_BOARD = {
+  offense: {
+    label: 'OFFENSE', color: '#ff6644',
+    nodes: [
+      { id: 'p_atk1',  name: 'Predator',      row: 1, desc: '+3% Damage',            apply: (p) => { p.bonusDmgPct += 3; } },
+      { id: 'p_atk2',  name: 'Sharpened',     row: 1, desc: '+2% Crit Chance',       apply: (p) => { p.bonusCritChance += 2; } },
+      { id: 'p_atk3',  name: 'Swift Draw',    row: 2, desc: '+3% Attack Speed',      apply: (p) => { p.bonusFireRatePct += 3; } },
+      { id: 'p_atk4',  name: 'Bloodied Edge', row: 2, desc: '+5% Crit Damage',       apply: (p) => { p.bonusCritDmg += 0.05; } },
+      { id: 'p_atk5',  name: 'Relentless',    row: 3, desc: '+4% Damage',            apply: (p) => { p.bonusDmgPct += 4; } },
+      { id: 'p_atk6',  name: 'Headhunter',    row: 3, desc: '+3% Crit Chance',       apply: (p) => { p.bonusCritChance += 3; } },
+      { id: 'p_atk7',  name: 'Overclocked',   row: 4, desc: '+4% Attack Speed',      apply: (p) => { p.bonusFireRatePct += 4; } },
+      { id: 'p_atk8',  name: 'Death Mark',    row: 4, desc: '+2% Overpower Chance',  apply: (p) => { p.baseOverpowerChance += 2; } },
+      { id: 'p_atk9',  name: 'Annihilator',   row: 5, desc: '+6% Damage',            apply: (p) => { p.bonusDmgPct += 6; } },
+      { id: 'p_atk10', name: 'Void Strike',   row: 5, desc: '+10% Crit Dmg, +4% Crit Chance', apply: (p) => { p.bonusCritDmg += 0.10; p.bonusCritChance += 4; } },
+    ],
+  },
+  defense: {
+    label: 'DEFENSE', color: '#4499ff',
+    nodes: [
+      { id: 'p_def1',  name: 'Fortified',     row: 1, desc: '+15 Max HP',            apply: (p) => { p.bonusMaxHp += 15; } },
+      { id: 'p_def2',  name: 'Plated',        row: 1, desc: '+3 Armor',              apply: (p) => { p.bonusArmor += 3; } },
+      { id: 'p_def3',  name: 'Ironhide',      row: 2, desc: '+20 Max HP',            apply: (p) => { p.bonusMaxHp += 20; } },
+      { id: 'p_def4',  name: 'Warded',        row: 2, desc: '+2% Dodge',             apply: (p) => { p.bonusDodge += 2; } },
+      { id: 'p_def5',  name: 'Second Wind',   row: 3, desc: '+1 HP Regen',           apply: (p) => { p.bonusRegen += 1; } },
+      { id: 'p_def6',  name: 'Bulwark',       row: 3, desc: '+5 Armor',              apply: (p) => { p.bonusArmor += 5; } },
+      { id: 'p_def7',  name: 'Resilient',     row: 4, desc: '+25 Max HP',            apply: (p) => { p.bonusMaxHp += 25; } },
+      { id: 'p_def8',  name: 'Phantasm',      row: 4, desc: '+4% Dodge',             apply: (p) => { p.bonusDodge += 4; } },
+      { id: 'p_def9',  name: 'Titan',         row: 5, desc: '+40 Max HP, +6 Armor',  apply: (p) => { p.bonusMaxHp += 40; p.bonusArmor += 6; } },
+      { id: 'p_def10', name: 'Deathless',     row: 5, desc: '+2 HP Regen, +5% Dodge', apply: (p) => { p.bonusRegen += 2; p.bonusDodge += 5; } },
+    ],
+  },
+  utility: {
+    label: 'UTILITY', color: '#ffcc33',
+    nodes: [
+      { id: 'p_utl1',  name: 'Windfoot',      row: 1, desc: '+8 Move Speed',         apply: (p) => { p.bonusMoveSpeed += 8; } },
+      { id: 'p_utl2',  name: 'Collector',     row: 1, desc: '+10 Pickup Range',      apply: (p) => { p.bonusPickupRange += 10; } },
+      { id: 'p_utl3',  name: 'Prospector',    row: 2, desc: '+10% Gold Find',        apply: (p) => { p.goldFindBonus = (p.goldFindBonus || 1) + 0.10; } },
+      { id: 'p_utl4',  name: 'Swiftness',     row: 2, desc: '+10 Move Speed',        apply: (p) => { p.bonusMoveSpeed += 10; } },
+      { id: 'p_utl5',  name: 'Arcane Well',   row: 3, desc: '+20 Max Resource',      apply: (p) => { p.bonusMaxResource += 20; } },
+      { id: 'p_utl6',  name: 'Mend',          row: 3, desc: '+1 HP Regen',           apply: (p) => { p.bonusRegen += 1; } },
+      { id: 'p_utl7',  name: 'Streamlined',   row: 4, desc: '+15 Move Speed',        apply: (p) => { p.bonusMoveSpeed += 15; } },
+      { id: 'p_utl8',  name: 'Hoarder',       row: 4, desc: '+15 Pickup Range',      apply: (p) => { p.bonusPickupRange += 15; } },
+      { id: 'p_utl9',  name: 'Blazing Speed', row: 5, desc: '+20 Move Speed, +10 Pickup', apply: (p) => { p.bonusMoveSpeed += 20; p.bonusPickupRange += 10; } },
+      { id: 'p_utl10', name: 'Font of Power', row: 5, desc: '+40 Max Resource, +3 Resource Regen', apply: (p) => { p.bonusMaxResource += 40; p.bonusResourceRegen += 3; } },
+    ],
+  },
+  mastery: {
+    label: 'MASTERY', color: '#cc66ff',
+    nodes: [
+      { id: 'p_mst1',  name: 'Tempered',      row: 1, desc: '+1% Damage per Char Level (additive)', apply: (p) => { if (typeof charLevel !== 'undefined') p.bonusDmgPct += charLevel; } },
+      { id: 'p_mst2',  name: 'Veteran',       row: 1, desc: '+2% All Stats',          apply: (p) => { p.bonusDmgPct += 2; p.bonusFireRatePct += 2; p.bonusMoveSpeed += 4; } },
+      { id: 'p_mst3',  name: 'Prodigy',       row: 2, desc: '+5% Crit on Abilities',  apply: (p) => { p.bonusCritChance += 5; } },
+      { id: 'p_mst4',  name: 'Hardened',      row: 2, desc: '+5 Armor, +10 HP',       apply: (p) => { p.bonusArmor += 5; p.bonusMaxHp += 10; } },
+      { id: 'p_mst5',  name: 'Overflowing',   row: 3, desc: '+3% Overpower Chance',   apply: (p) => { p.baseOverpowerChance += 3; } },
+      { id: 'p_mst6',  name: 'Precision',     row: 3, desc: '+5% Crit Damage',        apply: (p) => { p.bonusCritDmg += 0.05; } },
+      { id: 'p_mst7',  name: 'Undying',       row: 4, desc: '+30 Max HP, +2 Regen',   apply: (p) => { p.bonusMaxHp += 30; p.bonusRegen += 2; } },
+      { id: 'p_mst8',  name: 'Ascendant',     row: 4, desc: '+5% Dmg, +5% Atk Speed', apply: (p) => { p.bonusDmgPct += 5; p.bonusFireRatePct += 5; } },
+      { id: 'p_mst9',  name: 'Apex Predator', row: 5, desc: '+8% Dmg, +5% Crit, +5% Crit Dmg', apply: (p) => { p.bonusDmgPct += 8; p.bonusCritChance += 5; p.bonusCritDmg += 0.05; } },
+      { id: 'p_mst10', name: 'Transcendence', row: 5, desc: 'All paragon bonuses doubled (additive 100% of prior gains)', apply: (p) => { /* applied at end of paragon pass in applyParagonToPlayer */ } },
+    ],
+  },
+};
+function getParagonNode(id) {
+  for (const cat of Object.values(PARAGON_BOARD)) {
+    const n = cat.nodes.find(n => n.id === id);
+    if (n) return n;
+  }
+  return null;
+}
 
 // ============================================================
 // ECONOMY

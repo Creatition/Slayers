@@ -81,7 +81,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -129,6 +129,9 @@
   let talentPoints = 0;      // unspent points available to spend
   let spentTalents = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
+  let paragonLevel = 0, paragonXp = 0, paragonPoints = 0;
+  let spentParagon = {};          // nodeId -> true
+  let paragonTreeCat = 'offense'; // active category tab in paragon view
   // XP required to reach next level (level 1→2 = 100, scales by +75 each level)
   function charXpToNext(lvl) { return 100 + (lvl - 1) * 75; }
   function awardRunXp(wavesCompleted, bossesKilled, victory) {
@@ -171,6 +174,67 @@
     talentPoints--;
     saveData();
   }
+
+  // ============================================================
+  // PARAGON SYSTEM
+  // ============================================================
+  function awardTrialXp(wavesCleared, tier) {
+    const base = wavesCleared * 15 + tier * 40;
+    awardParagonXp(base);
+  }
+  function paragonXpToNext(lvl) { return 200 + lvl * 100; }
+  function awardParagonXp(amount) {
+    if (paragonLevel >= PARAGON_LEVEL_CAP) return;
+    paragonXp += amount;
+    while (paragonXp >= paragonXpToNext(paragonLevel) && paragonLevel < PARAGON_LEVEL_CAP) {
+      paragonXp -= paragonXpToNext(paragonLevel);
+      paragonLevel++;
+      paragonPoints++;
+    }
+    if (paragonLevel >= PARAGON_LEVEL_CAP) paragonXp = 0;
+    saveData();
+  }
+  function applyParagonToPlayer(p) {
+    const CATS = ['offense','defense','utility','mastery'];
+    const hasTrans = spentParagon['p_mst10'];
+    for (const catKey of CATS) {
+      const category = PARAGON_BOARD[catKey];
+      if (!category) continue;
+      for (const node of category.nodes) {
+        if (spentParagon[node.id] && node.id !== 'p_mst10') node.apply(p);
+      }
+    }
+    if (hasTrans) {
+      // Double pass — Transcendence applies all bonuses again
+      for (const catKey of CATS) {
+        const category = PARAGON_BOARD[catKey];
+        if (!category) continue;
+        for (const node of category.nodes) {
+          if (spentParagon[node.id] && node.id !== 'p_mst10') node.apply(p);
+        }
+      }
+    }
+    p.recomputeStats();
+  }
+  function canSpendParagon(nodeId) {
+    if (paragonPoints <= 0 || spentParagon[nodeId]) return false;
+    const node = getParagonNode(nodeId);
+    if (!node) return false;
+    if (node.row > 1) {
+      const cat = Object.values(PARAGON_BOARD).find(c => c.nodes.some(n => n.id === nodeId));
+      if (cat && !cat.nodes.some(n => n.row === node.row - 1 && spentParagon[n.id])) return false;
+    }
+    return true;
+  }
+  function spendParagon(nodeId) {
+    if (!canSpendParagon(nodeId)) return false;
+    spentParagon[nodeId] = true;
+    paragonPoints--;
+    applyParagonToPlayer(player);
+    saveData();
+    return true;
+  }
+
   // Slayer Trials (Phase 9)
   let runMode = 'standard';  // 'standard' or 'trial'
   let trialTier = 1;
@@ -540,6 +604,21 @@
   // ============================================================
   function handleEnemyDeath(e) {
     player.kills++;
+    // Legendary on-kill procs
+    if (player.legendaryEffects) {
+      for (const eid of player.legendaryEffects) {
+        const edef = getLegendaryEffect(eid);
+        if (edef && edef.procType === 'onKill') applyLegendaryKillProc(eid, e, player);
+      }
+    }
+    // Set: kill_heal — 3% max HP restore
+    if (player.activeSetEffects && player.activeSetEffects.includes('kill_heal'))
+      player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.03));
+    // Set: kill_speed_burst + unique: stormrider
+    if (player.activeSetEffects && player.activeSetEffects.includes('kill_speed_burst'))
+      player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
+    if (player.uniqueEffects && player.uniqueEffects.includes('stormrider_kill_speed'))
+      player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 1.5);
     const isElite = e.eliteScale > 1;
     const burstColors = isElite
       ? (e.eliteMods[0] ? [e.eliteMods[0].auraColor, '#ffd040', '#ffffff'] : ['#ffd040', '#ffaa00', '#ffffff'])
@@ -636,9 +715,16 @@
     const life = shooter.weaponRange / sp + 0.05;
     let dmg = shooter.weaponDamage * (shooter.effectiveDmgMult ? shooter.effectiveDmgMult() : shooter.dmgMult);
     const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
-    const isCrit = Math.random() * 100 < crit;
+    const razorwind4th = shooter === player && (player.uniqueEffects || []).includes('razorwind_4th_crit') && (player.attackCount || 0) === 3;
+    const isCrit = razorwind4th || Math.random() * 100 < crit;
     if (isCrit) { dmg *= (shooter.critDmg || 2); if (shooter.onCrit) shooter.onCrit(); }
-    projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
+    const newProj = new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit);
+    // Set effect + unique: pierce projectiles
+    if (shooter === player && (
+      (player.activeSetEffects && player.activeSetEffects.includes('pierce_one')) ||
+      (player.uniqueEffects && player.uniqueEffects.includes('soulreaper_pierce'))
+    )) { newProj.piercing = true; newProj.hitSet = new Set(); }
+    projectiles.push(newProj);
     Sfx.shoot();
   }
 
@@ -818,6 +904,45 @@
           const isOverpower = player.overpowerChance > 0 && Math.random() * 100 < player.overpowerChance;
           const died = enemy.takeDamage(proj.damage, { crit: proj.isCrit });
           if (proj.onHit) proj.onHit(enemy);
+          // Legendary on-hit procs
+          if (player.legendaryEffects && enemy.alive) {
+            for (const eid of player.legendaryEffects) {
+              const edef = getLegendaryEffect(eid);
+              if (edef && edef.procType === 'onHit' && Math.random() * 100 < edef.procChance)
+                applyLegendaryProc(eid, enemy, player);
+            }
+          }
+          // Executioner passive: bonus damage = 8% missing HP
+          if (player.legendaryEffects && player.legendaryEffects.includes('executioner') && enemy.alive) {
+            const missingHp = Math.max(0, enemy.maxHp - enemy.hp);
+            const exDmg = Math.floor(missingHp * 0.08);
+            if (exDmg > 0) { enemy.takeDamage(exDmg); spawnDamageNumber(enemy.x, enemy.y - enemy.r - 8, exDmg, { color: '#dd44ff', size: 9 }); }
+          }
+          // Set effect: chain_crit — on crit, chain damage to 2 nearby enemies
+          if (proj.isCrit && player.activeSetEffects && player.activeSetEffects.includes('chain_crit') && enemy.alive) {
+            let chains = 0;
+            for (const other of enemies) {
+              if (chains >= 2 || !other.alive || other === enemy) continue;
+              const cx = other.x - enemy.x, cy = other.y - enemy.y;
+              if (cx*cx + cy*cy < 80*80) {
+                const chainDmg = Math.floor(proj.damage * 0.5);
+                other.takeDamage(chainDmg);
+                spawnDamageNumber(other.x, other.y - other.r, chainDmg, { color: '#ffff44', size: 9 });
+                chains++;
+              }
+            }
+          }
+          // Legendary on-crit procs
+          if (proj.isCrit && player.legendaryEffects && enemy.alive) {
+            for (const eid of player.legendaryEffects) {
+              const edef = getLegendaryEffect(eid);
+              if (edef && edef.procType === 'onCrit') applyLegendaryProc(eid, enemy, player);
+            }
+          }
+          // Unique: razorwind_4th_crit — track attack count
+          if (player.uniqueEffects && player.uniqueEffects.includes('razorwind_4th_crit')) {
+            player.attackCount = ((player.attackCount || 0) + 1) % 4;
+          }
           if (proj.piercing) proj.hitSet.add(enemy);
           else proj.dead = true;
           spawnBurst(enemy.x, enemy.y, proj.isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#fff7a0', '#ffd040'], proj.isCrit ? 6 : 4);
@@ -1167,7 +1292,15 @@
     if (runMode === 'trial') {
       // Go to loadout screen first
       resetWorld();          // sets up empty player
-      state = STATE.TRIAL_LOADOUT;
+      if (charLevel < CHAR_LEVEL_CAP) {
+        // Trials locked until max char level
+      } else {
+        if (charLevel >= CHAR_LEVEL_CAP) {
+        state = STATE.TRIAL_LOADOUT;
+      } else {
+        // Show a message — trials unlock at max level
+      }
+      }
       loadout = {};
     } else {
       resetWorld();
@@ -1217,12 +1350,16 @@
   }
   // === SAVE / LOAD ===
   function serializeItem(item) {
-    return {
+    const s = {
       id: item.id,
       baseId: item.base.id,
       rarityId: item.rarity.id,
       affixes: item.affixes.map(a => ({ defId: a.def.id, value: a.value })),
     };
+    if (item.setId)              s.setId = item.setId;
+    if (item.legendaryEffectId)  s.legendaryEffectId = item.legendaryEffectId;
+    if (item.uniqueId)           s.uniqueId = item.uniqueId;
+    return s;
   }
   function deserializeItem(s) {
     const base = ITEM_BASES.find(b => b.id === s.baseId) || ITEM_BASES[0];
@@ -1231,7 +1368,11 @@
       const def = AFFIX_POOL.find(d => d.id === a.defId);
       return def ? { def, value: a.value } : null;
     }).filter(Boolean);
-    return { id: s.id || nextItemId++, base, rarity, affixes };
+    const item = { id: s.id || nextItemId++, base, rarity, affixes };
+    if (s.setId)             item.setId = s.setId;
+    if (s.legendaryEffectId) item.legendaryEffectId = s.legendaryEffectId;
+    if (s.uniqueId)          item.uniqueId = s.uniqueId;
+    return item;
   }
   function loadSave() {
     try {
@@ -1247,6 +1388,10 @@
       charXp       = data.charXp       || 0;
       talentPoints = data.talentPoints || 0;
       spentTalents = data.spentTalents || {};
+      paragonLevel  = Math.min(PARAGON_LEVEL_CAP, data.paragonLevel  || 0);
+      paragonXp     = data.paragonXp    || 0;
+      paragonPoints = data.paragonPoints || 0;
+      spentParagon  = data.spentParagon  || {};
     } catch (e) { console.warn('load save failed:', e); }
   }
   function saveData() {
@@ -1260,6 +1405,10 @@
         charXp,
         talentPoints,
         spentTalents,
+        paragonLevel,
+        paragonXp,
+        paragonPoints,
+        spentParagon,
       }));
     } catch (e) { console.warn('save failed:', e); }
   }
@@ -1278,11 +1427,18 @@
   function resetWorld() {
     player = new Player(W / 2, H / 2, selectedClassId);
     applyTalentsToPlayer(player); // apply persistent talent tree bonuses + abilities
+    if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
+    if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     runWavesCompleted = 0; runBossesKilled = 0; runXpAwarded = false;
+    player.attackCount = 0;           // razorwind_4th_crit tracker
+    player.shadowcloakReady = true;   // shadowcloak_first_dodge per wave
+    player.stormriderSpeedTimer = 0;  // stormrider kill-speed buff timer
+    player.berserkerStacks = 0;       // legendary berserker stacks
+    player.berserkerTimer = 0;        // berserker duration
     levelUpChoices = []; abilityDraftChoices = [];
     levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
     bossBannerTimer = 0; bossDefeatedBannerTimer = 0; lastBossName = '';
@@ -2771,12 +2927,41 @@
       ctx.fillStyle = '#666'; ctx.font = '7px monospace';
       ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}`, tx + 8, ty + 25);
       ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
+      let tipY = 38;
+      if (tooltipItem.uniqueId) {
+        const udef = getUniqueDef(tooltipItem.uniqueId);
+        if (udef && udef.uniqueEffect) {
+          ctx.fillStyle = '#ffdd88'; ctx.font = 'bold 8px monospace';
+          ctx.fillText('★ ' + udef.uniqueEffect.desc, tx + 8, tipY); tipY += 10;
+        }
+      }
+      if (tooltipItem.legendaryEffectId) {
+        const ldef = getLegendaryEffect(tooltipItem.legendaryEffectId);
+        if (ldef) {
+          ctx.fillStyle = '#ffaa44'; ctx.font = 'italic 8px monospace';
+          ctx.fillText('⚡ ' + ldef.desc, tx + 8, tipY); tipY += 10;
+        }
+      }
+      if (tooltipItem.setId) {
+        const sdef = getSetDef(tooltipItem.setId);
+        if (sdef) {
+          ctx.fillStyle = '#44ff88'; ctx.font = 'bold 8px monospace';
+          const equipped2 = getActiveSetBonuses(player ? player.equipped : {}).find(b => b.def.id === tooltipItem.setId);
+          const cnt = equipped2 ? equipped2.count : 0;
+          ctx.fillText('◆ ' + sdef.desc + ' (' + cnt + ' equipped)', tx + 8, tipY); tipY += 8;
+          ctx.fillStyle = cnt >= 2 ? '#33ff66' : '#446644'; ctx.font = '7px monospace';
+          ctx.fillText('  2pc: ' + sdef.bonus2.desc, tx + 8, tipY); tipY += 8;
+          ctx.fillStyle = cnt >= 4 ? '#33ff66' : '#446644';
+          ctx.fillText('  4pc: ' + sdef.bonus4.desc, tx + 8, tipY); tipY += 9;
+        }
+      }
+      ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
       if (tooltipItem.affixes.length === 0) {
-        ctx.fillStyle = '#888'; ctx.fillText('(no affixes)', tx + 8, ty + 40);
+        ctx.fillStyle = '#888'; ctx.fillText('(no affixes)', tx + 8, tipY);
       } else {
         for (let i = 0; i < tooltipItem.affixes.length; i++) {
           const aff = tooltipItem.affixes[i];
-          ctx.fillText(aff.def.fmt(aff.value), tx + 8, ty + 40 + i * 9);
+          ctx.fillText(aff.def.fmt(aff.value), tx + 8, tipY + i * 9);
         }
       }
     } else {
@@ -2784,6 +2969,154 @@
       ctx.fillText('Hover an item to inspect', tx + tw / 2, ty + th / 2 + 3);
       ctx.textAlign = 'left';
     }
+  }
+
+  // ============================================================
+  // LEGENDARY EFFECT DISPATCHER
+  // ============================================================
+  // burnTimers: Map<enemy, { dmg, rate, timer }>
+  const burnTimers = new Map();
+  const slowTimers = new Map();
+
+  function applyLegendaryProc(effectId, enemy, shooter) {
+    if (!enemy || !enemy.alive) return;
+    switch (effectId) {
+      case 'searing':
+        burnTimers.set(enemy, { dmg: 4, rate: 1.0, timer: 3.0, elapsed: 0 });
+        spawnDamageNumber(enemy.x, enemy.y - enemy.r, 'BURN', { color: '#ff6600', size: 9, vy: -40, life: 0.8 });
+        break;
+      case 'thunderclap':
+        explodeAt(enemy.x, enemy.y, 55, 50);
+        spawnBurst(enemy.x, enemy.y, ['#ffff88','#ffdd00','#ffffff','#ffaa00'], 14);
+        spawnDamageNumber(enemy.x, enemy.y - enemy.r - 10, 'THUNDER', { color: '#ffff44', size: 10, vy: -50, life: 1.0 });
+        shake = Math.min(shake + 3, 8);
+        break;
+      case 'frostbite':
+        slowTimers.set(enemy, { mult: 0.5, timer: 2.0 });
+        spawnDamageNumber(enemy.x, enemy.y - enemy.r, 'SLOW', { color: '#88ccff', size: 9, vy: -35, life: 0.8 });
+        break;
+      case 'shrapnel':
+        for (let i = 0; i < 3; i++) {
+          const ang = (Math.PI * 2 / 3) * i + Math.random() * 0.5;
+          const sdmg = Math.max(1, Math.floor(shooter.weaponDmg * 0.4));
+          projectiles.push(new Projectile(enemy.x, enemy.y, Math.cos(ang) * 200, Math.sin(ang) * 200, sdmg, 0.5, false));
+        }
+        break;
+      default: break;
+    }
+  }
+  function applyLegendaryKillProc(effectId, enemy, shooter) {
+    switch (effectId) {
+      case 'vampiric':
+        shooter.hp = Math.min(shooter.maxHp, shooter.hp + 8);
+        spawnDamageNumber(shooter.x, shooter.y - shooter.r - 4, '+8 HP', { color: '#55ff55', size: 10, vy: -45, life: 0.9 });
+        break;
+      case 'berserker':
+        shooter.berserkerStacks = Math.min(3, (shooter.berserkerStacks || 0) + 1);
+        shooter.berserkerTimer = 3.0;
+        spawnDamageNumber(shooter.x, shooter.y - shooter.r - 4, 'BERSERK!', { color: '#ff4400', size: 11, vy: -50, life: 1.0 });
+        break;
+      case 'soul_harvest':
+        shooter.resource = Math.min(shooter.maxResource, shooter.resource + 18);
+        spawnDamageNumber(shooter.x, shooter.y - shooter.r - 4, '+18', { color: shooter.class.resourceColor || '#aaddff', size: 10, vy: -45, life: 0.9 });
+        break;
+      default: break;
+    }
+  }
+  function updateBurnAndSlow(dt) {
+    for (const [enemy, burn] of burnTimers) {
+      if (!enemy.alive) { burnTimers.delete(enemy); continue; }
+      burn.elapsed += dt;
+      while (burn.elapsed >= burn.rate && enemy.alive) {
+        burn.elapsed -= burn.rate;
+        const died = enemy.takeDamage(burn.dmg);
+        spawnDamageNumber(enemy.x, enemy.y - enemy.r, burn.dmg, { color: '#ff6600', size: 8 });
+        if (died) { handleEnemyDeath(enemy); burnTimers.delete(enemy); break; }
+      }
+      burn.timer -= dt;
+      if (burn.timer <= 0) burnTimers.delete(enemy);
+    }
+    for (const [enemy, slow] of slowTimers) {
+      if (!enemy.alive) { slowTimers.delete(enemy); continue; }
+      enemy.speedMult = slow.mult;
+      slow.timer -= dt;
+      if (slow.timer <= 0) { enemy.speedMult = 1; slowTimers.delete(enemy); }
+    }
+  }
+
+
+  function drawParagonScreen() {
+    const W = 640, H = 360;
+    ctx.fillStyle = '#0d0d14'; ctx.fillRect(0, 0, W, H);
+    // Header
+    ctx.fillStyle = '#cc66ff'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('PARAGON BOARD', W / 2, 20);
+    const parPct = paragonLevel < PARAGON_LEVEL_CAP ? paragonXp / paragonXpToNext(paragonLevel) : 1;
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(W/2-140, 27, 280, 8);
+    ctx.fillStyle = '#cc66ff'; ctx.fillRect(W/2-140, 27, 280 * parPct, 8);
+    ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+    const parLabel = paragonLevel < PARAGON_LEVEL_CAP
+      ? `P${paragonLevel}  ${paragonXp}/${paragonXpToNext(paragonLevel)} XP`
+      : `P${paragonLevel}  ASCENDED`;
+    ctx.fillText(parLabel, W / 2, 44);
+    if (paragonPoints > 0) {
+      ctx.fillStyle = '#ffdd44'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(`${paragonPoints} POINT${paragonPoints !== 1 ? 'S' : ''} AVAILABLE`, W / 2, 53);
+    }
+    // Category tabs
+    const CATS = Object.keys(PARAGON_BOARD);
+    const tabW = 70, tabH = 14, tabStartX = W/2 - (CATS.length * tabW) / 2;
+    for (let i = 0; i < CATS.length; i++) {
+      const cat = PARAGON_BOARD[CATS[i]];
+      const tx = tabStartX + i * tabW, ty = 58;
+      const active = CATS[i] === paragonTreeCat;
+      ctx.fillStyle = active ? cat.color : '#222'; ctx.fillRect(tx, ty, tabW - 2, tabH);
+      ctx.strokeStyle = cat.color; ctx.lineWidth = active ? 2 : 1; ctx.strokeRect(tx, ty, tabW - 2, tabH);
+      ctx.fillStyle = active ? '#000' : cat.color; ctx.font = `bold 7px monospace`; ctx.textAlign = 'center';
+      ctx.fillText(cat.label, tx + (tabW - 2) / 2, ty + 9);
+    }
+    // Node grid — 5 rows, 2 per row, laid out in the board area
+    const cat = PARAGON_BOARD[paragonTreeCat];
+    const colW = (W - 60) / 2;
+    const rowH = 42, startY = 82;
+    // Sort nodes by row
+    const rows = {};
+    for (const node of cat.nodes) { rows[node.row] = rows[node.row] || []; rows[node.row].push(node); }
+    for (const rowNum of Object.keys(rows).sort((a,b)=>a-b)) {
+      const rowNodes = rows[rowNum];
+      for (let ci = 0; ci < rowNodes.length; ci++) {
+        const node = rowNodes[ci];
+        const nx = 30 + ci * colW;
+        const ny = startY + (rowNum - 1) * rowH;
+        const spent = spentParagon[node.id];
+        const canBuy = canSpendParagon(node.id);
+        ctx.fillStyle = spent ? cat.color : (canBuy ? '#1a1a2e' : '#111');
+        ctx.fillRect(nx, ny, colW - 8, rowH - 6);
+        ctx.strokeStyle = spent ? cat.color : (canBuy ? '#444466' : '#222');
+        ctx.lineWidth = spent ? 2 : 1; ctx.strokeRect(nx, ny, colW - 8, rowH - 6);
+        ctx.fillStyle = spent ? '#000' : (canBuy ? '#ddd' : '#555');
+        ctx.font = `bold 8px monospace`; ctx.textAlign = 'left';
+        ctx.fillText(node.name, nx + 5, ny + 12);
+        ctx.fillStyle = spent ? '#000099' : (canBuy ? '#aaa' : '#444');
+        ctx.font = `7px monospace`;
+        const words = node.desc.split(' ');
+        let line = '', lineY = ny + 22;
+        for (const w of words) {
+          if (ctx.measureText(line + w).width > colW - 18) {
+            ctx.fillText(line.trim(), nx + 5, lineY); line = w + ' '; lineY += 9;
+          } else line += w + ' ';
+        }
+        if (line.trim()) ctx.fillText(line.trim(), nx + 5, lineY);
+        // Store hitbox for click
+        node._hx = nx; node._hy = ny; node._hw = colW - 8; node._hh = rowH - 6;
+      }
+    }
+    // Back button
+    ctx.fillStyle = '#222'; ctx.fillRect(8, 8, 55, 16);
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 1; ctx.strokeRect(8, 8, 55, 16);
+    ctx.fillStyle = '#aaa'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('← BACK', 13, 19);
+    ctx.textAlign = 'left';
   }
 
   // ============================================================
@@ -2974,305 +3307,3 @@
       }
 
       // Gamepad d-pad grid navigation
-      if (gpJustPressed.has(15)) { gpClassIdx = (gpClassIdx % COLS === COLS - 1) ? gpClassIdx : gpClassIdx + 1; }
-      if (gpJustPressed.has(14)) { gpClassIdx = (gpClassIdx % COLS === 0) ? gpClassIdx : gpClassIdx - 1; }
-      if (gpJustPressed.has(13)) { gpClassIdx = Math.min(classIds.length - 1, gpClassIdx + COLS); }
-      if (gpJustPressed.has(12)) { gpClassIdx = Math.max(0, gpClassIdx - COLS); }
-      // A/Cross = confirm highlighted
-      if (gpJustPressed.has(0)) picked = classIds[gpClassIdx];
-
-      // Mouse click
-      if (!picked && mouseClicked) {
-        if (isHovering(8, 8, 140, 20)) {
-          cycleMode();
-        } else if (isHovering(W - 170, 8, 160, 20)) {
-          charTreeClass = selectedClassId || 'archer';
-          state = STATE.CHAR_SCREEN;
-        } else {
-          const cardW = 148, cardH = 138, gap = 6;
-          const totalW = cardW * COLS + gap * (COLS - 1);
-          const startX = Math.floor((W - totalW) / 2);
-          const startY = 48;
-          for (let i = 0; i < classIds.length; i++) {
-            const col = i % COLS, row = Math.floor(i / COLS);
-            const cx = startX + col * (cardW + gap);
-            const cy = startY + row * (cardH + gap);
-            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH) {
-              picked = classIds[i]; break;
-            }
-          }
-        }
-      }
-      if (picked) pickClass(picked);
-    }
-    else if (state === STATE.CHAR_SCREEN) {
-      updateVirtualCursor(dt);
-      if (gpJustPressed.has(0)) mouseClicked = true;
-      if (keyJustPressed.has('escape') || keyJustPressed.has('c') || gpJustPressed.has(1)) {
-        state = STATE.CLASS_SELECT;
-      }
-      if (mouseClicked) {
-        // Back button
-        if (isHovering(8, H - 26, 80, 20)) { state = STATE.CLASS_SELECT; }
-        // Class tabs
-        const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
-        const tabW = Math.floor((W - 16) / allClasses.length);
-        for (let i = 0; i < allClasses.length; i++) {
-          if (isHovering(8 + i * tabW, 48, tabW - 2, 16)) { charTreeClass = allClasses[i]; break; }
-        }
-        // Talent node clicks — spend points
-        const tree = TALENT_TREES[charTreeClass];
-        if (tree) {
-          const treeStartY = 72, rowH = 46, colW = 155, nodeW = 130, nodeH = 32;
-          const treeX = Math.floor((W - 3 * colW) / 2) + 20;
-          for (const node of tree.nodes) {
-            const nx = treeX + (node.col - 1) * colW;
-            const ny = treeStartY + (node.row - 1) * rowH;
-            if (isHovering(nx, ny, nodeW, nodeH)) {
-              spendTalent(charTreeClass, node);
-              break;
-            }
-          }
-        }
-      }
-    }
-    else if (state === STATE.TRIAL_LOADOUT) {
-      updateVirtualCursor(dt);
-      if (gpJustPressed.has(0)) mouseClicked = true;
-      if (gpJustPressed.has(1)) { loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT; }
-      if (mouseClicked) {
-        // Click equipped slot — unequip
-        const eqSlot = getLoadoutSlotAtMouse();
-        if (eqSlot) {
-          delete loadout[eqSlot];
-        } else {
-          // Click stash item — equip into its slot
-          const si = getLoadoutStashIdxAtMouse();
-          if (si >= 0 && stash[si]) {
-            const item = stash[si];
-            let targetSlot = item.base.slot;
-            if (targetSlot === 'ring') {
-              // Pick first empty ring slot
-              if (loadout.ring1 === undefined) targetSlot = 'ring1';
-              else if (loadout.ring2 === undefined) targetSlot = 'ring2';
-              else targetSlot = 'ring1';
-            }
-            // If this stash item already loaded into another slot, remove from there
-            for (const slot in loadout) {
-              if (loadout[slot] === si) delete loadout[slot];
-            }
-            loadout[targetSlot] = si;
-          } else {
-            // BACK button
-            if (isHovering(W - 280, H - 30, 130, 24)) {
-              loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT;
-            }
-            // START button
-            else if (isHovering(W - 140, H - 30, 120, 24)) {
-              startTrialRun();
-            }
-          }
-        }
-      }
-    }
-    else if (state === STATE.INVENTORY) {
-      updateVirtualCursor(dt);
-      // A button = synthetic click
-      if (gpJustPressed.has(0)) mouseClicked = true;
-      // B button = close
-      if (gpJustPressed.has(1)) toggleInventory();
-      // V=whites  B=blues  Y=rares
-      if (keyJustPressed.has('v')) bulkSalvage(0);
-      if (keyJustPressed.has('b')) bulkSalvage(1);
-      if (keyJustPressed.has('y')) bulkSalvage(2);
-      // Right-click = instant salvage
-      if (rightClicked) {
-        const rIdx = getInventoryIdxAtMouse();
-        if (rIdx >= 0 && player.inventory[rIdx]) salvageInventoryItem(rIdx);
-      }
-      if (mouseClicked) {
-        const eqSlot = getEquippedSlotAtMouse();
-        if (eqSlot && player.equipped[eqSlot]) unequipSlot(eqSlot);
-        else {
-          const idx = getInventoryIdxAtMouse();
-          if (idx >= 0 && player.inventory[idx]) {
-            if (keys.has('shift')) salvageInventoryItem(idx);
-            else equipFromInventory(idx);
-          }
-        }
-      }
-    }
-    else if (state === STATE.SHOP) {
-      updateVirtualCursor(dt);
-      // A button = synthetic click at cursor; B button or Space/Enter = next wave
-      if (gpJustPressed.has(0)) mouseClicked = true;
-      if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(1)) {
-        // If the next wave is in a new biome AND we still have acts left,
-        // play the act-transition cinematic before actually starting the wave.
-        const upcoming = currentWave + 1;
-        if (upcoming <= 20 && biomeFor(upcoming).id !== biomeFor(currentWave).id) {
-          enterActTransition(upcoming);
-        } else {
-          startNextWave();
-        }
-        return finalizeFrame();
-      }
-      // Refresh shortcut: R key
-      if (keyJustPressed.has('r')) doRefreshShop();
-      // Bulk-salvage shortcuts: V=whites, B=blues, Y=rares
-      if (keyJustPressed.has('v')) bulkSalvage(0);
-      if (keyJustPressed.has('b')) bulkSalvage(1);
-      if (keyJustPressed.has('y')) bulkSalvage(2);
-      if (mouseClicked) {
-        // Shop item buy
-        const shopIdx = getShopIdxAtMouse();
-        if (shopIdx >= 0 && shopItems[shopIdx]) {
-          buyShopItem(shopIdx);
-        } else {
-          // Refresh button + the three bulk-salvage buttons in a row
-          const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
-          const refY = SHOP_Y;
-          const salvWX = refX + 95;       // SALVAGE WHITES
-          const salvBX = salvWX + 94;     // SALVAGE BLUES
-          const salvRX = salvBX + 94;     // SALVAGE RARES
-          if (isHovering(refX, refY, 90, SHOP_ITEM_H)) {
-            doRefreshShop();
-          } else if (isHovering(salvWX, refY, 90, SHOP_ITEM_H)) {
-            bulkSalvage(0); // whites
-          } else if (isHovering(salvBX, refY, 90, SHOP_ITEM_H)) {
-            bulkSalvage(1); // whites + blues
-          } else if (isHovering(salvRX, refY, 90, SHOP_ITEM_H)) {
-            bulkSalvage(2); // whites + blues + rares
-          } else {
-            // Right-click on shop item = toggle lock; on inventory item = salvage
-            if (rightClicked) {
-              const lockIdx = getShopIdxAtMouse();
-              if (lockIdx >= 0 && shopItems[lockIdx]) {
-                shopLocked[lockIdx] = !shopLocked[lockIdx];
-                Sfx.uiConfirm();
-              } else {
-                const rIdxS = getInventoryIdxAtMouse();
-                if (rIdxS >= 0 && player.inventory[rIdxS]) salvageInventoryItem(rIdxS);
-              }
-            }
-            // Inventory click — select (or Shift+Click = instant salvage)
-            let invHit = -1;
-            for (let i = 0; i < INV_COLS * INV_ROWS; i++) {
-              const col = i % INV_COLS;
-              const row = Math.floor(i / INV_COLS);
-              const x = INV_START_X + col * (INV_SLOT_SIZE + INV_GAP);
-              const y = INV_START_Y + 70 + row * (INV_SLOT_SIZE + INV_GAP);
-              if (mouseX >= x && mouseX < x + INV_SLOT_SIZE && mouseY >= y && mouseY < y + INV_SLOT_SIZE) { invHit = i; break; }
-            }
-            if (invHit >= 0 && player.inventory[invHit]) {
-              if (keys.has('shift')) {
-                // Shift+Click = instant salvage (salvageInventoryItem also adjusts selectedInvIdx)
-                salvageInventoryItem(invHit);
-              } else {
-                selectedInvIdx = (selectedInvIdx === invHit) ? -1 : invHit;
-              }
-            } else {
-              // Action buttons (only when selection)
-              if (selectedInvIdx >= 0 && player.inventory[selectedInvIdx]) {
-                const btnX = W - 130, btnY = 200, btnW = 120, btnH = 18;
-                if (isHovering(btnX, btnY, btnW, btnH)) {
-                  equipFromInventory(selectedInvIdx);
-                } else if (isHovering(btnX, btnY + btnH + 4, btnW, btnH)) {
-                  salvageInventoryItem(selectedInvIdx);
-                } else if (isHovering(btnX, btnY + (btnH + 4) * 2, btnW, btnH)) {
-                  rerollInventoryItem(selectedInvIdx);
-                }
-              }
-              // READY button
-              const rX = W - 130, rY = H - 30, rW = 120, rH = 24;
-              if (isHovering(rX, rY, rW, rH)) startNextWave();
-            }
-          }
-        }
-      }
-    }
-
-    for (const p of particles) p.update(dt);
-    particles = particles.filter(p => !p.dead);
-    updateDamageNumbers(dt);
-    if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
-    if (lootFlashTimer > 0) lootFlashTimer -= dt;
-    if (bossBannerTimer > 0) bossBannerTimer -= dt;
-    if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
-    if (goldFlashTimer > 0) goldFlashTimer -= dt;
-    if (biomeBannerTimer > 0) biomeBannerTimer -= dt;
-    shake *= 0.85; if (shake < 0.05) shake = 0;
-
-    ctx.save();
-    if (shake > 0 && state !== STATE.INVENTORY && state !== STATE.SHOP) {
-      const sx = (Math.random() - 0.5) * shake * 2;
-      const sy = (Math.random() - 0.5) * shake * 2;
-      ctx.translate(sx, sy);
-    }
-    drawBackground();
-    drawGroundEffects(ctx);
-    for (const d of itemDrops) d.draw(ctx);
-    // Ability cast rings
-    for (let i = abilityFlashes.length - 1; i >= 0; i--) {
-      const f = abilityFlashes[i];
-      f.r += (f.maxR - f.r) * 0.28;
-      f.life -= 1/60;
-      if (f.life <= 0) { abilityFlashes.splice(i, 1); continue; }
-      const alpha = f.life / f.maxLife;
-      // Expanding ring
-      ctx.save();
-      ctx.globalAlpha = alpha * 0.75;
-      ctx.strokeStyle = f.color;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.stroke();
-      // Inner fill flash
-      ctx.globalAlpha = alpha * 0.12;
-      ctx.fillStyle = f.color;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.6, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-    }
-    for (const g of xpGems) g.draw(ctx);
-    for (const p of particles) p.draw(ctx);
-    for (const e of enemies) e.draw(ctx);
-    // Elite beacons — drawn after enemy sprites so they overlay heads, never get hidden
-    for (const e of enemies) if (e.alive && e.elite) drawEliteBeacon(ctx, e);
-    // Melee swing arcs — drawn over enemies so the slash trails are clearly visible
-    for (const sw of meleeSwings) sw.draw(ctx);
-    for (const p of projectiles) p.draw(ctx);
-    for (const ep of enemyProjectiles) ep.draw(ctx);
-    if (state !== STATE.DEAD) player.draw(ctx);
-    drawDamageNumbers(ctx);
-    ctx.restore();
-
-    drawHud();
-    if (state === STATE.PLAYING) drawAbilityBar();
-    if (state === STATE.LEVELUP) drawLevelUpScreen();
-    else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
-    else if (state === STATE.DEAD) drawDeathScreen();
-    else if (state === STATE.VICTORY) drawVictoryScreen();
-    else if (state === STATE.INVENTORY) drawInventoryScreen();
-    else if (state === STATE.SHOP) drawShopScreen();
-    else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
-    else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
-    else if (state === STATE.TRIAL_LOADOUT) drawTrialLoadoutScreen();
-    else if (state === STATE.ACT_TRANSITION) drawActTransitionScreen();
-    else if (state === STATE.CHAR_SCREEN) drawCharScreen();
-
-    // Virtual cursor draws on top of all UI
-    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT || state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT || state === STATE.CHAR_SCREEN) {
-      drawVirtualCursor();
-    }
-
-    finalizeFrame();
-  }
-
-  function finalizeFrame() {
-    keyJustPressed.clear();
-    mouseClicked = false;
-    rightClicked = false;
-    requestAnimationFrame(loop);
-  }
-  requestAnimationFrame(loop);
-</script>
-</body>
-</html>
