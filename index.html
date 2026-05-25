@@ -65,6 +65,9 @@
   // Logical game resolution (kept at 640x360 so all draw code stays unchanged)
   const W = 640;
   const H = 360;
+  // Arena playable boundary — keeps entities out of the dark vignette edges of background images.
+  // Increase to shrink the play area away from the edges; 18 matches the crypt image vignette.
+  const ARENA_PAD = 18;
   // Render at 2x internal resolution for crisp text — chunky pixels stay chunky
   // because the canvas CSS-scales to the same final size, but anti-aliased
   // text rasterizes at 2x and looks much sharper.
@@ -146,7 +149,7 @@
   // ============================================================
   const BG_IMAGES = {};
   (function preloadBgImages() {
-    const toLoad = { crypt: 'bg_crypt.jpg' };
+    const toLoad = { crypt: 'bg_crypt.jpg', frostspire: 'bg_frostspire.jpg' };
     for (const [key, file] of Object.entries(toLoad)) {
       const img = new Image();
       img.src = file;

@@ -85,6 +85,90 @@ class BoneProjectile {
 }
 
 // ============================================================
+// ENTITY: MeleeSwing — directional arc that deals damage on creation
+//   and renders a sweeping visual that fades over its short life.
+// ============================================================
+class MeleeSwing {
+  // x, y: pivot (player position) | angle: facing radians | range: reach
+  // arcSpread: half-angle in radians (so total arc = 2 * arcSpread)
+  // damage: applied to enemies in arc on creation | color: visual tint
+  constructor(x, y, angle, range, arcSpread, damage, isCrit, color) {
+    this.x = x; this.y = y;
+    this.angle = angle; this.range = range; this.arcSpread = arcSpread;
+    this.damage = damage; this.isCrit = !!isCrit;
+    this.color = color || '#ffe080';
+    this.life = 0.18; this.maxLife = 0.18;
+    this.dead = false;
+    this.hasHit = false; // hit-test resolved on first update
+  }
+  // Hit-test runs once on first update so the swing connects with all
+  // enemies inside its arc at the moment of the attack.
+  resolveHits(enemies, owner) {
+    if (this.hasHit) return;
+    this.hasHit = true;
+    const rangeSq = this.range * this.range;
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      const dx = e.x - this.x, dy = e.y - this.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > rangeSq) continue;
+      // Angular check: difference between enemy direction and swing facing
+      const enemyAng = Math.atan2(dy, dx);
+      let delta = enemyAng - this.angle;
+      // Normalise to -PI..PI
+      while (delta >  Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      if (Math.abs(delta) > this.arcSpread) continue;
+      const isCrit = this.isCrit || (Math.random() * 100 < (owner ? owner.effectiveCritChance() : 0));
+      const finalDmg = isCrit ? this.damage * 2 : this.damage;
+      const died = e.takeDamage(finalDmg);
+      if (typeof spawnDamageNumber === 'function') {
+        spawnDamageNumber(e.x, e.y - e.r, finalDmg, { color: isCrit ? '#ff8800' : '#ffe080', crit: isCrit });
+      }
+      spawnBurst(e.x, e.y, isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#ffaa40', '#ffd040'], isCrit ? 6 : 3);
+      if (owner) {
+        if (isCrit) owner.onCrit();
+        if (owner.class.rageOnHit) {
+          owner.resource = Math.min(owner.maxResource, owner.resource + owner.class.rageOnHit);
+        }
+      }
+      if (died) {
+        if (e.isBoss && typeof handleBossDeath === 'function') handleBossDeath(e);
+        else if (typeof handleEnemyDeath === 'function') handleEnemyDeath(e);
+      }
+    }
+  }
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0) this.dead = true;
+  }
+  draw(ctx) {
+    const t = 1 - (this.life / this.maxLife);  // 0 → 1 over the swing
+    const alpha = Math.max(0, 1 - t);
+    // Swing sweeps from -arcSpread to +arcSpread over its life
+    const swingFrom = this.angle - this.arcSpread;
+    const swingTo   = this.angle + this.arcSpread;
+    // Leading edge of the swing visual — tracks t
+    const lead = swingFrom + (swingTo - swingFrom) * t;
+    // Trail spans from start to lead, fading
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.range, swingFrom, lead);
+    ctx.stroke();
+    // Brighter leading edge tick
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ffffff';
+    const lx = this.x + Math.cos(lead) * this.range;
+    const ly = this.y + Math.sin(lead) * this.range;
+    ctx.fillRect(Math.floor(lx) - 1, Math.floor(ly) - 1, 3, 3);
+    ctx.restore();
+  }
+}
+
+// ============================================================
 // ENTITY: Particle
 // ============================================================
 class Particle {
@@ -246,8 +330,14 @@ class Player {
     this.weaponRange = this.class.weaponRange;
     this.weaponProjSpeed = this.class.weaponProjSpeed;
     this.fireTimer = 0;
-    this.abilities = [null, null, null, null];
-    this.abilityCooldowns = [0, 0, 0, 0];
+    // Weapon-overlay animation: swingTimer ticks down after each attack so the
+    // held weapon visibly rotates/recoils. swingAngle is the world-space angle
+    // of the most recent attack (used to point/rotate the overlay).
+    this.swingTimer = 0;
+    this.swingAngle = 0;
+    // 6 slots total: slot 0 = signature (auto-assigned below), slots 1-5 = drafted from bosses
+    this.abilities = [null, null, null, null, null, null];
+    this.abilityCooldowns = [0, 0, 0, 0, 0, 0];
     if (this.class.signature && ABILITIES[this.class.signature]) {
       this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE };
     }
@@ -309,8 +399,8 @@ class Player {
   update(dt) {
     this.x += Actions.moveX * this.effectiveSpeed() * dt;
     this.y += Actions.moveY * this.effectiveSpeed() * dt;
-    this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-    this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+    this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
+    this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
     if (Actions.moveX >  0.1) this.facing =  1;
     else if (Actions.moveX < -0.1) this.facing = -1;
     if (this.iframeTimer > 0) this.iframeTimer -= dt;
@@ -330,32 +420,30 @@ class Player {
     }
     if (this.fireTimer > 0) this.fireTimer -= dt;
     if (this.fireTimer <= 0) {
-      if (this.class.meleeRange) {
-        const range = this.class.meleeRange;
-        const buff = this.warCryTimer > 0 ? 1.4 : 1;
-        const dmg = this.weaponDamage * this.effectiveDmgMult() * buff;
-        let hitAny = false;
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - this.x, dy = e.y - this.y;
-          if (dx*dx + dy*dy < range*range) {
-            hitAny = true;
-            const isCrit = Math.random() * 100 < this.effectiveCritChance();
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            spawnBurst(e.x, e.y, isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#ff6020', '#ffaa40'], isCrit ? 5 : 2);
-            if (isCrit) this.onCrit();
-            if (this.class.rageOnHit) {
-              this.resource = Math.min(this.maxResource, this.resource + this.class.rageOnHit);
-            }
-            if (died) {
-              if (e.isBoss) handleBossDeath(e);
-              else handleEnemyDeath(e);
-            }
-          }
-        }
-        if (hitAny) {
-          spawnBurst(this.x + this.facing * 12, this.y, ['#ff6020', '#ffaa40', '#ffffff'], 4);
+      // Weapon-driven combat: equipped weapon's kind overrides class default.
+      // Melee = directional swing arc; Ranged = projectile toward nearest target.
+      const kind = this.weaponKind();
+      if (kind === 'melee') {
+        // Melee reach: use class's native meleeRange when it has one (Warrior=52),
+        // otherwise a constant 60 — never the full ranged weaponRange (would be absurd).
+        const range = this.class.meleeRange || 60;
+        // Pick nearest enemy to determine swing facing
+        const target = findNearestEnemy(this.x, this.y, range);
+        if (target) {
+          const dx = target.x - this.x, dy = target.y - this.y;
+          const angle = Math.atan2(dy, dx);
+          // Face the target so the sprite + weapon overlay turn correctly
+          this.facing = dx >= 0 ? 1 : -1;
+          const buff = this.warCryTimer > 0 ? 1.4 : 1;
+          const dmg  = this.weaponDamage * this.effectiveDmgMult() * buff;
+          // ±55° arc gives a generous frontal cleave without being omnidirectional
+          const swing = new MeleeSwing(this.x, this.y, angle, range, Math.PI * 0.31, dmg, false, '#ffe080');
+          swing.resolveHits(enemies, this);
+          meleeSwings.push(swing);
+          this.swingTimer = 0.18;       // visual recoil for weapon overlay
+          this.swingAngle = angle;      // overlay rotates toward this angle
+          spawnBurst(this.x + Math.cos(angle) * 12, this.y + Math.sin(angle) * 12,
+                     ['#ff6020', '#ffaa40', '#ffffff'], 3);
           this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
         } else {
           this.fireTimer = 0.1;
@@ -364,10 +452,27 @@ class Player {
         const target = findNearestEnemy(this.x, this.y, this.weaponRange);
         if (target) {
           fireProjectile(this, target);
-          this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
+          // Track the shot direction for the ranged weapon overlay (slight recoil)
+          this.swingTimer = 0.10;
+          this.swingAngle = Math.atan2(target.y - this.y, target.x - this.x);
+          this.fireTimer  = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
         }
       }
     }
+    // Decay weapon-overlay animation timer
+    if (this.swingTimer > 0) this.swingTimer -= dt;
+  }
+  // Returns 'melee' or 'ranged' based on currently equipped weapon, falling back to class default.
+  weaponKind() {
+    const w = this.equipped && this.equipped.weapon;
+    if (w && w.base && w.base.kind) return w.base.kind;
+    return this.class.defaultWeaponKind || 'ranged';
+  }
+  // Returns the weapon-base id the player is visually wielding (equipped > class default).
+  weaponBaseId() {
+    const w = this.equipped && this.equipped.weapon;
+    if (w && w.base && w.base.id) return w.base.id;
+    return this.class.defaultWeapon || 'sword';
   }
   takeDamage(amount) {
     if (this.iframeTimer > 0) return false;
@@ -448,6 +553,99 @@ class Player {
       ctx.fillStyle = flash ? '#ff4444' : this.class.color;
       ctx.fillRect(px - 4, py - 2, 8, 7);
     }
+    // Equipped weapon overlay — drawn over the sprite so you can SEE the gear you have on.
+    // We only render the overlay when an item is equipped in the weapon slot (the class's
+    // built-in weapon is already baked into the sprite, so we don't double-draw idly).
+    if (this.equipped && this.equipped.weapon) {
+      drawWeaponOverlay(ctx, this, px, py);
+    } else if (this.swingTimer > 0) {
+      // Show a brief weapon arc/recoil even with the default weapon so attacks feel impactful
+      drawWeaponOverlay(ctx, this, px, py);
+    }
+  }
+}
+
+// ============================================================
+// Weapon overlay drawing — draws a tiny visible representation of the player's
+// currently-held weapon (equipped > class default). For melee weapons during a
+// swing it rotates through the arc; for ranged it points at the last target
+// with a brief recoil. Drawn in canvas-pixel coords so it lines up with sprites.
+// ============================================================
+function drawWeaponOverlay(ctx, player, px, py) {
+  const baseId = player.weaponBaseId();
+  const kind   = player.weaponKind();
+  // Resting angle: forward (facing direction). swingAngle takes priority during attack.
+  const restAng = player.facing === -1 ? Math.PI : 0;
+  // Animation progress over the most recent swing window (0..1).
+  let attackT = 0;
+  const SWING_DUR = 0.18;
+  if (player.swingTimer > 0) attackT = 1 - (player.swingTimer / SWING_DUR);
+  // For melee, rotate from -55° to +55° around the attack angle as the swing plays.
+  // For ranged, mostly point at swingAngle with a brief recoil kick away from target.
+  let angle = restAng;
+  if (player.swingTimer > 0 && kind === 'melee') {
+    const half = Math.PI * 0.31;
+    angle = player.swingAngle - half + (2 * half) * attackT;
+  } else if (player.swingTimer > 0 && kind === 'ranged') {
+    // Recoil: weapon pushes back slightly during the first 30% then snaps to aim.
+    const recoil = attackT < 0.3 ? (1 - attackT / 0.3) * 0.4 : 0;
+    angle = player.swingAngle + recoil * (player.facing === -1 ? 0.4 : -0.4);
+  } else if (player.swingTimer > 0) {
+    angle = player.swingAngle;
+  }
+  // Hand position: ~5px out from center, in the angle direction
+  const HAND_OFFSET = 5;
+  const hx = px + Math.cos(angle) * HAND_OFFSET;
+  const hy = py + Math.sin(angle) * HAND_OFFSET + 1; // +1 = hand sits slightly below sprite center
+  // Pull palette + shape from base id; defaults handle unknown weapons
+  let len = 7, thick = 1, handle = '#5a3a20', blade = '#cccccc', tip = '#ffffff';
+  switch (baseId) {
+    case 'bow':    len = 8; thick = 1; handle = '#7a5a30'; blade = '#aa8855'; tip = '#ffeeaa'; break;
+    case 'sword':  len = 8; thick = 1; handle = '#5a3a20'; blade = '#cccccc'; tip = '#ffffff'; break;
+    case 'axe':    len = 6; thick = 2; handle = '#5a3a20'; blade = '#bbbbbb'; tip = '#dddddd'; break;
+    case 'dagger': len = 5; thick = 1; handle = '#3a2a18'; blade = '#dddddd'; tip = '#ffffff'; break;
+    case 'staff':  len = 9; thick = 1; handle = '#6a4a28'; blade = '#9988cc'; tip = '#dd99ff'; break;
+    case 'wand':   len = 6; thick = 1; handle = '#6a4a28'; blade = '#aaccff'; tip = '#ffffff'; break;
+    case 'mace':   len = 6; thick = 2; handle = '#5a3a20'; blade = '#999999'; tip = '#cccccc'; break;
+    case 'orb':    len = 4; thick = 2; handle = '#5a3a20'; blade = '#aa66ff'; tip = '#ffffff'; break;
+    default:       len = 6; thick = 1; handle = '#5a3a20'; blade = '#cccccc'; tip = '#ffffff'; break;
+  }
+  // Draw the weapon as a short line of pixels from hand outward
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  for (let i = 0; i < len; i++) {
+    const sx = Math.floor(hx + dx * i);
+    const sy = Math.floor(hy + dy * i);
+    // Color zones: handle (near hand) → blade (middle) → tip (far)
+    let col;
+    if (i < 2)               col = handle;
+    else if (i >= len - 1)   col = tip;
+    else                     col = blade;
+    ctx.fillStyle = col;
+    ctx.fillRect(sx, sy, thick, thick);
+  }
+  // Special touches per weapon
+  if (baseId === 'bow') {
+    // Bowstring: two side pixels perpendicular to draw direction
+    const nx = -dy, ny = dx;
+    ctx.fillStyle = '#eeeeee';
+    ctx.fillRect(Math.floor(hx + dx * 1 + nx * 2), Math.floor(hy + dy * 1 + ny * 2), 1, 1);
+    ctx.fillRect(Math.floor(hx + dx * 1 - nx * 2), Math.floor(hy + dy * 1 - ny * 2), 1, 1);
+  }
+  if (baseId === 'staff' || baseId === 'wand') {
+    // Glowing tip: extra bright pixel out beyond tip
+    const tipX = Math.floor(hx + dx * (len + 0));
+    const tipY = Math.floor(hy + dy * (len + 0));
+    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = tip;
+    ctx.fillRect(tipX - 1, tipY - 1, 3, 3);
+    ctx.globalAlpha = 1;
+  }
+  if (baseId === 'axe' || baseId === 'mace') {
+    // Bigger head at the tip
+    const tipX = Math.floor(hx + dx * (len - 1));
+    const tipY = Math.floor(hy + dy * (len - 1));
+    ctx.fillStyle = blade;
+    ctx.fillRect(tipX - 1, tipY - 1, 3, 3);
   }
 }
 
@@ -540,8 +738,8 @@ class Enemy {
           this.eliteTimers.teleport = 3 + Math.random() * 2;
           const ang = Math.random() * Math.PI * 2;
           const dist = 55 + Math.random() * 70;
-          this.x = Math.max(20, Math.min(W - 20, target.x + Math.cos(ang) * dist));
-          this.y = Math.max(20, Math.min(H - 20, target.y + Math.sin(ang) * dist));
+          this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, target.x + Math.cos(ang) * dist));
+          this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, target.y + Math.sin(ang) * dist));
           spawnBurst(this.x, this.y, ['#aa44aa', '#ff88ff', '#ffffff'], 10);
         }
       }
@@ -727,8 +925,8 @@ class BoneLord {
       this.x += (dx / d) * this.speed * mv * dt;
       this.y += (dy / d) * this.speed * mv * dt;
     }
-    this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-    this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+    this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
+    this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
     this.bobPhase += dt * 4;
     if (this.hitFlash > 0) this.hitFlash -= dt;
     this.boneThrowTimer -= dt;
@@ -800,8 +998,8 @@ class IceGiant {
       this.x += (dx / d) * this.speed * dt;
       this.y += (dy / d) * this.speed * dt;
     }
-    this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-    this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+    this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
+    this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
     this.bobPhase += dt * 3;
     if (this.hitFlash > 0) this.hitFlash -= dt;
     this.shardTimer -= dt;
@@ -873,8 +1071,8 @@ class Pyromancer {
       this.x -= (dx / d) * this.speed * 0.6 * dt;
       this.y -= (dy / d) * this.speed * 0.6 * dt;
     }
-    this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-    this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+    this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
+    this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
     this.bobPhase += dt * 6;
     if (this.hitFlash > 0) this.hitFlash -= dt;
     if (this.teleportFlash > 0) this.teleportFlash -= dt;
@@ -970,8 +1168,8 @@ class SlayerKiller {
       this.x += (dx / d) * this.speed * sm * mv * dt;
       this.y += (dy / d) * this.speed * sm * mv * dt;
     }
-    this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-    this.y = Math.max(this.r, Math.min(H - this.r, this.y));
+    this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
+    this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
     this.bobPhase += dt * 5;
     if (this.hitFlash > 0) this.hitFlash -= dt;
     this.boltTimer -= dt;
