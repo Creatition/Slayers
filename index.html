@@ -20,7 +20,9 @@
   #game {
     image-rendering: pixelated; image-rendering: crisp-edges;
     background: #14181a; border: 2px solid #444;
-    width: min(1280px, 96vw); height: min(720px, 54vw);
+    /* Bound by width AND height so the canvas never overflows the viewport / taskbar */
+    width:  min(1280px, 96vw, calc(80vh * 16 / 9));
+    height: min(720px,  54vw, 80vh);
     box-shadow: 0 0 60px rgba(122, 217, 107, 0.08);
     cursor: crosshair;
   }
@@ -38,7 +40,7 @@
   <div id="hud">
     <div><span class="label">INPUT:</span> <span id="device" class="accent">keyboard</span></div>
     <div><span class="label">MOVE:</span> <span class="value">WASD / Stick</span></div>
-    <div><span class="label">ABILITIES:</span> <span class="value">1-4 / Face Btns</span></div>
+    <div><span class="label">ABILITIES:</span> <span class="value">1-6 / Face Btns + LB/RB</span></div>
     <div><span class="label">INVENTORY:</span> <span class="value">Tab / I / Select</span></div>
     <div><span class="label">MENU CURSOR:</span> <span class="value">Stick / D-pad</span></div>
     <div><span class="label">RESTART:</span> <span class="value">R</span></div>
@@ -60,15 +62,23 @@
   // ============================================================
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  const W = canvas.width;
-  const H = canvas.height;
+  // Logical game resolution (kept at 640x360 so all draw code stays unchanged)
+  const W = 640;
+  const H = 360;
+  // Render at 2x internal resolution for crisp text — chunky pixels stay chunky
+  // because the canvas CSS-scales to the same final size, but anti-aliased
+  // text rasterizes at 2x and looks much sharper.
+  const RENDER_SCALE = 2;
+  canvas.width  = W * RENDER_SCALE;
+  canvas.height = H * RENDER_SCALE;
+  ctx.imageSmoothingEnabled = false; // re-set after width change resets state
+  ctx.scale(RENDER_SCALE, RENDER_SCALE);
   const $device = document.getElementById('device');
 
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -86,6 +96,10 @@
   let lastBossName = '';
   let goldFlashTimer = 0;
   let biomeBannerTimer = 0;
+  // Act-transition cinematic state (post-boss → next biome)
+  let actTransitionTimer = 0;        // counts down; transition advances when <= 0 or skipped
+  let actTransitionData  = null;     // { actRoman, biome, bossName, bossWave, particles: [...] }
+  const ACT_TRANSITION_DURATION = 3.0;
 
   // Shop / blacksmith state
   let shopItems = [];
@@ -121,10 +135,24 @@
   let particles = [];
   let groundEffects = []; // shockwaves, meteor warnings
   let abilityFlashes = []; // expanding cast rings
+  let meleeSwings    = []; // active melee swing arcs (visual + already-resolved damage)
   let damageNumbers = []; // floating damage text
   let bossRef = null;
   let floorDecorations = [];
   let hitPauseTimer = 0; // brief freeze-frame on crits for impact
+
+  // ============================================================
+  // BACKGROUND IMAGES — preloaded once, drawn as base layer per biome
+  // ============================================================
+  const BG_IMAGES = {};
+  (function preloadBgImages() {
+    const toLoad = { crypt: 'bg_crypt.jpg' };
+    for (const [key, file] of Object.entries(toLoad)) {
+      const img = new Image();
+      img.src = file;
+      BG_IMAGES[key] = img;
+    }
+  })();
 
   // ============================================================
   // INPUT
@@ -285,413 +313,12 @@
     ctx.fillRect(cx, cy, 1, 1);
   }
 
-  // [all constants/abilities/stat-pool/wave-config/enemy-types live in src/data.js]
-  const _ABILITIES_DEAD = {
-    multishot: {
-      id: 'multishot', name: 'Multishot', letter: 'M', classOf: 'archer',
-      desc: '3 arrows in spread (+20% dmg)',
-      cost: 25, cooldown: 1.8, color: '#ffd23f',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
-        if (!target) return false;
-        const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
-        const arrows = slot && slot.rarity && slot.rarity.id === 'orange' ? 5 : 3;
-        const halfSpread = arrows > 3 ? 0.46 : 0.35;
-        for (let i = 0; i < arrows; i++) {
-          const t = arrows === 1 ? 0 : (i / (arrows - 1)) * 2 - 1;
-          const a = baseAngle + t * halfSpread;
-          const sp = player.weaponProjSpeed;
-          let dmg = player.weaponDamage * player.dmgMult * 1.20 * rDmg;
-          const isCrit = Math.random() * 100 < player.critChance;
-          if (isCrit) { dmg *= 2; player.onCrit(); }
-          projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.15, isCrit));
-        }
-        spawnBurst(player.x, player.y, ['#ffd040', '#fff7a0', '#ffffff'], 8);
-        shake = Math.min(shake + 1.5, 5);
-        return true;
-      },
-    },
-    rainOfArrows: {
-      id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R', classOf: 'archer',
-      desc: 'AoE rain on target (3x dmg)',
-      cost: 40, cooldown: 4.0, color: '#ffaa44',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const target = findNearestEnemy(player.x, player.y, 280);
-        if (!target) return false;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const radius = isLegend ? 70 : 50;
-        const dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - target.x, dy = e.y - target.y;
-          if (dx*dx + dy*dy < radius*radius) {
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            if (isCrit) player.onCrit();
-            if (died) handleEnemyDeath(e);
-          }
-        }
-        for (let i = 0; i < 28; i++) {
-          const offX = (Math.random() - 0.5) * radius * 2;
-          const offY = (Math.random() - 0.5) * radius * 2;
-          if (offX*offX + offY*offY < radius*radius) {
-            spawnBurst(target.x + offX, target.y + offY, ['#fff7a0', '#ffd040'], 2);
-          }
-        }
-        shake = Math.min(shake + 3, 6);
-        return true;
-      },
-    },
-    piercingShot: {
-      id: 'piercingShot', name: 'Piercing Shot', letter: 'P', classOf: 'archer',
-      desc: 'Pierces all enemies (+150% dmg)',
-      cost: 30, cooldown: 2.5, color: '#5599ff',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
-        if (!target) return false;
-        const dx = target.x - player.x, dy = target.y - player.y;
-        const d = Math.hypot(dx, dy);
-        if (d < 0.01) return false;
-        const sp = player.weaponProjSpeed * 1.4;
-        let dmg = player.weaponDamage * player.dmgMult * 2.5 * rDmg;
-        const isCrit = Math.random() * 100 < player.critChance;
-        if (isCrit) { dmg *= 2; player.onCrit(); }
-        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 1.2, isCrit);
-        proj.piercing = true;
-        proj.r = 4;
-        projectiles.push(proj);
-        spawnBurst(player.x, player.y, ['#5599ff', '#aaccff'], 8);
-        return true;
-      },
-    },
-    hawkEye: {
-      id: 'hawkEye', name: 'Hawk Eye', letter: 'E', classOf: 'archer',
-      desc: '+30% crit & atk speed (5s)',
-      cost: 50, cooldown: 12.0, color: '#33cc55',
-      cast: (player, slot) => {
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        player.hawkEyeTimer = isLegend ? 8 : 5;
-        spawnBurst(player.x, player.y, ['#33cc55', '#88ff88', '#ffffff'], 12);
-        return true;
-      },
-    },
-    arrowVolley: {
-      id: 'arrowVolley', name: 'Arrow Volley', letter: 'V', classOf: 'archer',
-      desc: '8 arrows in full circle',
-      cost: 35, cooldown: 3.0, color: '#ff8000',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const arrows = isLegend ? 12 : 8;
-        for (let i = 0; i < arrows; i++) {
-          const a = (i / arrows) * Math.PI * 2;
-          const sp = player.weaponProjSpeed;
-          let dmg = player.weaponDamage * player.dmgMult * 1.0 * rDmg;
-          const isCrit = Math.random() * 100 < player.critChance;
-          if (isCrit) { dmg *= 2; player.onCrit(); }
-          projectiles.push(new Projectile(player.x, player.y, Math.cos(a) * sp, Math.sin(a) * sp, dmg, player.weaponRange / sp + 0.1, isCrit));
-        }
-        spawnBurst(player.x, player.y, ['#ff8000', '#ffaa00', '#ffd040'], 12);
-        shake = Math.min(shake + 2, 5);
-        return true;
-      },
-    },
-    fireball: {
-      id: 'fireball', name: 'Fireball', letter: 'F', classOf: 'wizard',
-      desc: 'Big projectile, explodes on impact', cost: 30, cooldown: 1.5, color: '#ff5520',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.6);
-        if (!target) return false;
-        const dx = target.x - player.x, dy = target.y - player.y;
-        const d = Math.hypot(dx, dy);
-        if (d < 0.01) return false;
-        const sp = player.weaponProjSpeed;
-        let dmg = player.weaponDamage * player.dmgMult * 1.4 * rDmg;
-        const isCrit = Math.random() * 100 < player.critChance;
-        if (isCrit) { dmg *= 2; player.onCrit(); }
-        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, d / sp + 0.15, isCrit);
-        proj.r = 5;
-        proj.theme = 'fire';
-        proj.explosive = true;
-        proj.explosionRadius = isLegend ? 60 : 40;
-        proj.explosionDamage = dmg * 0.9;
-        projectiles.push(proj);
-        spawnBurst(player.x, player.y, ['#ff5520', '#ffaa00', '#ffdd00'], 8);
-        return true;
-      },
-    },
-    frostNova: {
-      id: 'frostNova', name: 'Frost Nova', letter: 'N', classOf: 'wizard',
-      desc: 'AoE around player, slows enemies', cost: 50, cooldown: 5.0, color: '#aaccff',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const radius = 80;
-        const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
-        const slowDur = isLegend ? 4 : 2.5;
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - player.x, dy = e.y - player.y;
-          if (dx*dx + dy*dy < radius*radius) {
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            if (isCrit) player.onCrit();
-            e.slowTimer = slowDur;
-            e.slowFactor = 0.4;
-            if (died) handleEnemyDeath(e);
-          }
-        }
-        for (let i = 0; i < 36; i++) {
-          const a = (i / 36) * Math.PI * 2;
-          const r = 30 + Math.random() * radius;
-          spawnBurst(player.x + Math.cos(a) * r * 0.6, player.y + Math.sin(a) * r * 0.6, ['#aaccff', '#5599ff', '#ffffff'], 2);
-        }
-        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.5, maxLife: 0.5, color: '#aaccff', hit: new Set(), target: 'none' });
-        shake = Math.min(shake + 2, 5);
-        return true;
-      },
-    },
-    chainLightning: {
-      id: 'chainLightning', name: 'Chain Lightning', letter: 'L', classOf: 'wizard',
-      desc: 'Hits target, chains to 3 nearby', cost: 40, cooldown: 2.5, color: '#ffff80',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const maxChains = isLegend ? 5 : 3;
-        let target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.4);
-        if (!target) return false;
-        const hit = new Set();
-        let lastX = player.x, lastY = player.y;
-        let dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg;
-        for (let i = 0; i <= maxChains; i++) {
-          if (!target || hit.has(target) || !target.alive) break;
-          hit.add(target);
-          const isCrit = Math.random() * 100 < player.critChance;
-          const finalDmg = isCrit ? dmg * 2 : dmg;
-          const died = target.takeDamage(finalDmg);
-          if (isCrit) player.onCrit();
-          // Lightning visual: particles along path
-          const steps = 8;
-          for (let s = 0; s <= steps; s++) {
-            const lx = lastX + (target.x - lastX) * (s / steps) + (Math.random() - 0.5) * 6;
-            const ly = lastY + (target.y - lastY) * (s / steps) + (Math.random() - 0.5) * 6;
-            particles.push(new Particle(lx, ly, 0, 0, '#ffff80', 0.3, 2));
-          }
-          if (died) handleEnemyDeath(target);
-          lastX = target.x; lastY = target.y;
-          // Find next chain target within 90px
-          let nextBest = null, nextD = 90;
-          for (const e of enemies) {
-            if (!e.alive || hit.has(e)) continue;
-            const d = Math.hypot(e.x - lastX, e.y - lastY);
-            if (d < nextD) { nextD = d; nextBest = e; }
-          }
-          target = nextBest;
-          dmg *= 0.8;
-        }
-        spawnBurst(player.x, player.y, ['#ffff80', '#ffffff'], 6);
-        shake = Math.min(shake + 2, 5);
-        return true;
-      },
-    },
-    arcaneOrb: {
-      id: 'arcaneOrb', name: 'Arcane Orb', letter: 'O', classOf: 'wizard',
-      desc: 'Slow piercing orb, big damage', cost: 45, cooldown: 3.0, color: '#aa66ff',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const target = findNearestEnemy(player.x, player.y, player.weaponRange * 2);
-        if (!target) return false;
-        const dx = target.x - player.x, dy = target.y - player.y;
-        const d = Math.hypot(dx, dy);
-        if (d < 0.01) return false;
-        const sp = player.weaponProjSpeed * 0.5;
-        let dmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg;
-        const isCrit = Math.random() * 100 < player.critChance;
-        if (isCrit) { dmg *= 2; player.onCrit(); }
-        const proj = new Projectile(player.x, player.y, (dx/d) * sp, (dy/d) * sp, dmg, 2.5, isCrit);
-        proj.piercing = true;
-        proj.r = isLegend ? 8 : 6;
-        proj.theme = 'arcane';
-        projectiles.push(proj);
-        spawnBurst(player.x, player.y, ['#aa66ff', '#dd99ff', '#ffffff'], 10);
-        return true;
-      },
-    },
-    whirlwind: {
-      id: 'whirlwind', name: 'Whirlwind', letter: 'W', classOf: 'warrior',
-      desc: 'Spin attack, big AoE around you', cost: 30, cooldown: 2.0, color: '#ff6060',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const radius = isLegend ? 95 : 75;
-        const dmg = player.weaponDamage * player.dmgMult * 2.4 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - player.x, dy = e.y - player.y;
-          if (dx*dx + dy*dy < radius*radius) {
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            spawnBurst(e.x, e.y, ['#cc4040', '#ff6060', '#ffaa40'], 4);
-            if (isCrit) player.onCrit();
-            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
-          }
-        }
-        for (let i = 0; i < 28; i++) {
-          const a = (i / 28) * Math.PI * 2;
-          spawnBurst(player.x + Math.cos(a) * radius * 0.7, player.y + Math.sin(a) * radius * 0.7, ['#cc4040', '#ff6060'], 2);
-        }
-        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.4, maxLife: 0.4, color: '#ff6060', hit: new Set(), target: 'none' });
-        shake = Math.min(shake + 3, 6);
-        return true;
-      },
-    },
-    cleave: {
-      id: 'cleave', name: 'Cleave', letter: 'C', classOf: 'warrior',
-      desc: 'Massive forward swing (250% dmg)', cost: 25, cooldown: 2.0, color: '#ffaa40',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const cone = isLegend ? 1.6 : 1.2;
-        const range = 90;
-        const dmg = player.weaponDamage * player.dmgMult * 2.6 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
-        const faceAngle = player.facing >= 0 ? 0 : Math.PI;
-        let hitAny = false;
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - player.x, dy = e.y - player.y;
-          if (dx*dx + dy*dy > range * range) continue;
-          const ang = Math.atan2(dy, dx);
-          let diff = Math.abs(ang - faceAngle);
-          if (diff > Math.PI) diff = 2 * Math.PI - diff;
-          if (diff < cone / 2) {
-            hitAny = true;
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            spawnBurst(e.x, e.y, ['#ffaa40', '#ff6020', '#ffffff'], 6);
-            if (isCrit) player.onCrit();
-            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
-          }
-        }
-        spawnBurst(player.x + player.facing * 20, player.y, ['#ffaa40', '#ff6020', '#ffffff'], 14);
-        if (hitAny) shake = Math.min(shake + 4, 7);
-        return true;
-      },
-    },
-    warCry: {
-      id: 'warCry', name: 'War Cry', letter: 'Y', classOf: 'warrior',
-      desc: '+40% damage for 6s', cost: 50, cooldown: 14.0, color: '#cc4040',
-      cast: (player, slot) => {
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        player.warCryTimer = isLegend ? 10 : 6;
-        spawnBurst(player.x, player.y, ['#cc4040', '#ff6060', '#ffaa40', '#ffffff'], 16);
-        return true;
-      },
-    },
-    charge: {
-      id: 'charge', name: 'Charge', letter: 'H', classOf: 'warrior',
-      desc: 'Dash to enemy, damage path (200% dmg)', cost: 35, cooldown: 3.0, color: '#ffaa40',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const target = findNearestEnemy(player.x, player.y, 250);
-        if (!target) return false;
-        const startX = player.x, startY = player.y;
-        const dx = target.x - startX, dy = target.y - startY;
-        const d = Math.hypot(dx, dy);
-        if (d < 1) return false;
-        const stepX = dx / d, stepY = dy / d;
-        const pathW = 30;
-        const dmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const ex = e.x - startX, ey = e.y - startY;
-          const proj = ex * stepX + ey * stepY;
-          if (proj < 0 || proj > d) continue;
-          const perpX = ex - proj * stepX, perpY = ey - proj * stepY;
-          if (Math.hypot(perpX, perpY) < pathW) {
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            spawnBurst(e.x, e.y, ['#ff6020', '#ffaa40'], 5);
-            if (isCrit) player.onCrit();
-            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
-          }
-        }
-        player.x = Math.max(player.r, Math.min(W - player.r, target.x - stepX * 15));
-        player.y = Math.max(player.r, Math.min(H - player.r, target.y - stepY * 15));
-        for (let i = 0; i < 18; i++) {
-          const t = i / 18;
-          spawnBurst(startX + dx * t, startY + dy * t, ['#cc4040', '#ff6060'], 2);
-        }
-        shake = Math.min(shake + 3, 6);
-        player.iframeTimer = Math.max(player.iframeTimer, 0.35);
-        return true;
-      },
-    },
-    groundSlam: {
-      id: 'groundSlam', name: 'Ground Slam', letter: 'S', classOf: 'warrior',
-      desc: 'AoE slam, slows enemies', cost: 45, cooldown: 4.5, color: '#cc6020',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const radius = isLegend ? 115 : 90;
-        const dmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * (player.warCryTimer > 0 ? 1.4 : 1);
-        const slowDur = isLegend ? 3.5 : 2.5;
-        for (const e of enemies) {
-          if (!e.alive) continue;
-          const dx = e.x - player.x, dy = e.y - player.y;
-          if (dx*dx + dy*dy < radius*radius) {
-            const isCrit = Math.random() * 100 < player.critChance;
-            const finalDmg = isCrit ? dmg * 2 : dmg;
-            const died = e.takeDamage(finalDmg);
-            e.slowTimer = slowDur;
-            e.slowFactor = 0.45;
-            if (isCrit) player.onCrit();
-            if (died) { if (e.isBoss) handleBossDeath(e); else handleEnemyDeath(e); }
-          }
-        }
-        groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.55, maxLife: 0.55, color: '#cc6020', hit: new Set(), target: 'none' });
-        spawnBurst(player.x, player.y, ['#cc6020', '#ffaa40', '#ffffff'], 20);
-        shake = Math.min(shake + 5, 9);
-        return true;
-      },
-    },
-    meteor: {
-      id: 'meteor', name: 'Meteor', letter: 'T', classOf: 'wizard',
-      desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
-      cast: (player, slot) => {
-        const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
-        const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
-        const target = findNearestEnemy(player.x, player.y, 280);
-        if (!target) return false;
-        const meteors = isLegend ? 2 : 1;
-        const dmg = player.weaponDamage * player.dmgMult * 4.0 * rDmg;
-        for (let i = 0; i < meteors; i++) {
-          const offX = i === 0 ? 0 : (Math.random() - 0.5) * 60;
-          const offY = i === 0 ? 0 : (Math.random() - 0.5) * 60;
-          groundEffects.push({ type: 'meteor', x: target.x + offX, y: target.y + offY, r: 0, maxR: 55, damage: dmg, life: 1.0, maxLife: 1.0, color: '#ff4400', hit: new Set(), exploded: false, target: 'enemy' });
-        }
-        spawnBurst(player.x, player.y, ['#ff4400', '#ff8800', '#ffdd00'], 8);
-        return true;
-      },
-    },
-  };
-  const _ABILITY_LIST_DEAD = Object.values(_ABILITIES_DEAD);
   function classAbilities(classId) {
     return ABILITY_LIST.filter(a => !a.classOf || a.classOf === classId);
   }
 
   function castAbility(slotIdx) {
-    if (slotIdx < 0 || slotIdx > 3) return;
+    if (slotIdx < 0 || slotIdx > 5) return;
     const slot = player.abilities[slotIdx];
     if (!slot) return;
     if (player.abilityCooldowns[slotIdx] > 0) return;
@@ -709,16 +336,6 @@
   // ============================================================
   // LEVEL-UP STAT POOL
   // ============================================================
-  const _STAT_POOL_DEAD = [
-    { id: 'maxhp',       name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
-    { id: 'damage',      name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
-    { id: 'firerate',    name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
-    { id: 'pickup',      name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10; p.recomputeStats(); } },
-    { id: 'speed',       name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15; p.recomputeStats(); } },
-    { id: 'regen',       name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1; p.recomputeStats(); } },
-    { id: 'focus_regen', name: '+3 Focus/sec',       desc: 'Regen abilities faster',color: '#ffd23f', apply: (p) => { p.baseResourceRegen += 3; p.recomputeStats(); } },
-    { id: 'crit',        name: '+5% Crit Chance',    desc: 'More crits',            color: '#ff8800', apply: (p) => { p.baseCritChance += 5; p.recomputeStats(); } },
-  ];
   function rollLevelUpChoices() { return [...STAT_POOL].sort(() => Math.random() - 0.5).slice(0, 3); }
 
   // ============================================================
@@ -745,17 +362,6 @@
   // ============================================================
   // ENEMY TYPES
   // ============================================================
-  const _ENEMY_TYPES_DEAD = {
-    skeleton:   { hp: 8,  speedRange: [38, 56],  dmg: 5,  r: 4, name: 'Skeleton' },
-    zombie:     { hp: 18, speedRange: [22, 32],  dmg: 8,  r: 5, name: 'Zombie' },
-    rat:        { hp: 3,  speedRange: [78, 100], dmg: 3,  r: 3, name: 'Crypt Rat' },
-    yeti:       { hp: 28, speedRange: [28, 38],  dmg: 11, r: 6, name: 'Yeti' },
-    frostWolf:  { hp: 7,  speedRange: [85, 110], dmg: 6,  r: 4, name: 'Frost Wolf' },
-    imp:        { hp: 5,  speedRange: [60, 80],  dmg: 5,  r: 3, name: 'Imp', ranged: true },
-    hellhound:  { hp: 16, speedRange: [55, 75],  dmg: 10, r: 4, name: 'Hellhound' },
-    shadow:     { hp: 22, speedRange: [40, 55],  dmg: 12, r: 5, name: 'Shadow' },
-    voidCaster: { hp: 12, speedRange: [25, 35],  dmg: 8,  r: 4, name: 'Void Caster', ranged: true },
-  };
   function pickEnemyType(w) {
     const biome = biomeFor(w);
     if (biome === BIOME.CRYPT) {
@@ -783,721 +389,6 @@
     return 'zombie';
   }
 
-  // ============================================================
-  // ENTITY: Player
-  // ============================================================
-  const _Player_Dead = class {
-    constructor(x, y, classId) {
-      this.x = x; this.y = y;
-      this.r = 5; this.facing = 1;
-      this.class = getClassById(classId || 'archer');
-      this.baseMaxHp = this.class.baseMaxHp;
-      this.baseDmgMult = 1.0;
-      this.baseFireRateMult = 1.0;
-      this.basePickupRange = 30;
-      this.baseSpeed = this.class.baseSpeed;
-      this.baseRegen = 0;
-      this.baseArmor = 0;
-      this.baseCritChance = this.class.baseCritChance;
-      this.baseMaxResource = this.class.baseMaxResource;
-      this.baseResourceRegen = this.class.baseResourceRegen;
-      this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
-      this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
-      this.bonusArmor = 0; this.bonusCritChance = 0;
-      this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
-      this.maxHp = this.baseMaxHp; this.hp = this.maxHp;
-      this.dmgMult = 1.0; this.fireRateMult = 1.0;
-      this.pickupRange = this.basePickupRange; this.speed = this.baseSpeed;
-      this.regen = 0; this.armor = 0; this.critChance = this.baseCritChance;
-      this.maxResource = this.baseMaxResource; this.resourceRegen = this.baseResourceRegen;
-      this.resource = this.maxResource;
-      this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
-      this.hawkEyeTimer = 0;
-      this.warCryTimer = 0;
-      this.level = 1; this.xp = 0; this.xpToNext = 5;
-      this.pendingLevelUps = 0; this.kills = 0;
-      this.weaponDamage = this.class.weaponDamage;
-      this.weaponFireRate = this.class.weaponFireRate;
-      this.weaponRange = this.class.weaponRange;
-      this.weaponProjSpeed = this.class.weaponProjSpeed;
-      this.fireTimer = 0;
-      this.abilities = [null, null, null, null];
-      this.abilityCooldowns = [0, 0, 0, 0];
-      if (this.class.signature && ABILITIES[this.class.signature]) {
-        this.abilities[0] = { id: this.class.signature, def: ABILITIES[this.class.signature], rarity: RARITY.WHITE };
-      }
-      this.equipped = {
-        helm: null, chest: null, gloves: null, boots: null, belt: null,
-        amulet: null, ring1: null, ring2: null, weapon: null, offhand: null,
-      };
-      this.inventory = []; this.INVENTORY_CAP = 24;
-      this.gold = 0;
-      this.mats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
-    }
-    onCrit() {
-      if (this.class.critResourceGain) {
-        this.resource = Math.min(this.maxResource, this.resource + this.class.critResourceGain);
-      }
-    }
-    effectiveCritChance() { return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0); }
-    effectiveFireRateMult() { return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0); }
-    recomputeStats() {
-      this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
-      this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
-      this.bonusArmor = 0; this.bonusCritChance = 0;
-      this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
-      for (const k in this.equipped) {
-        const it = this.equipped[k];
-        if (!it) continue;
-        for (const aff of it.affixes) aff.def.apply(this, aff.value);
-      }
-      const oldMax = this.maxHp;
-      const ratio = oldMax > 0 ? this.hp / oldMax : 1;
-      const oldMaxR = this.maxResource;
-      const ratioR = oldMaxR > 0 ? this.resource / oldMaxR : 1;
-      this.maxHp = this.baseMaxHp + this.bonusMaxHp;
-      this.dmgMult = this.baseDmgMult * (1 + this.bonusDmgPct / 100);
-      this.fireRateMult = this.baseFireRateMult * (1 + this.bonusFireRatePct / 100);
-      this.pickupRange = this.basePickupRange + this.bonusPickupRange;
-      this.speed = this.baseSpeed + this.bonusMoveSpeed;
-      this.regen = this.baseRegen + this.bonusRegen;
-      this.armor = this.baseArmor + this.bonusArmor;
-      this.critChance = this.baseCritChance + this.bonusCritChance;
-      this.maxResource = this.baseMaxResource + this.bonusMaxResource;
-      this.resourceRegen = this.baseResourceRegen + this.bonusResourceRegen;
-      if (this.maxHp !== oldMax) this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
-      else this.hp = Math.min(this.hp, this.maxHp);
-      if (this.maxResource !== oldMaxR) this.resource = Math.min(this.maxResource, ratioR * this.maxResource);
-      else this.resource = Math.min(this.resource, this.maxResource);
-    }
-    update(dt) {
-      this.x += Actions.moveX * this.speed * dt;
-      this.y += Actions.moveY * this.speed * dt;
-      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      if (Actions.moveX >  0.1) this.facing =  1;
-      else if (Actions.moveX < -0.1) this.facing = -1;
-      if (this.iframeTimer > 0) this.iframeTimer -= dt;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      if (this.hawkEyeTimer > 0) this.hawkEyeTimer -= dt;
-      if (this.warCryTimer > 0) this.warCryTimer -= dt;
-      if (this.regen > 0 && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.regen * dt);
-      if (this.resource < this.maxResource) this.resource = Math.min(this.maxResource, this.resource + this.resourceRegen * dt);
-      for (let i = 0; i < this.abilityCooldowns.length; i++) {
-        if (this.abilityCooldowns[i] > 0) this.abilityCooldowns[i] -= dt;
-      }
-      if (this.fireTimer > 0) this.fireTimer -= dt;
-      if (this.fireTimer <= 0) {
-        if (this.class.meleeRange) {
-          // Melee auto-attack — AoE around player
-          const range = this.class.meleeRange;
-          const buff = this.warCryTimer > 0 ? 1.4 : 1;
-          const dmg = this.weaponDamage * this.dmgMult * buff;
-          let hitAny = false;
-          for (const e of enemies) {
-            if (!e.alive) continue;
-            const dx = e.x - this.x, dy = e.y - this.y;
-            if (dx*dx + dy*dy < range*range) {
-              hitAny = true;
-              const isCrit = Math.random() * 100 < this.effectiveCritChance();
-              const finalDmg = isCrit ? dmg * 2 : dmg;
-              const died = e.takeDamage(finalDmg);
-              spawnBurst(e.x, e.y, isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#ff6020', '#ffaa40'], isCrit ? 5 : 2);
-              if (isCrit) this.onCrit();
-              if (this.class.rageOnHit) {
-                this.resource = Math.min(this.maxResource, this.resource + this.class.rageOnHit);
-              }
-              if (died) {
-                if (e.isBoss) handleBossDeath(e);
-                else handleEnemyDeath(e);
-              }
-            }
-          }
-          if (hitAny) {
-            spawnBurst(this.x + this.facing * 12, this.y, ['#ff6020', '#ffaa40', '#ffffff'], 4);
-            this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
-          } else {
-            this.fireTimer = 0.1;
-          }
-        } else {
-          const target = findNearestEnemy(this.x, this.y, this.weaponRange);
-          if (target) {
-            fireProjectile(this, target);
-            this.fireTimer = 1 / (this.weaponFireRate * this.effectiveFireRateMult());
-          }
-        }
-      }
-    }
-    takeDamage(amount) {
-      if (this.iframeTimer > 0) return false;
-      const actual = Math.max(1, amount - this.armor);
-      this.hp -= actual;
-      this.iframeTimer = this.IFRAME; this.hitFlash = 0.25;
-      shake = Math.min(shake + 3, 6);
-      if (this.class.rageOnTake) {
-        this.resource = Math.min(this.maxResource, this.resource + this.class.rageOnTake);
-      }
-      if (this.hp <= 0) { this.hp = 0; return true; }
-      return false;
-    }
-    addXp(amount) {
-      this.xp += amount;
-      while (this.xp >= this.xpToNext) {
-        this.xp -= this.xpToNext; this.level += 1; this.pendingLevelUps += 1;
-        this.xpToNext = 5 + (this.level - 1) * 3;
-        levelUpFlashTimer = 1.5;
-      }
-    }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y);
-      const flash = this.hitFlash > 0 && Math.floor(this.hitFlash * 24) % 2 === 0;
-      if (this.hawkEyeTimer > 0) {
-        const pulse = 0.4 + 0.3 * Math.sin(performance.now() * 0.012);
-        ctx.globalAlpha = pulse * 0.5;
-        ctx.fillStyle = '#33cc55';
-        ctx.fillRect(px - 8, py - 9, 16, 17);
-        ctx.globalAlpha = 1;
-      }
-      if (this.warCryTimer > 0) {
-        const pulse = 0.5 + 0.4 * Math.sin(performance.now() * 0.018);
-        ctx.globalAlpha = pulse * 0.55;
-        ctx.fillStyle = '#ff4040';
-        ctx.fillRect(px - 8, py - 10, 16, 18);
-        ctx.globalAlpha = 1;
-      }
-      ctx.fillStyle = flash ? '#ff4444' : this.class.color;
-      ctx.fillRect(px - 4, py - 2, 8, 7);
-      ctx.fillStyle = '#3a3a2a'; ctx.fillRect(px - 4, py + 2, 8, 1);
-      ctx.fillStyle = '#4a3a2a';
-      ctx.fillRect(px - 3, py + 5, 2, 2); ctx.fillRect(px + 1, py + 5, 2, 2);
-      ctx.fillStyle = flash ? '#ff8888' : '#ffd5a0'; ctx.fillRect(px - 3, py - 7, 6, 5);
-      if (this.class.id === 'wizard') {
-        ctx.fillStyle = '#3366aa';
-        ctx.fillRect(px - 3, py - 8, 6, 2);
-        ctx.fillRect(px - 2, py - 10, 4, 2);
-        ctx.fillRect(px - 1, py - 11, 2, 1);
-      } else if (this.class.id === 'warrior') {
-        ctx.fillStyle = '#888888'; ctx.fillRect(px - 3, py - 8, 6, 1);
-        ctx.fillStyle = '#cccccc';
-        ctx.fillRect(px - 4, py - 9, 1, 2); ctx.fillRect(px + 3, py - 9, 1, 2);
-      } else {
-        ctx.fillStyle = '#5a3a2a'; ctx.fillRect(px - 3, py - 8, 6, 2);
-      }
-      ctx.fillStyle = '#000';
-      const eo = this.facing === 1 ? 0 : -1;
-      ctx.fillRect(px - 2 + eo, py - 5, 1, 1);
-      ctx.fillRect(px + 1 + eo, py - 5, 1, 1);
-    }
-  }
-
-  // ============================================================
-  // ENTITY: Enemy
-  // ============================================================
-  const _Enemy_Dead = class {
-    constructor(x, y, type, hpMult, speedMult, dmgMult) {
-      const t = ENEMY_TYPES[type];
-      this.type = type;
-      this.x = x; this.y = y; this.r = t.r;
-      this.maxHp = Math.round(t.hp * hpMult); this.hp = this.maxHp;
-      this.contactDmg = Math.round(t.dmg * dmgMult);
-      this.speed = (t.speedRange[0] + Math.random() * (t.speedRange[1] - t.speedRange[0])) * speedMult;
-      this.alive = true;
-      this.bobPhase = Math.random() * Math.PI * 2;
-      this.hitFlash = 0; this.isBoss = false;
-      this.fireTimer = 1 + Math.random() * 2;
-      this.slowTimer = 0;
-      this.slowFactor = 1.0;
-    }
-    update(dt, target) {
-      const dx = target.x - this.x, dy = target.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (this.slowTimer > 0) this.slowTimer -= dt;
-      const effSpeed = this.slowTimer > 0 ? this.speed * this.slowFactor : this.speed;
-      if (d > 0.01) { this.x += (dx / d) * effSpeed * dt; this.y += (dy / d) * effSpeed * dt; }
-      const bobSpeed = (this.type === 'rat' || this.type === 'frostWolf') ? 14
-                     : (this.type === 'zombie' || this.type === 'yeti') ? 5
-                     : 8;
-      this.bobPhase += dt * bobSpeed;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      // Ranged enemies fire occasionally
-      const t = ENEMY_TYPES[this.type];
-      if (t.ranged) {
-        this.fireTimer -= dt;
-        if (this.fireTimer <= 0 && d < 200 && d > 0.01) {
-          this.fireTimer = 2.5 + Math.random() * 1.5;
-          const sp = this.type === 'imp' ? 110 : 90;
-          const theme = this.type === 'imp' ? 'fire' : 'void';
-          enemyProjectiles.push(new BoneProjectile(this.x, this.y, (dx/d)*sp, (dy/d)*sp, this.contactDmg, theme));
-        }
-      }
-    }
-    takeDamage(amount) {
-      this.hp -= amount; this.hitFlash = 0.1;
-      if (this.hp <= 0) { this.alive = false; return true; }
-      return false;
-    }
-    draw(ctx) {
-      const t = ENEMY_TYPES[this.type];
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
-      const f = this.hitFlash > 0;
-      if (this.type === 'skeleton') {
-        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 3, py - 1, 6, 4);
-        ctx.fillStyle = f ? '#dddddd' : '#b0b0a0'; ctx.fillRect(px - 2, py + 1, 4, 1);
-        ctx.fillStyle = f ? '#eeeeee' : '#d0d0c0';
-        ctx.fillRect(px - 2, py + 3, 1, 2); ctx.fillRect(px + 1, py + 3, 1, 2);
-        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 2, py - 5, 4, 4);
-        ctx.fillStyle = '#1a0a0a';
-        ctx.fillRect(px - 1, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
-      } else if (this.type === 'zombie') {
-        ctx.fillStyle = f ? '#ffffff' : t.body; ctx.fillRect(px - 4, py - 2, 8, 6);
-        ctx.fillStyle = f ? '#dddddd' : '#4a6535'; ctx.fillRect(px - 4, py + 2, 8, 1);
-        ctx.fillStyle = f ? '#dddddd' : '#3a4a25';
-        ctx.fillRect(px - 3, py + 4, 2, 2); ctx.fillRect(px + 1, py + 4, 2, 2);
-        ctx.fillStyle = f ? '#ffffff' : t.head; ctx.fillRect(px - 3, py - 7, 6, 5);
-        ctx.fillStyle = '#1a0a0a';
-        ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-        ctx.fillStyle = '#aabb55'; ctx.fillRect(px, py - 3, 1, 1);
-      } else if (this.type === 'rat') {
-        ctx.fillStyle = f ? '#ffffff' : '#6b5034'; ctx.fillRect(px - 3, py - 1, 5, 3);
-        ctx.fillStyle = '#4a3a25'; ctx.fillRect(px + 2, py, 2, 1);
-        ctx.fillStyle = f ? '#ffffff' : '#7a5d3a'; ctx.fillRect(px - 4, py - 3, 3, 3);
-        ctx.fillStyle = '#ff3030'; ctx.fillRect(px - 3, py - 2, 1, 1);
-        ctx.fillStyle = '#4a3a25';
-        ctx.fillRect(px - 4, py - 4, 1, 1); ctx.fillRect(px - 2, py - 4, 1, 1);
-      } else if (this.type === 'yeti') {
-        ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 5, py - 2, 10, 8);
-        ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
-        ctx.fillRect(px - 5, py + 3, 10, 1); ctx.fillRect(px - 5, py + 5, 10, 1);
-        ctx.fillStyle = f ? '#dddddd' : '#88aac0';
-        ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
-        ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 4, py - 8, 8, 6);
-        ctx.fillStyle = '#5599ff';
-        ctx.fillRect(px - 2, py - 6, 2, 2); ctx.fillRect(px, py - 6, 2, 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(px - 3, py - 2, 1, 2); ctx.fillRect(px + 2, py - 2, 1, 2);
-      } else if (this.type === 'frostWolf') {
-        ctx.fillStyle = f ? '#ffffff' : '#88aac0'; ctx.fillRect(px - 4, py - 1, 7, 4);
-        ctx.fillStyle = '#5588a0'; ctx.fillRect(px + 3, py, 3, 1);
-        ctx.fillStyle = f ? '#ffffff' : '#aaccd8'; ctx.fillRect(px - 5, py - 4, 4, 4);
-        ctx.fillStyle = '#3366aa'; ctx.fillRect(px - 4, py - 3, 1, 1);
-        ctx.fillStyle = '#5588a0';
-        ctx.fillRect(px - 5, py - 5, 1, 1); ctx.fillRect(px - 3, py - 5, 1, 1);
-        ctx.fillStyle = '#88ccdd';
-        ctx.fillRect(px - 4, py + 3, 1, 2); ctx.fillRect(px + 2, py + 3, 1, 2);
-      } else if (this.type === 'imp') {
-        ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 3, py - 1, 5, 4);
-        ctx.fillStyle = '#882010'; ctx.fillRect(px - 3, py + 3, 5, 1);
-        ctx.fillStyle = f ? '#ffffff' : '#dd3030'; ctx.fillRect(px - 3, py - 5, 5, 4);
-        ctx.fillStyle = '#ffff00';
-        ctx.fillRect(px - 2, py - 4, 1, 1); ctx.fillRect(px + 1, py - 4, 1, 1);
-        ctx.fillStyle = '#882010';
-        ctx.fillRect(px - 3, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
-        ctx.fillStyle = '#aa3030';
-        ctx.fillRect(px - 5, py - 1, 2, 2); ctx.fillRect(px + 3, py - 1, 2, 2);
-      } else if (this.type === 'hellhound') {
-        ctx.fillStyle = f ? '#ffffff' : '#3a1010'; ctx.fillRect(px - 4, py - 2, 8, 5);
-        ctx.fillStyle = '#5a2020'; ctx.fillRect(px - 4, py + 3, 8, 1);
-        ctx.fillStyle = '#ff5520';
-        ctx.fillRect(px - 3, py, 2, 1); ctx.fillRect(px + 1, py, 2, 1);
-        ctx.fillStyle = f ? '#ffffff' : '#5a2020'; ctx.fillRect(px - 5, py - 5, 4, 4);
-        ctx.fillStyle = '#ff2020'; ctx.fillRect(px - 4, py - 4, 2, 2);
-        ctx.fillStyle = '#3a1010';
-        ctx.fillRect(px - 4, py + 4, 1, 2); ctx.fillRect(px + 3, py + 4, 1, 2);
-      } else if (this.type === 'shadow') {
-        const shimmer = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
-        ctx.globalAlpha = shimmer;
-        ctx.fillStyle = f ? '#ffffff' : '#2a1a4a'; ctx.fillRect(px - 4, py - 4, 8, 9);
-        ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 3, py - 7, 6, 5);
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = '#aa66ff';
-        ctx.fillRect(px - 2, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-        ctx.fillStyle = '#ddaaff'; ctx.fillRect(px - 2, py - 5, 1, 1);
-      } else if (this.type === 'voidCaster') {
-        ctx.fillStyle = f ? '#ffffff' : '#3a1a5a'; ctx.fillRect(px - 4, py - 2, 8, 7);
-        ctx.fillStyle = '#5a2a7a'; ctx.fillRect(px - 4, py + 4, 8, 1);
-        ctx.fillStyle = f ? '#ffffff' : '#aa66ff'; ctx.fillRect(px - 2, py - 7, 4, 5);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(px - 1, py - 5, 1, 1); ctx.fillRect(px + 1, py - 5, 1, 1);
-        const orbY = py + Math.sin(performance.now() * 0.005) * 1;
-        ctx.fillStyle = '#aa66ff'; ctx.fillRect(px + 4, Math.floor(orbY), 2, 2);
-      }
-    }
-  }
-
-  // ============================================================
-  // ENTITY: BoneLord (Act I boss)
-  // ============================================================
-  const _BoneLord_Dead = class {
-    constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x; this.y = y; this.r = 10;
-      this.maxHp = Math.round(280 * hpMult); this.hp = this.maxHp;
-      this.contactDmg = Math.round(12 * dmgMult);
-      this.speed = 32 * speedMult;
-      this.alive = true; this.isBoss = true;
-      this.bobPhase = 0; this.hitFlash = 0;
-      this.boneThrowTimer = 3.0; this.summonTimer = 8.0;
-      this.preferredDistance = 80;
-      this.name = 'Bone Lord';
-    }
-    update(dt, target) {
-      const dx = target.x - this.x, dy = target.y - this.y;
-      const d = Math.hypot(dx, dy);
-      let mv = 0;
-      if (d > this.preferredDistance + 20) mv = 1;
-      else if (d < this.preferredDistance - 20) mv = -0.5;
-      if (d > 0.01 && mv !== 0) {
-        this.x += (dx / d) * this.speed * mv * dt;
-        this.y += (dy / d) * this.speed * mv * dt;
-      }
-      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      this.bobPhase += dt * 4;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      this.boneThrowTimer -= dt;
-      if (this.boneThrowTimer <= 0) {
-        this.boneThrowTimer = 3.0;
-        const a0 = Math.atan2(dy, dx);
-        for (const off of [-0.25, 0, 0.25]) {
-          const a = a0 + off;
-          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 130, Math.sin(a) * 130, this.contactDmg));
-        }
-        spawnBurst(this.x, this.y, ['#e8e8d0', '#a0a090'], 6);
-      }
-      this.summonTimer -= dt;
-      if (this.summonTimer <= 0) {
-        this.summonTimer = 9.0;
-        for (let i = 0; i < 3; i++) {
-          const ang = (Math.PI * 2) * (i / 3) + Math.random() * 0.5;
-          const sx = this.x + Math.cos(ang) * 26;
-          const sy = this.y + Math.sin(ang) * 26;
-          enemies.push(new Enemy(sx, sy, 'skeleton', 0.8, 1.0, 0.8));
-        }
-        spawnBurst(this.x, this.y, ['#7755aa', '#aa88cc', '#ddccff'], 16);
-      }
-    }
-    takeDamage(amount) {
-      this.hp -= amount; this.hitFlash = 0.12;
-      if (this.hp <= 0) { this.alive = false; return true; }
-      return false;
-    }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
-      const f = this.hitFlash > 0;
-      ctx.fillStyle = f ? '#ffffff' : '#d8d8c0'; ctx.fillRect(px - 6, py - 2, 12, 8);
-      ctx.fillStyle = f ? '#dddddd' : '#a0a090';
-      ctx.fillRect(px - 4, py + 1, 8, 1); ctx.fillRect(px - 4, py + 3, 8, 1);
-      ctx.fillStyle = f ? '#dddddd' : '#bcbca0';
-      ctx.fillRect(px - 4, py + 6, 2, 4); ctx.fillRect(px + 2, py + 6, 2, 4);
-      ctx.fillStyle = f ? '#ffffff' : '#e8e8d0'; ctx.fillRect(px - 4, py - 10, 8, 8);
-      ctx.fillStyle = '#ff2020';
-      ctx.fillRect(px - 2, py - 8, 2, 2); ctx.fillRect(px + 0, py - 8, 2, 2);
-      ctx.fillStyle = '#3a3a30'; ctx.fillRect(px - 3, py - 4, 6, 1);
-      ctx.fillStyle = '#ffd040'; ctx.fillRect(px - 5, py - 12, 10, 2);
-      ctx.fillStyle = '#fff080';
-      ctx.fillRect(px - 4, py - 14, 2, 2); ctx.fillRect(px - 1, py - 14, 2, 2); ctx.fillRect(px + 2, py - 14, 2, 2);
-    }
-  }
-
-  // ============================================================
-  // BOSS: IceGiant (Wave 10)
-  // ============================================================
-  const _IceGiant_Dead = class {
-    constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x; this.y = y; this.r = 14;
-      this.maxHp = Math.round(500 * hpMult); this.hp = this.maxHp;
-      this.contactDmg = Math.round(14 * dmgMult);
-      this.speed = 22 * speedMult;
-      this.alive = true; this.isBoss = true;
-      this.bobPhase = 0; this.hitFlash = 0;
-      this.shardTimer = 4.0; this.slamTimer = 6.0; this.summonTimer = 12.0;
-      this.name = 'Ice Giant';
-    }
-    update(dt, target) {
-      const dx = target.x - this.x, dy = target.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 60 && d > 0.01) {
-        this.x += (dx / d) * this.speed * dt;
-        this.y += (dy / d) * this.speed * dt;
-      }
-      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      this.bobPhase += dt * 3;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      this.shardTimer -= dt;
-      if (this.shardTimer <= 0) {
-        this.shardTimer = 4.0;
-        const a0 = Math.atan2(dy, dx);
-        for (const off of [-0.35, -0.18, 0, 0.18, 0.35]) {
-          const a = a0 + off;
-          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 120, Math.sin(a) * 120, this.contactDmg, 'ice'));
-        }
-        spawnBurst(this.x, this.y, ['#aaccff', '#5599ff'], 8);
-      }
-      this.slamTimer -= dt;
-      if (this.slamTimer <= 0) {
-        this.slamTimer = 6.5;
-        groundEffects.push({ type: 'shockwave', x: this.x, y: this.y, r: 0, maxR: 100, damage: this.contactDmg * 1.5, life: 0.6, maxLife: 0.6, color: '#aaccff', hit: new Set() });
-        shake = Math.min(shake + 5, 10);
-      }
-      if (this.hp < this.maxHp * 0.5) {
-        this.summonTimer -= dt;
-        if (this.summonTimer <= 0) {
-          this.summonTimer = 10.0;
-          for (let i = 0; i < 2; i++) {
-            const ang = Math.random() * Math.PI * 2;
-            const sx = this.x + Math.cos(ang) * 32;
-            const sy = this.y + Math.sin(ang) * 32;
-            enemies.push(new Enemy(sx, sy, 'frostWolf', 0.9, 1.0, 0.9));
-          }
-          spawnBurst(this.x, this.y, ['#aaccff', '#5599ff', '#ffffff'], 14);
-        }
-      }
-    }
-    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.5);
-      const f = this.hitFlash > 0;
-      ctx.fillStyle = f ? '#ffffff' : '#d8e8f5'; ctx.fillRect(px - 9, py - 2, 18, 12);
-      ctx.fillStyle = f ? '#dddddd' : '#aaccd8';
-      ctx.fillRect(px - 9, py + 4, 18, 1); ctx.fillRect(px - 9, py + 7, 18, 1);
-      ctx.fillStyle = f ? '#dddddd' : '#88aac0';
-      ctx.fillRect(px - 7, py + 11, 4, 4); ctx.fillRect(px + 3, py + 11, 4, 4);
-      ctx.fillStyle = f ? '#ffffff' : '#e8f0ff'; ctx.fillRect(px - 6, py - 10, 12, 8);
-      ctx.fillStyle = '#5599ff';
-      ctx.fillRect(px - 4, py - 8, 3, 2); ctx.fillRect(px + 1, py - 8, 3, 2);
-      ctx.fillStyle = '#aaccff';
-      ctx.fillRect(px - 3, py - 7, 1, 1); ctx.fillRect(px + 2, py - 7, 1, 1);
-      ctx.fillStyle = '#bbddee';
-      ctx.fillRect(px - 6, py - 13, 2, 3); ctx.fillRect(px + 4, py - 13, 2, 3);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(px - 6, py - 14, 2, 1); ctx.fillRect(px + 4, py - 14, 2, 1);
-      ctx.fillStyle = '#aaccff';
-      ctx.fillRect(px - 10, py, 1, 4); ctx.fillRect(px + 9, py, 1, 4);
-    }
-  }
-
-  // ============================================================
-  // BOSS: Pyromancer (Wave 15)
-  // ============================================================
-  const _Pyromancer_Dead = class {
-    constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x; this.y = y; this.r = 8;
-      this.maxHp = Math.round(420 * hpMult); this.hp = this.maxHp;
-      this.contactDmg = Math.round(13 * dmgMult);
-      this.speed = 55 * speedMult;
-      this.alive = true; this.isBoss = true;
-      this.bobPhase = 0; this.hitFlash = 0;
-      this.teleportTimer = 5.0; this.meteorTimer = 2.5; this.summonTimer = 10.0;
-      this.name = 'Pyromancer';
-      this.teleportFlash = 0;
-    }
-    update(dt, target) {
-      const dx = target.x - this.x, dy = target.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (d > 100 && d > 0.01) {
-        this.x += (dx / d) * this.speed * dt;
-        this.y += (dy / d) * this.speed * dt;
-      } else if (d < 60 && d > 0.01) {
-        this.x -= (dx / d) * this.speed * 0.6 * dt;
-        this.y -= (dy / d) * this.speed * 0.6 * dt;
-      }
-      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      this.bobPhase += dt * 6;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      if (this.teleportFlash > 0) this.teleportFlash -= dt;
-      this.teleportTimer -= dt;
-      if (this.teleportTimer <= 0) {
-        this.teleportTimer = 5.0;
-        spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
-        this.x = 80 + Math.random() * (W - 160);
-        this.y = 80 + Math.random() * (H - 160);
-        this.teleportFlash = 0.5;
-        spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
-      }
-      this.meteorTimer -= dt;
-      if (this.meteorTimer <= 0) {
-        this.meteorTimer = 2.5;
-        const mx = target.x + (Math.random() - 0.5) * 20;
-        const my = target.y + (Math.random() - 0.5) * 20;
-        groundEffects.push({ type: 'meteor', x: mx, y: my, r: 0, maxR: 35, damage: this.contactDmg * 1.6, life: 1.2, maxLife: 1.2, color: '#ff4400', hit: new Set(), exploded: false });
-      }
-      if (this.hp < this.maxHp * 0.5) {
-        this.summonTimer -= dt;
-        if (this.summonTimer <= 0) {
-          this.summonTimer = 9.0;
-          for (let i = 0; i < 3; i++) {
-            const ang = Math.random() * Math.PI * 2;
-            const sx = this.x + Math.cos(ang) * 24;
-            const sy = this.y + Math.sin(ang) * 24;
-            enemies.push(new Enemy(sx, sy, 'imp', 0.9, 1.0, 0.9));
-          }
-          spawnBurst(this.x, this.y, ['#ff4400', '#ff8800', '#ffdd00'], 16);
-        }
-      }
-    }
-    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
-      const f = this.hitFlash > 0;
-      if (this.teleportFlash > 0) {
-        ctx.globalAlpha = this.teleportFlash * 1.5;
-        ctx.fillStyle = '#ff8800';
-        ctx.fillRect(px - 8, py - 10, 16, 18);
-        ctx.globalAlpha = 1;
-      }
-      ctx.fillStyle = f ? '#ffffff' : '#aa1010'; ctx.fillRect(px - 5, py - 1, 10, 8);
-      ctx.fillStyle = f ? '#ffffff' : '#cc2020'; ctx.fillRect(px - 5, py - 4, 10, 4);
-      ctx.fillStyle = f ? '#ffffff' : '#dd3010'; ctx.fillRect(px - 4, py - 8, 8, 4);
-      ctx.fillStyle = '#ffff40';
-      ctx.fillRect(px - 2, py - 6, 1, 1); ctx.fillRect(px + 1, py - 6, 1, 1);
-      const flamY = py - 12 + Math.sin(performance.now() * 0.008) * 1;
-      ctx.fillStyle = '#ff8800'; ctx.fillRect(px - 1, Math.floor(flamY), 2, 3);
-      ctx.fillStyle = '#ffdd00'; ctx.fillRect(px, Math.floor(flamY) + 1, 1, 1);
-      ctx.fillStyle = '#660000';
-      ctx.fillRect(px - 4, py + 7, 3, 3); ctx.fillRect(px + 1, py + 7, 3, 3);
-    }
-  }
-
-  // ============================================================
-  // BOSS: Slayer-Killer (Wave 20, final)
-  // ============================================================
-  const _SlayerKiller_Dead = class {
-    constructor(x, y, hpMult, speedMult, dmgMult) {
-      this.x = x; this.y = y; this.r = 11;
-      this.maxHp = Math.round(800 * hpMult); this.hp = this.maxHp;
-      this.contactDmg = Math.round(16 * dmgMult);
-      this.speed = 40 * speedMult;
-      this.alive = true; this.isBoss = true;
-      this.bobPhase = 0; this.hitFlash = 0;
-      this.boltTimer = 2.0; this.summonTimer = 12.0;
-      this.preferredDistance = 110;
-      this.name = 'The Slayer-Killer';
-      this.phase = 1;
-    }
-    update(dt, target) {
-      const hpRatio = this.hp / this.maxHp;
-      const newPhase = hpRatio > 0.66 ? 1 : hpRatio > 0.33 ? 2 : 3;
-      if (newPhase !== this.phase) {
-        this.phase = newPhase;
-        spawnBurst(this.x, this.y, ['#aa66ff', '#dd99ff', '#ffffff'], 20);
-        shake = Math.min(shake + 5, 10);
-      }
-      const dx = target.x - this.x, dy = target.y - this.y;
-      const d = Math.hypot(dx, dy);
-      let mv = 0;
-      if (d > this.preferredDistance + 20) mv = 1;
-      else if (d < this.preferredDistance - 20) mv = -0.6;
-      if (d > 0.01 && mv !== 0) {
-        const sm = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1.0;
-        this.x += (dx / d) * this.speed * sm * mv * dt;
-        this.y += (dy / d) * this.speed * sm * mv * dt;
-      }
-      this.x = Math.max(this.r, Math.min(W - this.r, this.x));
-      this.y = Math.max(this.r, Math.min(H - this.r, this.y));
-      this.bobPhase += dt * 5;
-      if (this.hitFlash > 0) this.hitFlash -= dt;
-      this.boltTimer -= dt;
-      const boltCd = this.phase === 3 ? 1.0 : this.phase === 2 ? 1.5 : 2.0;
-      if (this.boltTimer <= 0) {
-        this.boltTimer = boltCd;
-        const a0 = Math.atan2(dy, dx);
-        const sc = this.phase === 3 ? 5 : this.phase === 2 ? 4 : 3;
-        const hs = 0.3;
-        for (let i = 0; i < sc; i++) {
-          const t = sc === 1 ? 0 : (i / (sc - 1)) * 2 - 1;
-          const a = a0 + t * hs;
-          enemyProjectiles.push(new BoneProjectile(this.x, this.y, Math.cos(a) * 140, Math.sin(a) * 140, this.contactDmg, 'void'));
-        }
-        spawnBurst(this.x, this.y, ['#aa66ff', '#dd99ff'], 6);
-      }
-      if (this.phase >= 2) {
-        this.summonTimer -= dt;
-        if (this.summonTimer <= 0) {
-          this.summonTimer = this.phase === 3 ? 8.0 : 12.0;
-          for (let i = 0; i < 2; i++) {
-            const ang = Math.random() * Math.PI * 2;
-            const sx = this.x + Math.cos(ang) * 28;
-            const sy = this.y + Math.sin(ang) * 28;
-            enemies.push(new Enemy(sx, sy, 'shadow', 0.9, 1.0, 0.9));
-          }
-          spawnBurst(this.x, this.y, ['#5533aa', '#aa66ff', '#ffffff'], 18);
-        }
-      }
-    }
-    takeDamage(amount) { this.hp -= amount; this.hitFlash = 0.12; if (this.hp <= 0) { this.alive = false; return true; } return false; }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.6);
-      const f = this.hitFlash > 0;
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = this.phase === 3 ? '#ff4080' : this.phase === 2 ? '#aa66ff' : '#5533aa';
-      ctx.fillRect(px - 14, py - 14, 28, 28);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = f ? '#ffffff' : '#2a1a5a'; ctx.fillRect(px - 7, py - 2, 14, 10);
-      ctx.fillStyle = f ? '#ffffff' : '#3a2a7a'; ctx.fillRect(px - 7, py + 4, 14, 1);
-      ctx.fillStyle = '#1a0a3a';
-      ctx.fillRect(px - 5, py + 8, 3, 4); ctx.fillRect(px + 2, py + 8, 3, 4);
-      ctx.fillStyle = f ? '#ffffff' : '#5533aa'; ctx.fillRect(px - 5, py - 9, 10, 7);
-      ctx.fillStyle = '#aa66ff';
-      ctx.fillRect(px - 6, py - 11, 2, 3); ctx.fillRect(px + 4, py - 11, 2, 3); ctx.fillRect(px - 1, py - 12, 2, 4);
-      const eyeC = this.phase === 3 ? '#ff4080' : '#aa66ff';
-      ctx.fillStyle = eyeC;
-      ctx.fillRect(px - 3, py - 7, 2, 2); ctx.fillRect(px + 1, py - 7, 2, 2);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(px - 3, py - 7, 1, 1); ctx.fillRect(px + 1, py - 7, 1, 1);
-      for (let i = 0; i < this.phase; i++) {
-        ctx.fillStyle = eyeC;
-        ctx.fillRect(px - 8 + i * 8, py + 14, 2, 2);
-      }
-    }
-  }
-
-  // ============================================================
-  // ENTITY: Projectile
-  // ============================================================
-  const _PROJ_THEMES_DEAD = {
-    fire:   { outer: '#ff5520', inner: '#ffdd00' },
-    frost:  { outer: '#aaccff', inner: '#ffffff' },
-    arcane: { outer: '#aa66ff', inner: '#dd99ff' },
-    light:  { outer: '#ffff80', inner: '#ffffff' },
-  };
-  const _Projectile_Dead = class {
-    constructor(x, y, vx, vy, damage, life, isCrit) {
-      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
-      this.r = isCrit ? 3 : 2;
-      this.damage = damage; this.life = life;
-      this.dead = false; this.isCrit = !!isCrit;
-      this.piercing = false; this.hitSet = null;
-      this.theme = null;
-      this.explosive = false; this.explosionRadius = 0; this.explosionDamage = 0;
-    }
-    update(dt) {
-      this.x += this.vx * dt; this.y += this.vy * dt;
-      this.life -= dt;
-      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
-    }
-    draw(ctx) {
-      if (this.theme && PROJ_THEMES[this.theme]) {
-        const t = PROJ_THEMES[this.theme];
-        const r = this.r || 4;
-        ctx.fillStyle = t.outer;
-        ctx.fillRect(Math.floor(this.x - r), Math.floor(this.y - r), r * 2, r * 2);
-        ctx.fillStyle = t.inner;
-        ctx.fillRect(Math.floor(this.x - r/2), Math.floor(this.y - r/2), Math.max(1, r), Math.max(1, r));
-        return;
-      }
-      if (this.piercing) {
-        ctx.fillStyle = '#5599ff'; ctx.fillRect(Math.floor(this.x - 3), Math.floor(this.y - 3), 7, 7);
-        ctx.fillStyle = '#aaccff'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-      } else if (this.isCrit) {
-        ctx.fillStyle = '#ff8800'; ctx.fillRect(Math.floor(this.x - 2), Math.floor(this.y - 2), 5, 5);
-        ctx.fillStyle = '#ffe080'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-      } else {
-        ctx.fillStyle = '#fff7a0'; ctx.fillRect(Math.floor(this.x - 1), Math.floor(this.y - 1), 3, 3);
-        ctx.fillStyle = '#ffe040'; ctx.fillRect(Math.floor(this.x), Math.floor(this.y), 1, 1);
-      }
-    }
-  }
   // Floating damage number (Diablo/Brotato-style hit feedback)
   // opts: { color, size, vy, vx, life, crit }
   function spawnDamageNumber(x, y, amount, opts) {
@@ -1527,6 +418,40 @@
     }
     damageNumbers = damageNumbers.filter(n => !n.dead);
   }
+  // Floating "this is an elite" beacon — drawn above every live elite enemy so the player
+  // can prioritise them at a glance. Pulses + bobs; outlined for legibility on any background.
+  function drawEliteBeacon(ctx, enemy) {
+    const t = performance.now() * 0.005;
+    const bob = Math.sin(t * 2) * 1.5;
+    const cx = Math.floor(enemy.x);
+    const cy = Math.floor(enemy.y - enemy.r * 2 - 12 + bob);
+    const pulse = 0.6 + 0.4 * Math.sin(t * 3);
+    // Glow halo (pulses)
+    ctx.globalAlpha = pulse * 0.4;
+    ctx.fillStyle = '#ffd040';
+    ctx.fillRect(cx - 4, cy - 1, 9, 3);
+    ctx.fillRect(cx - 1, cy - 4, 3, 9);
+    // Black outline for legibility
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(cx, cy - 4, 1, 1);
+    ctx.fillRect(cx - 1, cy - 3, 3, 1);
+    ctx.fillRect(cx - 2, cy - 2, 5, 1);
+    ctx.fillRect(cx - 3, cy - 1, 7, 1);
+    ctx.fillRect(cx - 2, cy + 2, 5, 1);
+    ctx.fillRect(cx - 1, cy + 3, 3, 1);
+    ctx.fillRect(cx, cy + 4, 1, 1);
+    // Yellow diamond core
+    ctx.fillStyle = '#ffd040';
+    ctx.fillRect(cx, cy - 3, 1, 1);
+    ctx.fillRect(cx - 1, cy - 2, 3, 1);
+    ctx.fillRect(cx - 2, cy - 1, 5, 1);
+    ctx.fillRect(cx - 2, cy, 5, 1);
+    ctx.fillRect(cx - 2, cy + 1, 5, 1);
+    ctx.fillRect(cx - 1, cy + 2, 3, 1);
+    ctx.fillRect(cx, cy + 3, 1, 1);
+    ctx.globalAlpha = 1;
+  }
   function drawDamageNumbers(ctx) {
     for (const n of damageNumbers) {
       const a = Math.max(0, Math.min(1, n.life / n.maxLife));
@@ -1543,143 +468,6 @@
     ctx.globalAlpha = 1;
   }
 
-  // ============================================================
-  // ENTITY: BoneProjectile
-  // ============================================================
-  const _ENEMY_SHOT_THEMES_DEAD = {
-    bone: { outer: '#d8d8c0', inner: '#a0a090', spark: '#e8e8d0' },
-    ice:  { outer: '#aaccff', inner: '#5599ff', spark: '#ddeeff' },
-    fire: { outer: '#ff8800', inner: '#ffdd00', spark: '#ffaa44' },
-    void: { outer: '#aa66ff', inner: '#5533aa', spark: '#dd99ff' },
-  };
-  const _BoneProjectile_Dead = class {
-    constructor(x, y, vx, vy, damage, theme) {
-      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
-      this.r = 3; this.damage = damage;
-      this.life = 3.5; this.dead = false; this.rot = 0;
-      this.theme = theme || 'bone';
-    }
-    update(dt) {
-      this.x += this.vx * dt; this.y += this.vy * dt;
-      this.life -= dt; this.rot += dt * 9;
-      if (this.life <= 0 || this.x < -20 || this.x > W + 20 || this.y < -20 || this.y > H + 20) this.dead = true;
-    }
-    draw(ctx) {
-      const t = ENEMY_SHOT_THEMES[this.theme] || ENEMY_SHOT_THEMES.bone;
-      const px = Math.floor(this.x), py = Math.floor(this.y);
-      const flicker = Math.floor(this.rot) % 2;
-      ctx.fillStyle = flicker ? t.spark : t.outer; ctx.fillRect(px - 2, py - 2, 4, 4);
-      ctx.fillStyle = t.inner; ctx.fillRect(px - 1, py - 1, 2, 2);
-      ctx.fillStyle = t.spark;
-      ctx.fillRect(px - 3, py, 1, 1); ctx.fillRect(px + 2, py, 1, 1);
-    }
-  }
-
-  // ============================================================
-  // ENTITY: XP Gem
-  // ============================================================
-  const _XPGem_Dead = class {
-    constructor(x, y, value) {
-      this.x = x; this.y = y;
-      this.vx = (Math.random() - 0.5) * 40;
-      this.vy = (Math.random() - 0.5) * 40 - 20;
-      this.r = 3; this.value = value;
-      this.dead = false; this.magnetized = false;
-      this.bobPhase = Math.random() * Math.PI * 2;
-    }
-    update(dt, player) {
-      this.bobPhase += dt * 5;
-      if (!this.magnetized) {
-        this.vx *= 0.92; this.vy *= 0.92;
-        this.x += this.vx * dt; this.y += this.vy * dt;
-      }
-      const dx = player.x - this.x, dy = player.y - this.y;
-      const d = Math.hypot(dx, dy);
-      if (!this.magnetized && d < player.pickupRange) this.magnetized = true;
-      if (this.magnetized) {
-        const sp = 200 + (1 - Math.min(d / 100, 1)) * 250;
-        if (d > 0.01) { this.x += (dx / d) * sp * dt; this.y += (dy / d) * sp * dt; }
-        if (d < player.r + this.r) { player.addXp(this.value); this.dead = true; }
-      }
-    }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 0.8);
-      ctx.fillStyle = '#9b59ff'; ctx.fillRect(px - 1, py - 2, 3, 4);
-      ctx.fillStyle = '#c89aff';
-      ctx.fillRect(px, py - 1, 1, 1); ctx.fillRect(px - 1, py - 2, 1, 1);
-    }
-  }
-
-  // ============================================================
-  // ENTITY: ItemDrop
-  // ============================================================
-  const _ItemDrop_Dead = class {
-    constructor(x, y, item) {
-      this.x = x; this.y = y;
-      this.vx = (Math.random() - 0.5) * 30;
-      this.vy = (Math.random() - 0.5) * 30 - 25;
-      this.r = 5; this.item = item;
-      this.dead = false; this.settled = false;
-      this.bobPhase = Math.random() * Math.PI * 2;
-      this.glowPhase = Math.random() * Math.PI * 2;
-    }
-    update(dt, player) {
-      this.bobPhase += dt * 3; this.glowPhase += dt * 4;
-      if (!this.settled) {
-        this.vx *= 0.85; this.vy *= 0.85;
-        this.x += this.vx * dt; this.y += this.vy * dt;
-        if (Math.abs(this.vx) + Math.abs(this.vy) < 5) this.settled = true;
-      }
-      const dx = player.x - this.x, dy = player.y - this.y;
-      const rr = player.r + this.r;
-      if (dx * dx + dy * dy < rr * rr) {
-        if (player.inventory.length < player.INVENTORY_CAP) {
-          player.inventory.push(this.item);
-          this.dead = true;
-          spawnBurst(this.x, this.y, [this.item.rarity.color, '#ffffff'], 8);
-          lootFlashTimer = 2.0;
-          lastLootName = itemDisplayName(this.item);
-        }
-      }
-    }
-    draw(ctx) {
-      const px = Math.floor(this.x), py = Math.floor(this.y + Math.sin(this.bobPhase) * 1.5);
-      const glow = 0.4 + 0.2 * Math.sin(this.glowPhase);
-      ctx.globalAlpha = glow;
-      ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 6, py - 6, 12, 12);
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = this.item.rarity.color; ctx.fillRect(px - 4, py - 4, 8, 8);
-      ctx.fillStyle = '#1a1a22'; ctx.fillRect(px - 3, py - 3, 6, 6);
-      ctx.fillStyle = this.item.rarity.color;
-      ctx.font = 'bold 7px monospace';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(this.item.base.letter, px, py + 1);
-      ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
-    }
-  }
-
-  // ============================================================
-  // ENTITY: Particle
-  // ============================================================
-  const _Particle_Dead = class {
-    constructor(x, y, vx, vy, color, life, size) {
-      this.x = x; this.y = y; this.vx = vx; this.vy = vy;
-      this.color = color; this.life = life; this.maxLife = life;
-      this.size = size || 2;
-    }
-    update(dt) {
-      this.x += this.vx * dt; this.y += this.vy * dt;
-      this.vx *= 0.90; this.vy *= 0.90;
-      this.life -= dt;
-    }
-    draw(ctx) {
-      const a = Math.max(0, this.life / this.maxLife);
-      ctx.globalAlpha = a; ctx.fillStyle = this.color;
-      ctx.fillRect(Math.floor(this.x), Math.floor(this.y), this.size, this.size);
-      ctx.globalAlpha = 1;
-    }
-    get dead() { return this.life <= 0; }
-  }
   function spawnBurst(x, y, palette, count) {
     palette = palette || ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'];
     count = count || 8;
@@ -1722,7 +510,22 @@
     itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('orange')));
     const g = rngInt(30, 60); player.gold += g; goldFlashTimer = 0.8;
     shake = Math.min(shake + 6, 10);
+    lastBossName = e.name || 'Boss';
+    bossDefeatedBannerTimer = 2.0;
     bossRef = null;
+    // Sweep the arena so nothing lingers behind the post-boss UI
+    enemies = enemies.filter(en => en.alive && en !== e);
+    enemyProjectiles = [];
+    groundEffects = [];
+    // Wave transition — final boss goes straight to victory; act bosses trigger the ability draft.
+    // The draft itself handles the level-up / shop chain on selection.
+    if (isFinalWave(currentWave)) {
+      Sfx.waveComplete();
+      state = STATE.VICTORY;
+    } else {
+      Sfx.waveComplete();
+      enterAbilityDraft();
+    }
   }
 
   // ============================================================
@@ -2035,16 +838,46 @@
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
   }
+  // Boss ability draft — design: class-filtered with 10% cross-class spice, stack up to 6 slots.
+  // Slot 0 is the class signature ability and is never drafted into. Drafted abilities fill
+  // slots 1-5. When all 6 are full, the draft is skipped with a brief banner.
   function enterAbilityDraft() {
-    const pool = classAbilities(player.class.id).slice();
+    // Skip entirely when slots are full (cap = 6 total: signature + 5 drafted)
+    const filledSlots = player.abilities.filter(a => a).length;
+    if (filledSlots >= 6) {
+      lastLootName = 'Ability slots full!';
+      lootFlashTimer = 2.0;
+      if (player.pendingLevelUps > 0) enterLevelUp();
+      else enterShop();
+      return;
+    }
+    // Build the two pools, excluding abilities already owned
+    const owned = new Set();
+    for (const a of player.abilities) if (a) owned.add(a.id);
+    const classPool   = classAbilities(player.class.id).filter(a => !owned.has(a.id));
+    const offClassPool = ABILITY_LIST.filter(a => a.classOf && a.classOf !== player.class.id && !owned.has(a.id));
+
     const out = [];
-    const seen = new Set();
-    while (out.length < 3 && pool.length > 0) {
-      const idx = rngInt(0, pool.length - 1);
-      const def = pool.splice(idx, 1)[0];
-      if (seen.has(def.id)) continue;
-      seen.add(def.id);
+    const offered = new Set();
+    let attempts = 0;
+    while (out.length < 3 && attempts < 50) {
+      attempts++;
+      // 10% chance this slot rolls an off-class "rare find"
+      const crossRoll = Math.random() < 0.10;
+      const primary  = (crossRoll && offClassPool.length > 0) ? offClassPool : classPool;
+      const fallback = (crossRoll && offClassPool.length > 0) ? classPool    : offClassPool;
+      const pool = primary.length > 0 ? primary : fallback;
+      if (pool.length === 0) break; // Nothing left to offer
+      const def = pool[rngInt(0, pool.length - 1)];
+      if (offered.has(def.id)) continue;
+      offered.add(def.id);
       out.push({ def, rarity: pickWeightedRarity() });
+    }
+    if (out.length === 0) {
+      // Player owns everything available — skip without a banner
+      if (player.pendingLevelUps > 0) enterLevelUp();
+      else enterShop();
+      return;
     }
     abilityDraftChoices = out;
     state = STATE.ABILITYDRAFT;
@@ -2052,11 +885,12 @@
   function pickAbilityDraft(idx) {
     if (idx < 0 || idx >= abilityDraftChoices.length) return;
     const choice = abilityDraftChoices[idx];
+    // Find first empty slot in 1..5 (slot 0 reserved for class signature)
     let target = -1;
-    for (let i = 1; i < 4; i++) {
+    for (let i = 1; i < 6; i++) {
       if (!player.abilities[i]) { target = i; break; }
     }
-    if (target < 0) target = 1;
+    if (target < 0) target = 1; // Safety net (enterAbilityDraft already skips when full)
     player.abilities[target] = { id: choice.def.id, def: choice.def, rarity: choice.rarity };
     Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
@@ -2066,8 +900,158 @@
     state = STATE.SHOP;
     shopRefreshCost = 5;
     shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.cls.id : 'archer'));
+    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'archer'));
     selectedInvIdx = -1;
+  }
+  // Returns act info for the act the given wave belongs to.
+  // Wave 1-5 = Act I (Crypt, BoneLord), 6-10 = II (Frostspire, Ice Giant), etc.
+  function actInfoForWave(w) {
+    const actNum   = Math.max(1, Math.min(4, Math.ceil(w / 5)));
+    const actRoman = ['I','II','III','IV'][actNum - 1];
+    const lastWave = actNum * 5;
+    const bossName = lastWave === 5  ? 'BONE LORD'
+                   : lastWave === 10 ? 'ICE GIANT'
+                   : lastWave === 15 ? 'PYROMANCER'
+                   : 'SLAYER-KILLER';
+    return { actNum, actRoman, biome: biomeFor(w), bossName, bossWave: lastWave };
+  }
+  // Trigger between the shop and startNextWave when the upcoming wave crosses a biome boundary.
+  // The cinematic plays the new act's title, biome, and incoming boss before the wave actually starts.
+  function enterActTransition(upcomingWave) {
+    const info = actInfoForWave(upcomingWave);
+    // Pre-roll biome-themed particles: motion + palette tailored per biome so each
+    // act transition has its own visual signature.
+    // Frostspire = snow falls, Inferno = embers rise, Void = motes float random, Crypt = bone dust drifts.
+    const palette = info.biome.decoColors;
+    const id = info.biome.id;
+    const particles = [];
+    for (let i = 0; i < 70; i++) {
+      let vx, vy, size, color;
+      if (id === 'frostspire') {
+        vx = (Math.random() - 0.5) * 8;
+        vy = 14 + Math.random() * 16;
+        size = 1 + Math.floor(Math.random() * 2);
+        color = Math.random() < 0.65 ? '#ffffff' : (palette[3] || '#aaccff');
+      } else if (id === 'inferno') {
+        vx = (Math.random() - 0.5) * 6;
+        vy = -(18 + Math.random() * 22);
+        size = 1 + Math.floor(Math.random() * 2);
+        color = Math.random() < 0.5 ? (palette[3] || '#ff8040') : (palette[2] || '#aa4020');
+      } else if (id === 'void') {
+        const a = Math.random() * Math.PI * 2;
+        const s = 4 + Math.random() * 10;
+        vx = Math.cos(a) * s;
+        vy = Math.sin(a) * s;
+        size = 1 + Math.floor(Math.random() * 2);
+        color = Math.random() < 0.5 ? (palette[3] || '#dd99ff') : '#ffffff';
+      } else {
+        vx = (Math.random() - 0.5) * 6;
+        vy = 6 + Math.random() * 10;
+        size = 1;
+        color = palette[2] || '#88aabb';
+      }
+      particles.push({
+        x: Math.random() * W,
+        y: id === 'inferno' ? H + Math.random() * 20 : Math.random() * H,
+        vx, vy, size, color,
+        twinkle: Math.random() * Math.PI * 2,
+      });
+    }
+    actTransitionData = { ...info, upcomingWave, particles };
+    actTransitionTimer = ACT_TRANSITION_DURATION;
+    state = STATE.ACT_TRANSITION;
+    // Audio cue — re-use the boss-spawn sting so it lands like an arrival
+    if (typeof Sfx !== 'undefined' && Sfx.bossSpawn) Sfx.bossSpawn();
+  }
+  function drawActTransitionScreen() {
+    if (!actTransitionData) return;
+    const d = actTransitionData;
+    const elapsed = ACT_TRANSITION_DURATION - actTransitionTimer;
+    const t = Math.max(0, Math.min(1, elapsed / ACT_TRANSITION_DURATION));
+
+    // Background: dark base, biome-tinted wash that strengthens as the cinematic plays
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, H);
+    const wash = Math.min(0.55, t * 0.7);
+    ctx.fillStyle = d.biome.bg;
+    ctx.globalAlpha = wash;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+
+    // Themed particle drift (snow falls, embers rise, motes float — wraps differ by direction)
+    for (const p of d.particles) {
+      p.x += p.vx * (1/60); p.y += p.vy * (1/60);
+      p.twinkle += 0.12;
+      // Vertical wrap respects motion direction
+      if (p.vy >= 0 && p.y > H + 4)      { p.y = -4;    p.x = Math.random() * W; }
+      else if (p.vy < 0 && p.y < -4)     { p.y = H + 4; p.x = Math.random() * W; }
+      // Horizontal wrap (also handles void's omnidirectional drift)
+      if (p.x < -4)    p.x = W + 4;
+      if (p.x > W + 4) p.x = -4;
+      const a = 0.45 + 0.40 * Math.sin(p.twinkle);
+      ctx.globalAlpha = a * Math.min(1, t * 2);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(Math.floor(p.x), Math.floor(p.y), p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+
+    // Vignette
+    const grad = ctx.createRadialGradient(W/2, H/2, 60, W/2, H/2, Math.max(W, H) * 0.7);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,0.8)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+
+    // ACT label — fades + scales up in the first 1s
+    const actAlpha = Math.min(1, t / 0.25);
+    const actScale = 1 + Math.max(0, 0.25 - elapsed) * 0.6; // briefly oversized on entry
+    ctx.save();
+    ctx.translate(W / 2, H / 2 - 40);
+    ctx.scale(actScale, actScale);
+    ctx.globalAlpha = actAlpha;
+    ctx.fillStyle = '#000'; ctx.font = 'bold 22px monospace';
+    ctx.fillText(`ACT ${d.actRoman}`, 1, 1);
+    ctx.fillStyle = d.biome.decoColors[3] || '#ffffff';
+    ctx.fillText(`ACT ${d.actRoman}`, 0, 0);
+    ctx.restore();
+
+    // Biome name — fades in after 0.4s
+    const biomeAlpha = Math.max(0, Math.min(1, (elapsed - 0.4) / 0.5));
+    if (biomeAlpha > 0) {
+      ctx.globalAlpha = biomeAlpha;
+      ctx.fillStyle = '#000'; ctx.font = 'bold 30px monospace';
+      ctx.fillText(d.biome.name.toUpperCase(), W / 2 + 2, H / 2 + 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(d.biome.name.toUpperCase(), W / 2, H / 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // Incoming boss — fades in after 1.3s
+    const bossAlpha = Math.max(0, Math.min(1, (elapsed - 1.3) / 0.6));
+    if (bossAlpha > 0) {
+      ctx.globalAlpha = bossAlpha;
+      ctx.fillStyle = '#aaa'; ctx.font = '10px monospace';
+      ctx.fillText('INCOMING', W / 2, H / 2 + 32);
+      ctx.fillStyle = '#000'; ctx.font = 'bold 16px monospace';
+      ctx.fillText(d.bossName, W / 2 + 1, H / 2 + 51);
+      ctx.fillStyle = '#ff6060';
+      ctx.fillText(d.bossName, W / 2, H / 2 + 50);
+      ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+      ctx.fillText(`Wave ${d.bossWave}`, W / 2, H / 2 + 64);
+      ctx.globalAlpha = 1;
+    }
+
+    // Skip prompt — pulses in the last 1.5s
+    if (elapsed > 1.0) {
+      const pulse = 0.5 + 0.5 * Math.sin(elapsed * 4);
+      ctx.globalAlpha = 0.5 + 0.5 * pulse;
+      ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+      ctx.fillText('SPACE / Click / [B] to continue', W / 2, H - 22);
+      ctx.globalAlpha = 1;
+    }
+    ctx.textAlign = 'left';
   }
   function startNextWave() {
     currentWave += 1;
@@ -2193,7 +1177,7 @@
 
   function resetWorld() {
     player = new Player(W / 2, H / 2, selectedClassId);
-    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = [];
+    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
@@ -2253,7 +1237,7 @@
     player.gold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
     for (let i = 0; i < 4; i++) {
-      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.cls.id : 'archer');
+      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'archer');
     }
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();
@@ -2342,19 +1326,23 @@
     ctx.fillStyle = biome.bg; ctx.fillRect(0, 0, W, H);
 
     if (biome.id === 'crypt') {
-      // === CRYPT: stone brick floor ===
-      // Brick rows offset every other row
-      const bw = 32, bh = 16;
-      for (let gy = 0; gy < H; gy += bh) {
-        const rowOff = ((gy / bh) % 2 === 0) ? 0 : bw / 2;
-        for (let gx = -bw; gx < W + bw; gx += bw) {
-          const bx = gx + rowOff;
-          // Subtle variation per brick
-          const shade = ((Math.floor(bx/bw) * 7 + Math.floor(gy/bh) * 13) % 3);
-          ctx.fillStyle = shade === 0 ? '#1a1e1c' : shade === 1 ? '#171b19' : '#1c2019';
-          ctx.fillRect(bx, gy, bw - 1, bh - 1);
-        }
+      // === CRYPT: painted background image ===
+      const bgImg = BG_IMAGES.crypt;
+      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(bgImg, 0, 0, W, H);
+      } else {
+        // Fallback: solid fill while image loads
+        ctx.fillStyle = '#15181a'; ctx.fillRect(0, 0, W, H);
       }
+      // Dark gradient across top ~55px to bury the baked-in static torches from the image.
+      // The procedural animated torch glow below renders on top of this.
+      const topMask = ctx.createLinearGradient(0, 0, 0, 55);
+      topMask.addColorStop(0,   'rgba(0,0,0,0.92)');
+      topMask.addColorStop(0.6, 'rgba(0,0,0,0.55)');
+      topMask.addColorStop(1,   'rgba(0,0,0,0)');
+      ctx.fillStyle = topMask; ctx.fillRect(0, 0, W, 55);
+
       // Torch glow at 4 corners (animated flicker)
       const torchPositions = [[20, 20], [W-20, 20], [20, H-20], [W-20, H-20]];
       for (const [tx, ty] of torchPositions) {
@@ -2617,10 +1605,11 @@
   }
   function drawAbilityBar() {
     const slotSize = 30, gap = 6;
-    const totalW = 4 * slotSize + 3 * gap;
+    const slotCount = 6;
+    const totalW = slotCount * slotSize + (slotCount - 1) * gap;
     const startX = (W - totalW) / 2;
     const y = H - slotSize - 6;
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < slotCount; i++) {
       const x = startX + i * (slotSize + gap);
       const ability = player.abilities[i];
       const cd = player.abilityCooldowns[i];
@@ -2990,29 +1979,38 @@
   function drawClassSelectScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.92)';
     ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 18px monospace';
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
     ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 28);
-    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
-    ctx.fillText('Click a card or press 1-8.  Click MODE to toggle Trial.', W / 2, 40);
+    ctx.fillStyle = '#cccccc'; ctx.font = 'bold 9px monospace';
+    ctx.fillText('Click a card or press 1-8.  Click MODE to toggle Trial.', W / 2, 42);
     // Mode toggle button (top-left)
     const modeLabel = runMode === 'standard' ? 'MODE: STANDARD' : `MODE: TRIAL T${trialTier}`;
     const modeColor = runMode === 'standard' ? '#7ad96b' : '#ff4080';
     drawButton(8, 8, 140, 20, modeLabel, true, modeColor);
-    ctx.fillStyle = '#666'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
     ctx.fillText(`Unlocked tier: ${unlockedTrialTier}/${TRIAL_MAX_TIER}`, 8, 38);
     // Stash count display
-    ctx.fillStyle = '#ffd23f'; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'right';
     ctx.fillText(`STASH  ${stash.length}/${stashSize}`, W - 8, H - 8);
     ctx.textAlign = 'left';
+
+    // Helper to draw text with 1px black shadow for legibility on any background
+    const shadowText = (text, x, y) => {
+      const orig = ctx.fillStyle;
+      ctx.fillStyle = '#000';
+      ctx.fillText(text, x + 1, y + 1);
+      ctx.fillStyle = orig;
+      ctx.fillText(text, x, y);
+    };
 
     // 4×2 grid layout — row 0: Archer/Wizard/Warrior/Rogue, row 1: Monk/Paladin/Witch Doctor/Necromancer
     const allClasses = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR, CLASS.ROGUE,
                         CLASS.MONK, CLASS.PALADIN, CLASS.WITCH_DOCTOR, CLASS.NECROMANCER];
-    const cardW = 148, cardH = 138, gap = 6;
+    const cardW = 148, cardH = 145, gap = 6;
     const cols = 4;
     const totalW = cardW * cols + gap * (cols - 1);
     const startX = Math.floor((W - totalW) / 2);
-    const startY = 48;
+    const startY = 52;
 
     for (let i = 0; i < allClasses.length; i++) {
       const c = allClasses[i];
@@ -3022,7 +2020,8 @@
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
       const gpHover = (i === gpClassIdx);
 
-      ctx.fillStyle = (hovered || gpHover) ? '#2a2a38' : '#18181f';
+      // Darker base, slightly lighter when hovered — better contrast against text
+      ctx.fillStyle = (hovered || gpHover) ? '#26262f' : '#13131a';
       ctx.fillRect(cx, cy, cardW, cardH);
       ctx.strokeStyle = c.color;
       ctx.lineWidth = gpHover ? 4 : hovered ? 3 : 2;
@@ -3038,33 +2037,40 @@
       ctx.lineWidth = 1;
 
       // Key hint
-      ctx.fillStyle = '#555'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`[${i + 1}]`, cx + 6, cy + 12);
+      ctx.fillStyle = '#aaa'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, cx + 6, cy + 13);
 
-      // Name
-      ctx.fillStyle = c.color; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 22);
+      // Name (with shadow for emphasis)
+      ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#000'; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2 + 1, cy + 24);
+      ctx.fillStyle = c.color; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 23);
 
-      // Sprite icon — colored block
-      const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 46);
-      ctx.fillStyle = c.color;
-      ctx.fillRect(sx - 5, sy - 3, 10, 9);
-      ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 9, 8, 6);
-      ctx.fillStyle = '#000';
-      ctx.fillRect(sx - 2, sy - 7, 1, 1); ctx.fillRect(sx + 1, sy - 7, 1, 1);
-      ctx.fillStyle = '#4a3a2a';
-      ctx.fillRect(sx - 4, sy + 6, 2, 3); ctx.fillRect(sx + 2, sy + 6, 2, 3);
+      // Sprite icon — actual in-game character at 3x scale
+      const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 48);
+      const sprite = (typeof PLAYER_SPRITES !== 'undefined') ? PLAYER_SPRITES[c.id] : null;
+      if (sprite && typeof drawSprite === 'function') {
+        drawSprite(ctx, sprite, sx, sy, false, false, 3);
+      } else {
+        // Fallback: generic colored placeholder if sprites missing
+        ctx.fillStyle = c.color;
+        ctx.fillRect(sx - 5, sy - 3, 10, 9);
+        ctx.fillStyle = '#ffd5a0'; ctx.fillRect(sx - 4, sy - 9, 8, 6);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(sx - 2, sy - 7, 1, 1); ctx.fillRect(sx + 1, sy - 7, 1, 1);
+        ctx.fillStyle = '#4a3a2a';
+        ctx.fillRect(sx - 4, sy + 6, 2, 3); ctx.fillRect(sx + 2, sy + 6, 2, 3);
+      }
 
-      // Stats block
-      ctx.fillStyle = '#ccc'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
-      const sy2 = cy + 68;
-      ctx.fillText(`HP ${c.baseMaxHp}  SPD ${c.baseSpeed}  CRIT ${c.baseCritChance}%`, cx + 8, sy2);
-      ctx.fillText(`WPN ${c.weaponDamage}dmg @ ${c.weaponFireRate}/s`, cx + 8, sy2 + 10);
+      // Stats block — bigger, brighter, with shadow
+      ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      const sy2 = cy + 72;
+      ctx.fillStyle = '#e8e8e8'; shadowText(`HP ${c.baseMaxHp}  SPD ${c.baseSpeed}  CRIT ${c.baseCritChance}%`, cx + 8, sy2);
+      ctx.fillStyle = '#e8e8e8'; shadowText(`WPN ${c.weaponDamage}dmg @ ${c.weaponFireRate}/s`, cx + 8, sy2 + 11);
       ctx.fillStyle = c.resourceColor || c.color;
-      ctx.fillText(`${c.resourceName}: ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 8, sy2 + 20);
+      shadowText(`${c.resourceName}: ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 8, sy2 + 22);
 
-      // Desc (wrapped to ~24 chars)
-      ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+      // Desc (wrapped to ~24 chars) — brighter
+      ctx.fillStyle = '#c8c8c8'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
       const words = (c.desc || '').split(' ');
       const dlines = []; let dline = '';
       for (const w of words) {
@@ -3073,14 +2079,15 @@
       }
       if (dline) dlines.push(dline);
       for (let li = 0; li < Math.min(dlines.length, 2); li++) {
-        ctx.fillText(dlines[li], cx + cardW / 2, sy2 + 36 + li * 9);
+        shadowText(dlines[li], cx + cardW / 2, sy2 + 40 + li * 10);
       }
 
-      // Signature ability
+      // Signature ability — bigger with shadow
       const sig = ABILITIES[c.signature];
       if (sig) {
-        ctx.fillStyle = sig.color; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
-        ctx.fillText(`★ ${sig.name}`, cx + cardW / 2, cy + cardH - 8);
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        ctx.fillStyle = sig.color;
+        shadowText(`★ ${sig.name}`, cx + cardW / 2, cy + cardH - 7);
       }
     }
     ctx.textAlign = 'left';
@@ -3603,6 +2610,8 @@
       if (keyJustPressed.has('2') || gpJustPressed.has(1)) castAbility(1);
       if (keyJustPressed.has('3') || gpJustPressed.has(2)) castAbility(2);
       if (keyJustPressed.has('4') || gpJustPressed.has(3)) castAbility(3);
+      if (keyJustPressed.has('5') || gpJustPressed.has(4)) castAbility(4); // LB
+      if (keyJustPressed.has('6') || gpJustPressed.has(5)) castAbility(5); // RB
 
       // Hit-pause: freeze world for a few frames after a crit/big hit.
       // Damage numbers continue animating so the popup is visible during the freeze.
@@ -3625,6 +2634,7 @@
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(wdt);
       for (const g of xpGems) if (!g.dead) g.update(wdt, player);
       for (const d of itemDrops) if (!d.dead) d.update(wdt, player);
+      for (const sw of meleeSwings) if (!sw.dead) sw.update(wdt);
       updateGroundEffects(wdt);
       if (!frozen) checkCollisions();
       enemies = enemies.filter(e => e.alive);
@@ -3632,6 +2642,7 @@
       enemyProjectiles = enemyProjectiles.filter(p => !p.dead);
       xpGems = xpGems.filter(g => !g.dead);
       itemDrops = itemDrops.filter(d => !d.dead);
+      meleeSwings = meleeSwings.filter(sw => !sw.dead);
       if (!isBossWave(currentWave) && waveTimer <= 0 && enemies.length === 0) endWave();
     }
     else if (state === STATE.LEVELUP) {
@@ -3684,6 +2695,17 @@
         }
       }
       if (picked >= 0) pickAbilityDraft(picked);
+    }
+    else if (state === STATE.ACT_TRANSITION) {
+      // Tick the cinematic timer; auto-advance to next wave when it expires.
+      actTransitionTimer -= dt;
+      const skipPressed = keyJustPressed.has(' ') || keyJustPressed.has('enter') ||
+                          mouseClicked || gpJustPressed.has(0) || gpJustPressed.has(1);
+      if (actTransitionTimer <= 0 || skipPressed) {
+        // currentWave hasn't been incremented yet; startNextWave will do the work.
+        actTransitionData = null;
+        startNextWave();
+      }
     }
     else if (state === STATE.DEAD || state === STATE.VICTORY) {
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
@@ -3845,7 +2867,15 @@
       // A button = synthetic click at cursor; B button or Space/Enter = next wave
       if (gpJustPressed.has(0)) mouseClicked = true;
       if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(1)) {
-        startNextWave(); return finalizeFrame();
+        // If the next wave is in a new biome AND we still have acts left,
+        // play the act-transition cinematic before actually starting the wave.
+        const upcoming = currentWave + 1;
+        if (upcoming <= 20 && biomeFor(upcoming).id !== biomeFor(currentWave).id) {
+          enterActTransition(upcoming);
+        } else {
+          startNextWave();
+        }
+        return finalizeFrame();
       }
       // Refresh shortcut: R key
       if (keyJustPressed.has('r')) doRefreshShop();
@@ -3859,15 +2889,20 @@
         if (shopIdx >= 0 && shopItems[shopIdx]) {
           buyShopItem(shopIdx);
         } else {
-          // Refresh button
+          // Refresh button + the three bulk-salvage buttons in a row
           const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
           const refY = SHOP_Y;
-          const salvBtnX = refX + 95;
+          const salvWX = refX + 95;       // SALVAGE WHITES
+          const salvBX = salvWX + 94;     // SALVAGE BLUES
+          const salvRX = salvBX + 94;     // SALVAGE RARES
           if (isHovering(refX, refY, 90, SHOP_ITEM_H)) {
             doRefreshShop();
-          } else if (isHovering(salvBtnX, refY, 95, SHOP_ITEM_H)) {
-            // Bulk salvage whites button
-            bulkSalvage(0);
+          } else if (isHovering(salvWX, refY, 90, SHOP_ITEM_H)) {
+            bulkSalvage(0); // whites
+          } else if (isHovering(salvBX, refY, 90, SHOP_ITEM_H)) {
+            bulkSalvage(1); // whites + blues
+          } else if (isHovering(salvRX, refY, 90, SHOP_ITEM_H)) {
+            bulkSalvage(2); // whites + blues + rares
           } else {
             // Right-click on shop item = toggle lock; on inventory item = salvage
             if (rightClicked) {
@@ -3959,6 +2994,10 @@
     for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
     for (const e of enemies) e.draw(ctx);
+    // Elite beacons — drawn after enemy sprites so they overlay heads, never get hidden
+    for (const e of enemies) if (e.alive && e.elite) drawEliteBeacon(ctx, e);
+    // Melee swing arcs — drawn over enemies so the slash trails are clearly visible
+    for (const sw of meleeSwings) sw.draw(ctx);
     for (const p of projectiles) p.draw(ctx);
     for (const ep of enemyProjectiles) ep.draw(ctx);
     if (state !== STATE.DEAD) player.draw(ctx);
@@ -3976,6 +3015,7 @@
     else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
     else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
     else if (state === STATE.TRIAL_LOADOUT) drawTrialLoadoutScreen();
+    else if (state === STATE.ACT_TRANSITION) drawActTransitionScreen();
 
     // Virtual cursor draws on top of all UI
     if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP || state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT || state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT) {
