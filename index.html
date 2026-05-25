@@ -81,7 +81,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
@@ -238,6 +238,10 @@
   // Slayer Ordeals (Phase 9)
   let savedEquipped = null;   // persisted across runs
   let savedInventory = [];    // persisted across runs
+  let savedGems = [];         // persisted gem stash across runs
+  let hubSubMenu = null;      // null | 'stash' | 'blacksmith' | 'jeweler' | 'shop'
+  let hubSelectedItem = null; // { source:'eq'|'inv'|'stash', key } for hub item ops
+  let hubGemPick = null;      // { typeId, quality } gem being socketed
   let runMode = 'standard';  // 'standard' or 'trial'
   let trialTier = 1;
   let unlockedTrialTier = 1; // highest tier the player can attempt
@@ -638,19 +642,38 @@
       itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('yellow')));
       const g = rngInt(6, 14); player.gold += g; goldFlashTimer = 0.8;
       shake = Math.min(shake + 2, 6);
+      // 20% elite gem drop
+      if (Math.random() < 0.20 && typeof rollGemDrop === 'function') {
+        const gd = rollGemDrop(charLevel);
+        if (gd && player.gems.length < player.GEM_CAP) { player.gems.push(gd); spawnDamageNumber(e.x, e.y - 14, '◆ GEM', { color: '#aaffcc', size: 10, vy: -55, life: 1.2 }); }
+      }
     } else {
       // Normal: 1 XP gem, 18% item chance, small gold
       xpGems.push(new XPGem(e.x, e.y, 1));
       if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
       const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
+      // 5% chance to drop a gem from normal enemy
+      if (Math.random() < 0.05 && typeof rollGemDrop === 'function') {
+        const gd = rollGemDrop(charLevel);
+        if (gd && player.gems.length < player.GEM_CAP) { player.gems.push(gd); spawnDamageNumber(e.x, e.y - 14, '◆ GEM', { color: '#aaffcc', size: 9, vy: -50, life: 1.2 }); }
+      }
     }
   }
   function handleBossDeath(e) {
     player.kills++;
     spawnBurst(e.x, e.y, ['#ffd040', '#ff8800', '#ffffff', '#ff4400'], 36);
     for (let i = 0; i < 8; i++) xpGems.push(new XPGem(e.x + rngInt(-20,20), e.y + rngInt(-20,20), 5));
-    // Boss always drops a legendary or set item
+    // Boss drops: unique if charLevel>=40 (5%), else legendary
+    if (charLevel >= 40 && Math.random() < 0.05 && typeof UNIQUE_ITEMS !== 'undefined') {
+      const uid = UNIQUE_ITEMS[rngInt(0, UNIQUE_ITEMS.length - 1)].id;
+      itemDrops.push(new ItemDrop(e.x - 12, e.y, generateUniqueItem(uid)));
+    }
     itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('orange')));
+    // Boss always drops a gem (40%)
+    if (Math.random() < 0.40 && typeof rollGemDrop === 'function') {
+      const gd = rollGemDrop(charLevel);
+      if (gd && player.gems.length < player.GEM_CAP) { player.gems.push(gd); spawnDamageNumber(e.x, e.y - 20, '◆ GEM DROP', { color: '#ffccff', size: 11, vy: -60, life: 1.5 }); }
+    }
     const g = rngInt(30, 60); player.gold += g; goldFlashTimer = 0.8;
     shake = Math.min(shake + 6, 10);
     lastBossName = e.name || 'Boss';
@@ -1367,6 +1390,8 @@
     if (item.setId)              s.setId = item.setId;
     if (item.legendaryEffectId)  s.legendaryEffectId = item.legendaryEffectId;
     if (item.uniqueId)           s.uniqueId = item.uniqueId;
+    if (item.itemLevel)          s.itemLevel = item.itemLevel;
+    if (item.sockets && item.sockets.length) s.sockets = item.sockets.map(sk => sk ? { typeId: sk.typeId, quality: sk.quality } : null);
     return s;
   }
   function deserializeItem(s) {
@@ -1380,6 +1405,8 @@
     if (s.setId)             item.setId = s.setId;
     if (s.legendaryEffectId) item.legendaryEffectId = s.legendaryEffectId;
     if (s.uniqueId)          item.uniqueId = s.uniqueId;
+    if (s.itemLevel)         item.itemLevel = s.itemLevel;
+    item.sockets = (s.sockets || []).map(sk => sk ? { typeId: sk.typeId, quality: sk.quality } : null);
     return item;
   }
   function loadSave() {
@@ -1403,6 +1430,7 @@
       // Persist equipped gear + inventory across runs
       savedEquipped  = data.savedEquipped  || null;
       savedInventory = (data.savedInventory || []).map(s => s ? deserializeItem(s) : null);
+      savedGems      = data.savedGems || [];
     } catch (e) { console.warn('load save failed:', e); }
   }
   function saveData() {
@@ -1424,6 +1452,7 @@
           Object.entries(player.equipped).map(([k, v]) => [k, v ? serializeItem(v) : null])
         ) : savedEquipped,
         savedInventory: player ? player.inventory.map(it => it ? serializeItem(it) : null) : savedInventory,
+        savedGems: player ? (player.gems || []) : savedGems,
       }));
     } catch (e) { console.warn('save failed:', e); }
   }
@@ -1450,6 +1479,9 @@
     }
     if (savedInventory && savedInventory.length > 0) {
       player.inventory = savedInventory.filter(Boolean).map(s => s.base ? s : deserializeItem(s));
+    }
+    if (savedGems && savedGems.length > 0) {
+      player.gems = savedGems.slice(0, player.GEM_CAP);
     }
     applyTalentsToPlayer(player); // apply persistent talent tree bonuses + abilities
     if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
@@ -2018,6 +2050,8 @@
     }
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to continue', W / 2, H / 2 + 38);
+    ctx.fillStyle = '#aaaaff'; ctx.font = '8px monospace';
+    ctx.fillText('Press H to visit the Hub', W / 2, H / 2 + 52);
     ctx.textAlign = 'left';
   }
   function drawStashBankingScreen() {
@@ -2267,6 +2301,8 @@
       ctx.fillStyle = '#ffd040'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`${talentPoints} POINT${talentPoints > 1 ? 'S' : ''} AVAILABLE`, charBtnX + 80, charBtnY + 30);
     }
+    // HUB button
+    drawButton(W - 170, 34, 75, 18, '⚒ HUB', true, '#aaaaff');
 
     // Helper to draw text with 1px black shadow for legibility on any background
     const shadowText = (text, x, y) => {
@@ -2505,6 +2541,8 @@
     }
     ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
     ctx.fillText('Press R, click, or face button to continue', W / 2, H / 2 + 60);
+    ctx.fillStyle = '#aaaaff'; ctx.font = '8px monospace';
+    ctx.fillText('Press H to visit the Hub', W / 2, H / 2 + 74);
     ctx.textAlign = 'left';
   }
 
@@ -2951,7 +2989,8 @@
       ctx.font = 'bold 11px monospace'; ctx.textAlign = 'left';
       ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 14);
       ctx.fillStyle = '#666'; ctx.font = '7px monospace';
-      ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}`, tx + 8, ty + 25);
+      const iLvlTag = tooltipItem.itemLevel ? `  iLvl ${tooltipItem.itemLevel}` : '';
+      ctx.fillText(`(${SLOT_LABEL[tooltipItem.base.slot] || tooltipItem.base.slot.toUpperCase()})  ${tooltipSource}${iLvlTag}`, tx + 8, ty + 25);
       ctx.fillStyle = '#ddd'; ctx.font = '8px monospace';
       let tipY = 38;
       if (tooltipItem.uniqueId) {
@@ -2989,6 +3028,24 @@
           const aff = tooltipItem.affixes[i];
           ctx.fillText(aff.def.fmt(aff.value), tx + 8, tipY + i * 9);
         }
+      }
+      // Socket display
+      if (tooltipItem.base && tooltipItem.base.maxSockets > 0) {
+        const socks = tooltipItem.sockets || [];
+        const maxS = tooltipItem.base.maxSockets;
+        ctx.font = '7px monospace'; ctx.textAlign = 'right';
+        for (let si = 0; si < maxS; si++) {
+          const gem = socks[si];
+          if (gem && typeof getGemType === 'function') {
+            const gt = getGemType(gem.typeId);
+            ctx.fillStyle = gt ? gt.color : '#888';
+            ctx.fillText('◆ ' + (gt ? gemDisplayName(gem) : gem.typeId), tx + tw - 6, ty + 14 + si * 10);
+          } else {
+            ctx.fillStyle = '#444';
+            ctx.fillText('◇ empty', tx + tw - 6, ty + 14 + si * 10);
+          }
+        }
+        ctx.textAlign = 'left';
       }
     } else {
       ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
@@ -3070,6 +3127,236 @@
     }
   }
 
+
+
+  // ============================================================
+  // HUB SCREEN — Blacksmith, Jeweler, Stash, Shopkeeper
+  // ============================================================
+  function drawHubScreen() {
+    ctx.fillStyle = '#0e0e16'; ctx.fillRect(0, 0, W, H);
+    // Title
+    ctx.fillStyle = '#ffd040'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('THE SLAYER HUB', W / 2, 22);
+    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+    ctx.fillText('Your gems: ' + (player ? (player.gems || []).length : 0) + '/' + (player ? player.GEM_CAP : 50) + '  |  Gold: ' + (player ? player.gold : 0) + 'g', W / 2, 34);
+
+    if (!hubSubMenu) {
+      // 4-panel NPC layout
+      const panels = [
+        { id: 'blacksmith', label: 'BLACKSMITH',   icon: '⚒',  color: '#ff8844', desc: 'Add sockets to items' },
+        { id: 'jeweler',    label: 'JEWELER',       icon: '◆',  color: '#44ccff', desc: 'Socket & combine gems' },
+        { id: 'stash',      label: 'STASH',         icon: '⬛', color: '#aaaaff', desc: 'Shared item storage' },
+        { id: 'shop',       label: 'SHOPKEEPER',    icon: '$',  color: '#ffd040', desc: 'Buy items with gold' },
+      ];
+      const panW = 130, panH = 110, panGap = 14;
+      const totalW = panels.length * panW + (panels.length - 1) * panGap;
+      const startX = (W - totalW) / 2;
+      const panY = 70;
+      for (let i = 0; i < panels.length; i++) {
+        const p = panels[i];
+        const px = startX + i * (panW + panGap);
+        const hov = mouseX >= px && mouseX <= px + panW && mouseY >= panY && mouseY <= panY + panH;
+        ctx.fillStyle = hov ? '#1a1a28' : '#13131e';
+        ctx.fillRect(px, panY, panW, panH);
+        ctx.strokeStyle = p.color; ctx.lineWidth = hov ? 2 : 1;
+        ctx.strokeRect(px + 0.5, panY + 0.5, panW - 1, panH - 1);
+        ctx.fillStyle = p.color; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(p.icon, px + panW / 2, panY + 36);
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText(p.label, px + panW / 2, panY + 52);
+        ctx.fillStyle = '#888'; ctx.font = '8px monospace';
+        ctx.fillText(p.desc, px + panW / 2, panY + 66);
+        // Store hitbox
+        p._hx = px; p._hy = panY; p._hw = panW; p._hh = panH;
+      }
+      // Store panel list for click handler
+      drawHubScreen._panels = panels;
+      // Back button
+      drawButton(8, 8, 70, 16, '← BACK', true, '#888');
+      ctx.textAlign = 'left';
+    } else if (hubSubMenu === 'blacksmith') {
+      drawBlacksmithScreen();
+    } else if (hubSubMenu === 'jeweler') {
+      drawJewelerScreen();
+    } else if (hubSubMenu === 'stash') {
+      drawStashBankingScreen();
+    } else if (hubSubMenu === 'shop') {
+      drawShopScreen();
+    }
+  }
+  drawHubScreen._panels = [];
+
+  function drawBlacksmithScreen() {
+    ctx.fillStyle = '#0e0e16'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ff8844'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('BLACKSMITH — Add Sockets', W / 2, 22);
+    ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+    ctx.fillText('Select an item from equipped or inventory to add a socket.', W / 2, 34);
+    ctx.fillStyle = '#ffd040';
+    ctx.fillText('Cost: 50g per socket added  |  Gold: ' + player.gold + 'g', W / 2, 44);
+
+    // Equipped slots
+    ctx.fillStyle = '#888'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('EQUIPPED:', 10, 62);
+    const eqKeys = Object.keys(player.equipped).filter(k => player.equipped[k]);
+    for (let i = 0; i < eqKeys.length; i++) {
+      const k = eqKeys[i];
+      const it = player.equipped[k];
+      const iy = 72 + i * 18;
+      const sel = hubSelectedItem && hubSelectedItem.source === 'eq' && hubSelectedItem.key === k;
+      const socks = (it.sockets || []).length;
+      const maxS = it.base.maxSockets || 0;
+      ctx.fillStyle = sel ? '#332200' : '#111118';
+      ctx.fillRect(8, iy - 10, 200, 15);
+      ctx.strokeStyle = sel ? '#ffd040' : it.rarity.color;
+      ctx.lineWidth = sel ? 2 : 1; ctx.strokeRect(8, iy - 10, 200, 15);
+      ctx.fillStyle = it.rarity.color; ctx.font = '8px monospace';
+      ctx.fillText(itemDisplayName(it).substring(0, 24), 12, iy - 1);
+      ctx.fillStyle = maxS === 0 ? '#553333' : '#aaa';
+      ctx.textAlign = 'right';
+      ctx.fillText(`[${socks}/${maxS} sockets]`, 210, iy - 1);
+      ctx.textAlign = 'left';
+      it._bsHx = 8; it._bsHy = iy - 10; it._bsHw = 200; it._bsHh = 15;
+    }
+
+    // Inventory
+    const invStart = 72 + eqKeys.length * 18 + 8;
+    ctx.fillStyle = '#888'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('INVENTORY:', 10, invStart);
+    const invItems = player.inventory.filter(Boolean);
+    for (let i = 0; i < Math.min(invItems.length, 8); i++) {
+      const it = invItems[i];
+      const iy = invStart + 10 + i * 18;
+      const sel = hubSelectedItem && hubSelectedItem.source === 'inv' && hubSelectedItem.it === it;
+      const socks = (it.sockets || []).length;
+      const maxS = it.base.maxSockets || 0;
+      ctx.fillStyle = sel ? '#332200' : '#111118';
+      ctx.fillRect(8, iy - 10, 200, 15);
+      ctx.strokeStyle = sel ? '#ffd040' : it.rarity.color;
+      ctx.lineWidth = sel ? 2 : 1; ctx.strokeRect(8, iy - 10, 200, 15);
+      ctx.fillStyle = it.rarity.color; ctx.font = '8px monospace';
+      ctx.fillText(itemDisplayName(it).substring(0, 24), 12, iy - 1);
+      ctx.fillStyle = maxS === 0 ? '#553333' : '#aaa';
+      ctx.textAlign = 'right';
+      ctx.fillText(`[${socks}/${maxS} sockets]`, 210, iy - 1);
+      ctx.textAlign = 'left';
+      it._bsHx = 8; it._bsHy = iy - 10; it._bsHw = 200; it._bsHh = 15;
+    }
+
+    // Right panel: selected item detail + add socket button
+    if (hubSelectedItem) {
+      const it = hubSelectedItem.source === 'eq' ? player.equipped[hubSelectedItem.key] : hubSelectedItem.it;
+      if (it) {
+        const socks = (it.sockets || []).length;
+        const maxS = it.base.maxSockets || 0;
+        ctx.fillStyle = '#1a1a22'; ctx.fillRect(225, 58, 200, 120);
+        ctx.strokeStyle = it.rarity.color; ctx.lineWidth = 2; ctx.strokeRect(225, 58, 200, 120);
+        ctx.fillStyle = it.rarity.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+        ctx.fillText(itemDisplayName(it), 232, 72);
+        ctx.fillStyle = '#888'; ctx.font = '7px monospace';
+        ctx.fillText(it.base.maxSockets > 0 ? `Sockets: ${socks}/${maxS}` : 'Cannot be socketed', 232, 84);
+        if (maxS > 0 && socks < maxS) {
+          const canAfford = player.gold >= 50;
+          const label = canAfford ? `ADD SOCKET (50g)` : 'NEED 50g';
+          drawButton(232, 98, 140, 18, label, canAfford, canAfford ? '#ff8844' : '#666');
+        } else if (maxS > 0) {
+          ctx.fillStyle = '#666'; ctx.font = '8px monospace';
+          ctx.fillText('Max sockets reached', 232, 108);
+        }
+      }
+    }
+
+    drawButton(8, 8, 70, 16, '← BACK', true, '#888');
+    ctx.textAlign = 'left';
+  }
+
+  function drawJewelerScreen() {
+    ctx.fillStyle = '#0e0e16'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#44ccff'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('JEWELER — Socket & Combine Gems', W / 2, 22);
+    ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
+    ctx.fillText('Socket gems into items or combine 3 of the same quality into 1 higher.', W / 2, 34);
+    ctx.fillStyle = '#ffd040';
+    ctx.fillText('Socketing: free  |  Combining: free  |  Remove: 25g', W / 2, 44);
+
+    // Gem stash
+    const gems = player.gems || [];
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`GEM STASH (${gems.length}/${player.GEM_CAP}):`, 10, 60);
+    const GCOLS = 8, GCELL = 30, GGAP = 3;
+    for (let i = 0; i < Math.min(gems.length, 32); i++) {
+      const gem = gems[i];
+      const gt = typeof getGemType === 'function' ? getGemType(gem.typeId) : null;
+      const col = i % GCOLS, row = Math.floor(i / GCOLS);
+      const gx = 10 + col * (GCELL + GGAP);
+      const gy = 68 + row * (GCELL + GGAP);
+      const sel = hubGemPick && hubGemPick._idx === i;
+      ctx.fillStyle = sel ? '#2a2a1a' : '#111118';
+      ctx.fillRect(gx, gy, GCELL, GCELL);
+      ctx.strokeStyle = sel ? '#ffd040' : (gt ? gt.color : '#555');
+      ctx.lineWidth = sel ? 2 : 1; ctx.strokeRect(gx, gy, GCELL, GCELL);
+      ctx.fillStyle = gt ? gt.color : '#888'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('◆', gx + GCELL / 2, gy + 14);
+      ctx.fillStyle = '#aaa'; ctx.font = '6px monospace';
+      const ql = typeof getGemQuality === 'function' ? getGemQuality(gem.quality) : null;
+      ctx.fillText(ql ? ql.name.substring(0, 4) : '?', gx + GCELL / 2, gy + 24);
+      // Store hitbox
+      gem._jHx = gx; gem._jHy = gy; gem._jHw = GCELL; gem._jHh = GCELL; gem._jIdx = i;
+    }
+
+    // Combine instruction
+    const gemYBottom = 68 + Math.ceil(Math.min(gems.length, 32) / GCOLS) * (GCELL + GGAP) + 8;
+    ctx.fillStyle = '#555'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('Click a gem to select. Then click an item socket to insert, or "COMBINE" to upgrade 3→1.', 10, Math.max(gemYBottom, 165));
+
+    // Selected gem info + combine button
+    if (hubGemPick) {
+      const gt = typeof getGemType === 'function' ? getGemType(hubGemPick.typeId) : null;
+      const ql = typeof getGemQuality === 'function' ? getGemQuality(hubGemPick.quality) : null;
+      ctx.fillStyle = '#1a1a22'; ctx.fillRect(430, 58, 190, 90);
+      ctx.strokeStyle = gt ? gt.color : '#555'; ctx.lineWidth = 2; ctx.strokeRect(430, 58, 190, 90);
+      ctx.fillStyle = gt ? gt.color : '#aaa'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      ctx.fillText((gt ? gt.name : '?') + ' — ' + (ql ? ql.name : '?'), 438, 72);
+      ctx.fillStyle = '#ccc'; ctx.font = '8px monospace';
+      if (gt && ql) ctx.fillText(gt.bonuses[hubGemPick.quality], 438, 84);
+      // Count matching gems for combine
+      const sameCount = gems.filter(g => g.typeId === hubGemPick.typeId && g.quality === hubGemPick.quality).length;
+      const canCombine = sameCount >= 3 && hubGemPick.quality < 4;
+      ctx.fillStyle = '#888'; ctx.font = '7px monospace';
+      ctx.fillText(`You have: ${sameCount}x  (need 3 to combine)`, 438, 96);
+      drawButton(438, 102, 130, 16, canCombine ? 'COMBINE 3→1' : 'NEED 3 SAME', canCombine, '#44ccff');
+      drawButton(438, 122, 130, 16, 'REMOVE FROM SLOT (25g)', false, '#888');
+    }
+
+    // Item socket targets — show equipped items with open sockets
+    ctx.fillStyle = '#888'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('SOCKET INTO EQUIPPED (click slot):', 10, 196);
+    let xi = 0;
+    for (const k of Object.keys(player.equipped)) {
+      const it = player.equipped[k];
+      if (!it || !it.base.maxSockets) continue;
+      const socks = it.sockets || [];
+      for (let si = 0; si < it.base.maxSockets; si++) {
+        const gemInSlot = socks[si];
+        const bx = 10 + xi * 34, by = 205;
+        const gt2 = gemInSlot && typeof getGemType === 'function' ? getGemType(gemInSlot.typeId) : null;
+        ctx.fillStyle = gt2 ? '#1a1422' : '#111118';
+        ctx.fillRect(bx, by, 30, 30);
+        ctx.strokeStyle = gt2 ? gt2.color : '#444'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, 30, 30);
+        ctx.fillStyle = gt2 ? gt2.color : '#333'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('◆', bx + 15, by + 16);
+        ctx.fillStyle = '#555'; ctx.font = '6px monospace';
+        ctx.fillText(SLOT_LABEL[k] ? SLOT_LABEL[k].substring(0, 3) : k.substring(0, 3), bx + 15, by + 27);
+        // Store hitbox for gem insert
+        if (!it._jSock) it._jSock = [];
+        it._jSock[si] = { x: bx, y: by, w: 30, h: 30, slot: k, si };
+        xi++;
+      }
+    }
+
+    drawButton(8, 8, 70, 16, '← BACK', true, '#888');
+    ctx.textAlign = 'left';
+  }
 
   function drawParagonScreen() {
     const W = 640, H = 360;
@@ -3333,3 +3620,321 @@
       }
 
       // Gamepad d-pad grid navigation
+      if (gpJustPressed.has(15)) { gpClassIdx = (gpClassIdx % COLS === COLS - 1) ? gpClassIdx : gpClassIdx + 1; }
+      if (gpJustPressed.has(14)) { gpClassIdx = (gpClassIdx % COLS === 0) ? gpClassIdx : gpClassIdx - 1; }
+      if (gpJustPressed.has(13)) { gpClassIdx = Math.min(classIds.length - 1, gpClassIdx + COLS); }
+      if (gpJustPressed.has(12)) { gpClassIdx = Math.max(0, gpClassIdx - COLS); }
+      // A/Cross = confirm highlighted
+      if (gpJustPressed.has(0)) picked = classIds[gpClassIdx];
+
+      // Mouse click
+      if (!picked && mouseClicked) {
+        if (isHovering(8, 8, 140, 20)) {
+          cycleMode();
+        } else if (isHovering(W - 170, 34, 75, 18)) {
+          // HUB button
+          hubSubMenu = null; hubSelectedItem = null; hubGemPick = null;
+          state = STATE.HUB;
+        } else if (isHovering(W - 170, 8, 160, 20)) {
+          state = STATE.CHAR_SCREEN;
+        } else {
+          const cardW = 148, cardH = 138, gap = 6;
+          const totalW = cardW * COLS + gap * (COLS - 1);
+          const startX = Math.floor((W - totalW) / 2);
+          const startY = 48;
+          for (let i = 0; i < classIds.length; i++) {
+            const col = i % COLS, row = Math.floor(i / COLS);
+            const cx = startX + col * (cardW + gap);
+            const cy = startY + row * (cardH + gap);
+            if (mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH) {
+              picked = classIds[i]; break;
+            }
+          }
+        }
+      }
+      if (picked) pickClass(picked);
+    }
+    else if (state === STATE.CHAR_SCREEN) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (keyJustPressed.has('escape') || keyJustPressed.has('c') || gpJustPressed.has(1)) {
+        state = STATE.CLASS_SELECT;
+      }
+      if (mouseClicked) {
+        // Back button
+        if (isHovering(8, H - 26, 80, 20)) { state = STATE.CLASS_SELECT; }
+        // Class tabs
+        const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
+        const tabW = Math.floor((W - 16) / allClasses.length);
+        for (let i = 0; i < allClasses.length; i++) {
+          if (isHovering(8 + i * tabW, 48, tabW - 2, 16)) { charTreeClass = allClasses[i]; break; }
+        }
+        // Talent node clicks
+        const tree = TALENT_TREES[charTreeClass];
+        if (tree) {
+          const treeStartY = 72, rowH = 46, colW = 155, nodeW = 130, nodeH = 32;
+          const treeX = Math.floor((W - 3 * colW) / 2) + 20;
+          for (const node of tree.nodes) {
+            const nx = treeX + (node.col - 1) * colW;
+            const ny = treeStartY + (node.row - 1) * rowH;
+            if (isHovering(nx, ny, nodeW, nodeH)) {
+              spendTalent(charTreeClass, node);
+              break;
+            }
+          }
+        }
+      }
+    }
+    else if (state === STATE.TRIAL_LOADOUT) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (gpJustPressed.has(1)) { loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT; }
+      if (mouseClicked) {
+        // Click equipped slot — unequip
+        const eqSlot = getLoadoutSlotAtMouse();
+        if (eqSlot) {
+          delete loadout[eqSlot];
+        } else {
+          // Click stash item — equip into its slot
+          const si = getLoadoutStashIdxAtMouse();
+          if (si >= 0 && stash[si]) {
+            const item = stash[si];
+            let targetSlot = item.base.slot;
+            if (targetSlot === 'ring') {
+              if (loadout.ring1 === undefined) targetSlot = 'ring1';
+              else if (loadout.ring2 === undefined) targetSlot = 'ring2';
+              else targetSlot = 'ring1';
+            }
+            for (const slot in loadout) {
+              if (loadout[slot] === si) delete loadout[slot];
+            }
+            loadout[targetSlot] = si;
+          } else {
+            if (isHovering(W - 280, H - 30, 130, 24)) {
+              loadout = {}; runMode = 'standard'; state = STATE.CLASS_SELECT;
+            } else if (isHovering(W - 140, H - 30, 120, 24)) {
+              startTrialRun();
+            }
+          }
+        }
+      }
+    }
+    // TRIALS_SELECT — paragon board input
+    if (state === STATE.TRIALS_SELECT && mouseClicked) {
+      if (mouseX >= 8 && mouseX <= 63 && mouseY >= 8 && mouseY <= 24) {
+        state = STATE.CLASS_SELECT;
+      } else {
+        const CATS = Object.keys(PARAGON_BOARD);
+        const tabW = 70, tabStartX = W/2 - (CATS.length * tabW) / 2;
+        let handled = false;
+        for (let i = 0; i < CATS.length; i++) {
+          const tx = tabStartX + i * tabW;
+          if (mouseX >= tx && mouseX <= tx + tabW - 2 && mouseY >= 58 && mouseY <= 72) {
+            paragonTreeCat = CATS[i]; handled = true; break;
+          }
+        }
+        if (!handled) {
+          const cat = PARAGON_BOARD[paragonTreeCat];
+          for (const node of cat.nodes) {
+            if (node._hx !== undefined &&
+                mouseX >= node._hx && mouseX <= node._hx + node._hw &&
+                mouseY >= node._hy && mouseY <= node._hy + node._hh) {
+              spendParagon(node.id); break;
+            }
+          }
+        }
+      }
+    }
+    // HUB state input
+    if (state === STATE.HUB) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      if (keyJustPressed.has('h') || keyJustPressed.has('escape') || gpJustPressed.has(1)) {
+        if (hubSubMenu) { hubSubMenu = null; hubSelectedItem = null; hubGemPick = null; }
+        else state = STATE.CLASS_SELECT;
+      }
+      if (mouseClicked) {
+        // Back button (8,8,70,16) — always visible
+        if (isHovering(8, 8, 70, 16)) {
+          if (hubSubMenu) { hubSubMenu = null; hubSelectedItem = null; hubGemPick = null; }
+          else state = STATE.CLASS_SELECT;
+        } else if (!hubSubMenu) {
+          // NPC panel clicks
+          const panels = drawHubScreen._panels || [];
+          for (const p of panels) {
+            if (mouseX >= p._hx && mouseX <= p._hx + p._hw && mouseY >= p._hy && mouseY <= p._hy + p._hh) {
+              hubSubMenu = p.id; hubSelectedItem = null; hubGemPick = null; break;
+            }
+          }
+        } else if (hubSubMenu === 'blacksmith') {
+          // Select item
+          for (const k of Object.keys(player.equipped)) {
+            const it = player.equipped[k];
+            if (!it) continue;
+            if (it._bsHx !== undefined && mouseX >= it._bsHx && mouseX < it._bsHx + it._bsHw && mouseY >= it._bsHy && mouseY < it._bsHy + it._bsHh) {
+              hubSelectedItem = { source: 'eq', key: k }; break;
+            }
+          }
+          if (!hubSelectedItem) {
+            const invItems = player.inventory.filter(Boolean);
+            for (const it of invItems) {
+              if (it._bsHx !== undefined && mouseX >= it._bsHx && mouseX < it._bsHx + it._bsHw && mouseY >= it._bsHy && mouseY < it._bsHy + it._bsHh) {
+                hubSelectedItem = { source: 'inv', it }; break;
+              }
+            }
+          }
+          // Add socket button (232,98,140,18)
+          if (hubSelectedItem && isHovering(232, 98, 140, 18)) {
+            const it = hubSelectedItem.source === 'eq' ? player.equipped[hubSelectedItem.key] : hubSelectedItem.it;
+            if (it && player.gold >= 50) {
+              const socks = (it.sockets || []);
+              const maxS = it.base.maxSockets || 0;
+              if (socks.length < maxS) {
+                if (!it.sockets) it.sockets = [];
+                it.sockets.push(null); // empty socket
+                player.gold -= 50;
+                saveData();
+                spawnDamageNumber(W/2, H/2, 'SOCKET ADDED', { color: '#ff8844', size: 12, vy: -50, life: 1.5 });
+              }
+            }
+          }
+        } else if (hubSubMenu === 'jeweler') {
+          // Gem selection
+          const gems = player.gems || [];
+          for (let i = 0; i < gems.length; i++) {
+            const gem = gems[i];
+            if (gem._jHx !== undefined && mouseX >= gem._jHx && mouseX < gem._jHx + gem._jHw && mouseY >= gem._jHy && mouseY < gem._jHy + gem._jHh) {
+              hubGemPick = (hubGemPick && hubGemPick._idx === i) ? null : { ...gem, _idx: i };
+              break;
+            }
+          }
+          // Combine button (438,102,130,16)
+          if (hubGemPick && isHovering(438, 102, 130, 16)) {
+            const sameIdxs = gems.map((g,i) => (g.typeId === hubGemPick.typeId && g.quality === hubGemPick.quality) ? i : -1).filter(i => i >= 0);
+            if (sameIdxs.length >= 3 && hubGemPick.quality < 4) {
+              // Remove 3 gems
+              const toRemove = sameIdxs.slice(0, 3).sort((a,b) => b-a);
+              for (const idx of toRemove) gems.splice(idx, 1);
+              // Add 1 higher quality
+              gems.push({ typeId: hubGemPick.typeId, quality: hubGemPick.quality + 1 });
+              hubGemPick = null;
+              saveData();
+              spawnDamageNumber(W/2, H/2, 'GEM UPGRADED!', { color: '#44ccff', size: 13, vy: -55, life: 1.8 });
+            }
+          }
+          // Socket gem into item slot
+          for (const k of Object.keys(player.equipped)) {
+            const it = player.equipped[k];
+            if (!it || !it._jSock) continue;
+            for (const sock of it._jSock) {
+              if (!sock) continue;
+              if (mouseX >= sock.x && mouseX < sock.x + sock.w && mouseY >= sock.y && mouseY < sock.y + sock.h) {
+                if (hubGemPick) {
+                  // Insert gem
+                  if (!it.sockets) it.sockets = [];
+                  while (it.sockets.length <= sock.si) it.sockets.push(null);
+                  it.sockets[sock.si] = { typeId: hubGemPick.typeId, quality: hubGemPick.quality };
+                  gems.splice(hubGemPick._idx, 1);
+                  hubGemPick = null;
+                  player.recomputeStats();
+                  saveData();
+                }
+              }
+            }
+          }
+        }
+      }
+      // H key from dead/victory → hub
+    }
+    // H key from dead/victory state — visit hub
+    if ((state === STATE.DEAD || state === STATE.VICTORY) && keyJustPressed.has('h')) {
+      if (!runXpAwarded) { awardRunXp(runWavesCompleted, runBossesKilled, state === STATE.VICTORY); runXpAwarded = true; }
+      hubSubMenu = null; hubSelectedItem = null; hubGemPick = null;
+      state = STATE.HUB;
+    }
+
+    for (const p of particles) p.update(dt);
+    particles = particles.filter(p => !p.dead);
+    updateDamageNumbers(dt);
+    if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
+    if (lootFlashTimer > 0) lootFlashTimer -= dt;
+    if (bossBannerTimer > 0) bossBannerTimer -= dt;
+    if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
+    if (goldFlashTimer > 0) goldFlashTimer -= dt;
+    if (biomeBannerTimer > 0) biomeBannerTimer -= dt;
+    shake *= 0.85; if (shake < 0.05) shake = 0;
+
+    ctx.save();
+    if (shake > 0 && state !== STATE.INVENTORY && state !== STATE.SHOP) {
+      const sx = (Math.random() - 0.5) * shake * 2;
+      const sy = (Math.random() - 0.5) * shake * 2;
+      ctx.translate(sx, sy);
+    }
+    drawBackground();
+    drawGroundEffects(ctx);
+    for (const d of itemDrops) d.draw(ctx);
+    // Ability cast rings
+    for (let i = abilityFlashes.length - 1; i >= 0; i--) {
+      const f = abilityFlashes[i];
+      f.r += (f.maxR - f.r) * 0.28;
+      f.life -= 1/60;
+      if (f.life <= 0) { abilityFlashes.splice(i, 1); continue; }
+      const alpha = f.life / f.maxLife;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.75;
+      ctx.strokeStyle = f.color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = alpha * 0.12;
+      ctx.fillStyle = f.color;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.6, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    for (const g of xpGems) g.draw(ctx);
+    for (const p of particles) p.draw(ctx);
+    for (const e of enemies) e.draw(ctx);
+    for (const e of enemies) if (e.alive && e.elite) drawEliteBeacon(ctx, e);
+    for (const sw of meleeSwings) sw.draw(ctx);
+    for (const p of projectiles) p.draw(ctx);
+    for (const ep of enemyProjectiles) ep.draw(ctx);
+    if (state !== STATE.DEAD) player.draw(ctx);
+    drawDamageNumbers(ctx);
+    ctx.restore();
+
+    drawHud();
+    if (state === STATE.PLAYING) drawAbilityBar();
+    if (state === STATE.LEVELUP) drawLevelUpScreen();
+    else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
+    else if (state === STATE.DEAD) drawDeathScreen();
+    else if (state === STATE.VICTORY) drawVictoryScreen();
+    else if (state === STATE.INVENTORY) drawInventoryScreen();
+    else if (state === STATE.SHOP) drawShopScreen();
+    else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
+    else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
+    else if (state === STATE.TRIAL_LOADOUT) drawTrialLoadoutScreen();
+    else if (state === STATE.ACT_TRANSITION) drawActTransitionScreen();
+    else if (state === STATE.CHAR_SCREEN) drawCharScreen();
+    else if (state === STATE.TRIALS_SELECT) drawParagonScreen();
+    else if (state === STATE.HUB) drawHubScreen();
+
+    // Virtual cursor on top of all UI
+    if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP ||
+        state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT ||
+        state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT ||
+        state === STATE.CHAR_SCREEN || state === STATE.HUB) {
+      drawVirtualCursor();
+    }
+
+    finalizeFrame();
+  }
+
+  function finalizeFrame() {
+    keyJustPressed.clear();
+    mouseClicked = false;
+    rightClicked = false;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+</script>
+</body>
+</html>

@@ -39,36 +39,38 @@ const SLOT_LABEL = {
   amulet: 'AMULET', ring1: 'RING I', ring2: 'RING II', weapon: 'WEAPON', offhand: 'OFFHAND',
 };
 const RARITY = {
-  WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 60, dmgMult: 1.00 },
-  BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 25, dmgMult: 1.15 },
-  YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 10, dmgMult: 1.30 },
-  ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 4,  dmgMult: 1.50 },
-  GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1,  dmgMult: 1.40 },
+  WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 600, dmgMult: 1.00 },
+  BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 290, dmgMult: 1.15 },
+  YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 100, dmgMult: 1.30 },
+  // Legendary: ~0.9% base (feels special). Set: ~0.1% (incredibly rare).
+  // Unique: never in this pool — drops via special boss conditions only.
+  ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 9,   dmgMult: 1.50 },
+  GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1,   dmgMult: 1.40 },
 };
 const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
 
 const ITEM_BASES = [
-  // Armor
-  { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H' },
-  { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C' },
-  { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G' },
-  { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F' },
-  { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L' },
-  // Jewelry
-  { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
-  { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
-  // Weapons — kind: 'melee' swings in an arc; 'ranged' fires a projectile
-  { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W', kind: 'ranged' },
-  { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W', kind: 'melee'  },
-  { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W', kind: 'melee'  },
-  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W', kind: 'melee'  },
-  { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W', kind: 'ranged' },
-  { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W', kind: 'ranged' },
-  { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W', kind: 'melee'  },
-  // Off-hands
-  { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
-  { id: 'shield', name: 'Wooden Shield',  slot: 'offhand', letter: 'O' },
-  { id: 'orb',    name: 'Magic Orb',      slot: 'offhand', letter: 'O' },
+  // Armor — maxSockets: chest/offhand get 2, small pieces get 1
+  { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H', maxSockets: 1 },
+  { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C', maxSockets: 2 },
+  { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G', maxSockets: 1 },
+  { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F', maxSockets: 1 },
+  { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L', maxSockets: 1 },
+  // Jewelry — amulet gets 1 socket, rings get 0 (too small)
+  { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A', maxSockets: 1 },
+  { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R', maxSockets: 0 },
+  // Weapons — 2 sockets each
+  { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
+  { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
+  { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
+  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
+  { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
+  { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
+  { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
+  // Off-hands — shield/offhand get 2, quiver gets 1
+  { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q', maxSockets: 1 },
+  { id: 'shield', name: 'Wooden Shield',  slot: 'offhand', letter: 'O', maxSockets: 2 },
+  { id: 'orb',    name: 'Magic Orb',      slot: 'offhand', letter: 'O', maxSockets: 2 },
 ];
 const AFFIX_POOL = [
   { id: 'maxhp',        min: 5,  max: 22, fmt: (v) => `+${v} Max HP`,         apply: (p, v) => { p.bonusMaxHp += v; } },
@@ -85,47 +87,63 @@ const AFFIX_POOL = [
 
 function rngInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function rngPick(arr) { return arr[rngInt(0, arr.length - 1)]; }
-function pickWeightedRarity() {
-  const total = RARITY_LIST.reduce((s, r) => s + r.weight, 0);
+function pickWeightedRarity(iLvl) {
+  iLvl = iLvl || 1;
+  // Set items only drop at iLvl 20+. Legendary suppressed early too.
+  const effective = RARITY_LIST.map(r => {
+    if (r.id === 'green'  && iLvl < 20) return { ...r, weight: 0 };
+    if (r.id === 'orange' && iLvl < 10) return { ...r, weight: Math.floor(r.weight * 0.2) };
+    return r;
+  });
+  const total = effective.reduce((s, r) => s + r.weight, 0);
   let roll = Math.random() * total;
-  for (const r of RARITY_LIST) { roll -= r.weight; if (roll <= 0) return r; }
+  for (const r of effective) { roll -= r.weight; if (roll <= 0) return RARITY_LIST.find(x=>x.id===r.id) || r; }
   return RARITY.WHITE;
 }
-function rollAffixes(count) {
+function rollAffixes(count, iLvl) {
+  iLvl = iLvl || 40; // default full value for legacy calls
+  const scale = Math.max(0.3, 0.3 + 0.7 * (iLvl / 40)); // 30% at iLvl1 → 100% at iLvl40
   const pool = AFFIX_POOL.slice();
   const out = [];
   for (let i = 0; i < count && pool.length > 0; i++) {
     const idx = rngInt(0, pool.length - 1);
     const def = pool.splice(idx, 1)[0];
-    out.push({ def, value: rngInt(def.min, def.max) });
+    const min = Math.max(1, Math.round(def.min * scale));
+    const max = Math.max(min, Math.round(def.max * scale));
+    out.push({ def, value: rngInt(min, max) });
   }
   return out;
 }
 let nextItemId = 1;
-function _tagItem(item) {
+function _tagItem(item, iLvl) {
+  item.itemLevel = iLvl || 1;
+  item.sockets = []; // empty socket slots — Blacksmith adds actual socket slots
   if (item.rarity.id === 'green' && typeof SET_DEFS !== 'undefined' && SET_DEFS.length)
     item.setId = rngPick(SET_DEFS).id;
   if (item.rarity.id === 'orange' && typeof LEGENDARY_EFFECTS !== 'undefined' && LEGENDARY_EFFECTS.length)
     item.legendaryEffectId = rngPick(LEGENDARY_EFFECTS).id;
   return item;
 }
-function generateItem() {
-  const rarity = pickWeightedRarity();
+function generateItem(iLvl) {
+  if (iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
+  iLvl = Math.max(1, Math.min(40, iLvl));
+  const rarity = pickWeightedRarity(iLvl);
   const base = rngPick(ITEM_BASES);
-  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) });
+  const count = rngInt(rarity.affixMin, rarity.affixMax);
+  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(count, iLvl) }, iLvl);
 }
 // Generate item with at least a minimum rarity (for elite drops)
-function generateItemMinRarity(minId) {
+function generateItemMinRarity(minId, iLvl) {
+  if (iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
+  iLvl = Math.max(1, Math.min(40, iLvl));
   const order = { white: 0, blue: 1, yellow: 2, orange: 3, green: 4 };
-  let rarity = pickWeightedRarity();
-  // Reroll until we meet minimum (cap at 20 tries)
-  for (let i = 0; i < 20 && order[rarity.id] < order[minId]; i++) rarity = pickWeightedRarity();
-  if (order[rarity.id] < order[minId]) {
-    // Force minimum if rerolls failed (rare edge case)
+  let rarity = pickWeightedRarity(iLvl);
+  for (let i = 0; i < 20 && order[rarity.id] < order[minId]; i++) rarity = pickWeightedRarity(iLvl);
+  if (order[rarity.id] < order[minId])
     rarity = RARITY_LIST.find(r => r.id === minId) || RARITY.YELLOW;
-  }
   const base = rngPick(ITEM_BASES);
-  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) });
+  const count = rngInt(rarity.affixMin, rarity.affixMax);
+  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(count, iLvl) }, iLvl);
 }
 // Class-biased item: prefers the class's weapon types, falls back to random
 const CLASS_PREFERRED_BASES = {
@@ -148,8 +166,11 @@ function generateItemForClass(classId) {
   } else {
     base = rngPick(ITEM_BASES);
   }
-  const rarity = pickWeightedRarity();
-  return { id: nextItemId++, base, rarity, affixes: rollAffixes(rngInt(rarity.affixMin, rarity.affixMax)) };
+  if (typeof iLvl === 'undefined' || iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
+  iLvl = Math.max(1, Math.min(40, iLvl));
+  const rarity = pickWeightedRarity(iLvl);
+  const count = rngInt(rarity.affixMin, rarity.affixMax);
+  return _tagItem({ id: nextItemId++, base, rarity, affixes: rollAffixes(count, iLvl) }, iLvl);
 }
 function itemDisplayName(item) {
   if (item.uniqueId) {
@@ -426,6 +447,61 @@ function getParagonNode(id) {
     if (n) return n;
   }
   return null;
+}
+
+
+// ============================================================
+// GEM SYSTEM
+// ============================================================
+// 4 gem types × 5 quality tiers. Socketed into item socket slots by the Jeweler.
+// Quality 0=Chipped, 1=Flawed, 2=Normal, 3=Flawless, 4=Perfect
+const GEM_QUALITIES = [
+  { id: 0, name: 'Chipped',  color: '#888888', minILvl: 1  },
+  { id: 1, name: 'Flawed',   color: '#aaaaaa', minILvl: 10 },
+  { id: 2, name: 'Normal',   color: '#cccccc', minILvl: 20 },
+  { id: 3, name: 'Flawless', color: '#eeeebb', minILvl: 30 },
+  { id: 4, name: 'Perfect',  color: '#ffffff', minILvl: 40 },
+];
+const GEM_TYPES = [
+  {
+    id: 'ruby', name: 'Ruby', color: '#ff3333',
+    bonuses: [ '+3 HP, +1 Armor', '+6 HP, +2 Armor', '+10 HP, +3 Armor', '+16 HP, +5 Armor', '+25 HP, +8 Armor' ],
+    apply: (p, q) => { const hp=[3,6,10,16,25][q]; const ar=[1,2,3,5,8][q]; p.bonusMaxHp+=hp; p.bonusArmor+=ar; },
+  },
+  {
+    id: 'sapphire', name: 'Sapphire', color: '#3366ff',
+    bonuses: [ '+5 Resource, +1 Regen', '+10 Resource, +1.5 Regen', '+18 Resource, +2 Regen', '+28 Resource, +3 Regen', '+40 Resource, +5 Regen' ],
+    apply: (p, q) => { const rs=[5,10,18,28,40][q]; const rr=[1,1.5,2,3,5][q]; p.bonusMaxResource+=rs; p.bonusResourceRegen+=rr; },
+  },
+  {
+    id: 'topaz', name: 'Topaz', color: '#ffcc00',
+    bonuses: [ '+3% Dmg, +2% Atk Spd', '+5% Dmg, +4% Atk Spd', '+8% Dmg, +6% Atk Spd', '+13% Dmg, +10% Atk Spd', '+20% Dmg, +15% Atk Spd' ],
+    apply: (p, q) => { const dm=[3,5,8,13,20][q]; const fs=[2,4,6,10,15][q]; p.bonusDmgPct+=dm; p.bonusFireRatePct+=fs; },
+  },
+  {
+    id: 'emerald', name: 'Emerald', color: '#22cc55',
+    bonuses: [ '+1% Crit, +1% Dodge', '+2% Crit, +2% Dodge', '+4% Crit, +3% Dodge', '+6% Crit, +5% Dodge', '+10% Crit, +8% Dodge' ],
+    apply: (p, q) => { const cc=[1,2,4,6,10][q]; const dg=[1,2,3,5,8][q]; p.bonusCritChance+=cc; p.bonusDodge+=dg; },
+  },
+];
+function getGemType(id) { return GEM_TYPES.find(g => g.id === id) || null; }
+function getGemQuality(q) { return GEM_QUALITIES[Math.max(0, Math.min(4, q))] || GEM_QUALITIES[0]; }
+function gemDisplayName(gem) {
+  const t = getGemType(gem.typeId);
+  const q = getGemQuality(gem.quality);
+  return t ? `${q.name} ${t.name}` : 'Unknown Gem';
+}
+// Roll a gem drop based on iLvl — higher iLvl = better quality, rarer
+function rollGemDrop(iLvl) {
+  iLvl = iLvl || 1;
+  // Quality determined by iLvl
+  let quality = 0;
+  if (iLvl >= 40) quality = Math.random() < 0.3 ? 4 : (Math.random() < 0.5 ? 3 : 2);
+  else if (iLvl >= 30) quality = Math.random() < 0.4 ? 3 : (Math.random() < 0.5 ? 2 : 1);
+  else if (iLvl >= 20) quality = Math.random() < 0.5 ? 2 : 1;
+  else if (iLvl >= 10) quality = Math.random() < 0.4 ? 1 : 0;
+  const typeId = rngPick(GEM_TYPES).id;
+  return { typeId, quality };
 }
 
 // ============================================================

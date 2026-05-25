@@ -354,6 +354,7 @@ class Player {
       amulet: null, ring1: null, ring2: null, weapon: null, offhand: null,
     };
     this.inventory = []; this.INVENTORY_CAP = 24;
+    this.gems = []; this.GEM_CAP = 50; // gem stash
     this.gold = 0;
     this.mats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
   }
@@ -411,6 +412,18 @@ class Player {
       if (def && def.uniqueEffect) {
         if (def.uniqueEffect.apply) def.uniqueEffect.apply(this);
         if (def.uniqueEffect.id) this.uniqueEffects.push(def.uniqueEffect.id);
+      }
+    }
+    // Socketed gem bonuses
+    if (typeof GEM_TYPES !== 'undefined') {
+      for (const k in this.equipped) {
+        const it = this.equipped[k];
+        if (!it || !it.sockets) continue;
+        for (const gem of it.sockets) {
+          if (!gem || !gem.typeId) continue;
+          const gemType = GEM_TYPES.find(g => g.id === gem.typeId);
+          if (gemType) gemType.apply(this, gem.quality || 0);
+        }
       }
     }
     const oldMax = this.maxHp;
