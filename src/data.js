@@ -1197,6 +1197,150 @@ function castAbility(slotIdx) {
 }
 
 // ============================================================
+// TALENT SYSTEM
+// ============================================================
+function addAbilityToPlayer(p, abilityId) {
+  if (!ABILITIES[abilityId]) return;
+  for (let i = 0; i < p.abilities.length; i++) {
+    if (p.abilities[i] && p.abilities[i].id === abilityId) return; // already has it
+  }
+  for (let i = 1; i < p.abilities.length; i++) { // slot 0 = signature
+    if (!p.abilities[i]) {
+      p.abilities[i] = { id: abilityId, def: ABILITIES[abilityId], rarity: RARITY.WHITE };
+      return;
+    }
+  }
+}
+
+// Tree nodes: { id, name, row(1-5), col(1-3), type:'passive'|'ability', abilityId, desc, apply(p) }
+// Unlock rule: to spend in row N you need ≥1 spent node in row N-1.
+const TALENT_TREES = {
+  archer: { nodes: [
+    // Row 1 — always available
+    { id:'a_keen_eye',       row:1, col:1, type:'passive', name:'Keen Eye',          desc:'+5% Crit Chance',              apply:(p)=>{ p.baseCritChance+=5;          p.recomputeStats(); } },
+    { id:'a_swift_quiver',   row:1, col:2, type:'passive', name:'Swift Quiver',      desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
+    { id:'a_eagle_scout',    row:1, col:3, type:'passive', name:'Eagle Scout',       desc:'+20 Pickup Range',             apply:(p)=>{ p.basePickupRange+=20;        p.recomputeStats(); } },
+    // Row 2
+    { id:'a_rain',           row:2, col:1, type:'ability', abilityId:'rainOfArrows',  name:'Rain of Arrows', desc:'Unlock: Rain of Arrows',  apply:(p)=>{ addAbilityToPlayer(p,'rainOfArrows'); } },
+    { id:'a_sharpshooter',   row:2, col:2, type:'passive', name:'Sharpshooter',      desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
+    { id:'a_hawk_eye',       row:2, col:3, type:'ability', abilityId:'hawkEye',       name:'Hawk Eye',       desc:'Unlock: Hawk Eye',        apply:(p)=>{ addAbilityToPlayer(p,'hawkEye'); } },
+    // Row 3
+    { id:'a_piercing',       row:3, col:1, type:'ability', abilityId:'piercingShot',  name:'Piercing Shot',  desc:'Unlock: Piercing Shot',   apply:(p)=>{ addAbilityToPlayer(p,'piercingShot'); } },
+    { id:'a_lethal_focus',   row:3, col:2, type:'passive', name:'Lethal Focus',      desc:'+10% Dmg, +5% Crit',           apply:(p)=>{ p.baseDmgMult*=1.10; p.baseCritChance+=5; p.recomputeStats(); } },
+    { id:'a_crit_mastery',   row:3, col:3, type:'passive', name:'Crit Mastery',      desc:'+25% Crit Damage',             apply:(p)=>{ p.baseCritDmg+=0.25;          p.recomputeStats(); } },
+    // Row 4
+    { id:'a_volley',         row:4, col:1, type:'ability', abilityId:'arrowVolley',   name:'Arrow Volley',   desc:'Unlock: Arrow Volley',    apply:(p)=>{ addAbilityToPlayer(p,'arrowVolley'); } },
+    { id:'a_predator',       row:4, col:3, type:'passive', name:'Predator',          desc:'+8% Dodge, +5% Crit',          apply:(p)=>{ p.baseDodge+=8; p.baseCritChance+=5; p.recomputeStats(); } },
+    // Row 5 — Capstone
+    { id:'a_deadeye',        row:5, col:2, type:'passive', name:'Dead Eye',          desc:'+20% Dmg, +50% Crit Dmg, +5% Crit', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseCritDmg+=0.50; p.baseCritChance+=5; p.recomputeStats(); } },
+  ]},
+
+  wizard: { nodes: [
+    { id:'w_arcane_mind',    row:1, col:1, type:'passive', name:'Arcane Mind',       desc:'+12% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.12;          p.recomputeStats(); } },
+    { id:'w_mana_surge',     row:1, col:2, type:'passive', name:'Mana Surge',        desc:'+40 Max Mana',                 apply:(p)=>{ p.baseMaxResource+=40;        p.recomputeStats(); } },
+    { id:'w_glass_cannon',   row:1, col:3, type:'passive', name:'Glass Cannon',      desc:'+20% Dmg, -15 Max HP',         apply:(p)=>{ p.baseDmgMult*=1.20; p.baseMaxHp=Math.max(10,p.baseMaxHp-15); p.recomputeStats(); } },
+    { id:'w_frost_nova',     row:2, col:1, type:'ability', abilityId:'frostNova',     name:'Frost Nova',     desc:'Unlock: Frost Nova',      apply:(p)=>{ addAbilityToPlayer(p,'frostNova'); } },
+    { id:'w_chain_react',    row:2, col:2, type:'passive', name:'Chain Reaction',    desc:'+15% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.15;          p.recomputeStats(); } },
+    { id:'w_arcane_orb',     row:2, col:3, type:'ability', abilityId:'arcaneOrb',     name:'Arcane Orb',     desc:'Unlock: Arcane Orb',      apply:(p)=>{ addAbilityToPlayer(p,'arcaneOrb'); } },
+    { id:'w_chain_light',    row:3, col:1, type:'ability', abilityId:'chainLightning',name:'Chain Lightning',desc:'Unlock: Chain Lightning',  apply:(p)=>{ addAbilityToPlayer(p,'chainLightning'); } },
+    { id:'w_overload',       row:3, col:2, type:'passive', name:'Overload',          desc:'+10% Dmg, +2 Armor',           apply:(p)=>{ p.baseDmgMult*=1.10; p.baseArmor+=2; p.recomputeStats(); } },
+    { id:'w_spell_echo',     row:3, col:3, type:'passive', name:'Spell Echo',        desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
+    { id:'w_mana_shield',    row:4, col:3, type:'passive', name:'Mana Shield',       desc:'+4 Armor, +20 Max Mana',       apply:(p)=>{ p.baseArmor+=4; p.baseMaxResource+=20; p.recomputeStats(); } },
+    { id:'w_archmage',       row:5, col:2, type:'passive', name:'Archmage',          desc:'+25% Dmg, +3 Armor, +30 Mana', apply:(p)=>{ p.baseDmgMult*=1.25; p.baseArmor+=3; p.baseMaxResource+=30; p.recomputeStats(); } },
+  ]},
+
+  warrior: { nodes: [
+    { id:'wa_battle_hard',   row:1, col:1, type:'passive', name:'Battle Hardened',   desc:'+25 Max HP',                   apply:(p)=>{ p.baseMaxHp+=25;              p.recomputeStats(); } },
+    { id:'wa_iron_skin',     row:1, col:2, type:'passive', name:'Iron Skin',         desc:'+3 Armor',                     apply:(p)=>{ p.baseArmor+=3;               p.recomputeStats(); } },
+    { id:'wa_war_vet',       row:1, col:3, type:'passive', name:'War Veteran',       desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
+    { id:'wa_cleave',        row:2, col:1, type:'ability', abilityId:'cleave',        name:'Cleave',         desc:'Unlock: Cleave',          apply:(p)=>{ addAbilityToPlayer(p,'cleave'); } },
+    { id:'wa_blood_rage',    row:2, col:2, type:'passive', name:'Blood Rage',        desc:'+15% Dmg, +25 Max HP',         apply:(p)=>{ p.baseDmgMult*=1.15; p.baseMaxHp+=25; p.recomputeStats(); } },
+    { id:'wa_thick_skin',    row:2, col:3, type:'passive', name:'Thick Skin',        desc:'+3 Armor, +1 HP/sec',          apply:(p)=>{ p.baseArmor+=3; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'wa_war_cry',       row:3, col:1, type:'ability', abilityId:'warCry',        name:'War Cry',        desc:'Unlock: War Cry',         apply:(p)=>{ addAbilityToPlayer(p,'warCry'); } },
+    { id:'wa_unstoppable',   row:3, col:2, type:'passive', name:'Unstoppable',       desc:'+5 Armor',                     apply:(p)=>{ p.baseArmor+=5;               p.recomputeStats(); } },
+    { id:'wa_endurance',     row:3, col:3, type:'passive', name:'Endurance',         desc:'+40 Max HP, +1 HP/sec',        apply:(p)=>{ p.baseMaxHp+=40; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'wa_charge',        row:4, col:1, type:'ability', abilityId:'charge',        name:'Charge',         desc:'Unlock: Charge',          apply:(p)=>{ addAbilityToPlayer(p,'charge'); } },
+    { id:'wa_colossus',      row:4, col:3, type:'passive', name:'Colossus',          desc:'+50 Max HP, +2 Armor',         apply:(p)=>{ p.baseMaxHp+=50; p.baseArmor+=2; p.recomputeStats(); } },
+    { id:'wa_ground_slam',   row:5, col:2, type:'ability', abilityId:'groundSlam',    name:'Ground Slam',    desc:'Unlock: Ground Slam',     apply:(p)=>{ addAbilityToPlayer(p,'groundSlam'); } },
+  ]},
+
+  rogue: { nodes: [
+    { id:'r_shadow_step',    row:1, col:1, type:'passive', name:'Shadow Step',       desc:'+15 Move Speed',               apply:(p)=>{ p.baseSpeed+=15;              p.recomputeStats(); } },
+    { id:'r_deadly_poison',  row:1, col:2, type:'passive', name:'Deadly Poison',     desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
+    { id:'r_reflexes',       row:1, col:3, type:'passive', name:'Quick Reflexes',    desc:'+4% Dodge',                    apply:(p)=>{ p.baseDodge+=4;               p.recomputeStats(); } },
+    { id:'r_blade_flurry',   row:2, col:1, type:'ability', abilityId:'bladeFlurry',   name:'Blade Flurry',   desc:'Unlock: Blade Flurry',    apply:(p)=>{ addAbilityToPlayer(p,'bladeFlurry'); } },
+    { id:'r_cut_run',        row:2, col:2, type:'passive', name:'Cut and Run',       desc:'+12% Atk Speed, +10 Speed',   apply:(p)=>{ p.baseFireRateMult*=1.12; p.baseSpeed+=10; p.recomputeStats(); } },
+    { id:'r_smoke_bomb',     row:2, col:3, type:'ability', abilityId:'smokeBomb',     name:'Smoke Bomb',     desc:'Unlock: Smoke Bomb',      apply:(p)=>{ addAbilityToPlayer(p,'smokeBomb'); } },
+    { id:'r_backstab',       row:3, col:1, type:'ability', abilityId:'backstab',      name:'Backstab',       desc:'Unlock: Backstab',        apply:(p)=>{ addAbilityToPlayer(p,'backstab'); } },
+    { id:'r_serrated',       row:3, col:2, type:'passive', name:'Serrated Edge',     desc:'+12% Dmg, +5% Crit',          apply:(p)=>{ p.baseDmgMult*=1.12; p.baseCritChance+=5; p.recomputeStats(); } },
+    { id:'r_phantom',        row:3, col:3, type:'passive', name:'Phantom',           desc:'+5% Dodge, +10 Speed',        apply:(p)=>{ p.baseDodge+=5; p.baseSpeed+=10; p.recomputeStats(); } },
+    { id:'r_evasion',        row:4, col:1, type:'ability', abilityId:'evasion',       name:'Evasion',        desc:'Unlock: Evasion',         apply:(p)=>{ addAbilityToPlayer(p,'evasion'); } },
+    { id:'r_killing_spree',  row:4, col:3, type:'passive', name:'Killing Spree',     desc:'+15% Atk Speed, +8% Crit Dmg',apply:(p)=>{ p.baseFireRateMult*=1.15; p.baseCritDmg+=0.08; p.recomputeStats(); } },
+    { id:'r_master_assassin',row:5, col:2, type:'passive', name:'Master Assassin',   desc:'+50% Crit Dmg, +8% Crit, +6% Dodge', apply:(p)=>{ p.baseCritDmg+=0.50; p.baseCritChance+=8; p.baseDodge+=6; p.recomputeStats(); } },
+  ]},
+
+  monk: { nodes: [
+    { id:'m_inner_peace',    row:1, col:1, type:'passive', name:'Inner Peace',       desc:'+2 HP/sec Regen',              apply:(p)=>{ p.baseRegen+=2;               p.recomputeStats(); } },
+    { id:'m_swift_strikes',  row:1, col:2, type:'passive', name:'Swift Strikes',     desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
+    { id:'m_spirit_focus',   row:1, col:3, type:'passive', name:'Spirit Focus',      desc:'+25 Max Chi',                  apply:(p)=>{ p.baseMaxResource+=25;        p.recomputeStats(); } },
+    { id:'m_cyclone',        row:2, col:1, type:'ability', abilityId:'cycloneStrike', name:'Cyclone Strike', desc:'Unlock: Cyclone Strike',  apply:(p)=>{ addAbilityToPlayer(p,'cycloneStrike'); } },
+    { id:'m_transcendence',  row:2, col:2, type:'passive', name:'Transcendence',     desc:'+2 HP/sec, +10% Dmg',         apply:(p)=>{ p.baseRegen+=2; p.baseDmgMult*=1.10; p.recomputeStats(); } },
+    { id:'m_sanctuary',      row:2, col:3, type:'ability', abilityId:'innerSanctuary',name:'Inner Sanctuary',desc:'Unlock: Inner Sanctuary', apply:(p)=>{ addAbilityToPlayer(p,'innerSanctuary'); } },
+    { id:'m_mantra',         row:3, col:1, type:'ability', abilityId:'mantraOfHealing',name:'Mantra of Healing',desc:'Unlock: Mantra of Healing',apply:(p)=>{ addAbilityToPlayer(p,'mantraOfHealing'); } },
+    { id:'m_lightning_ref',  row:3, col:2, type:'passive', name:'Lightning Reflex',  desc:'+15 Speed, +2 HP/sec',        apply:(p)=>{ p.baseSpeed+=15; p.baseRegen+=2; p.recomputeStats(); } },
+    { id:'m_chi_surge',      row:3, col:3, type:'passive', name:'Chi Surge',         desc:'+15% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.15;          p.recomputeStats(); } },
+    { id:'m_seven_sided',    row:4, col:1, type:'ability', abilityId:'sevenSidedStrike',name:'Seven-Sided Strike',desc:'Unlock: Seven-Sided Strike',apply:(p)=>{ addAbilityToPlayer(p,'sevenSidedStrike'); } },
+    { id:'m_one_with_all',   row:4, col:3, type:'passive', name:'One With Everything',desc:'+3 Armor, +2 HP/sec',        apply:(p)=>{ p.baseArmor+=3; p.baseRegen+=2; p.recomputeStats(); } },
+    { id:'m_nirvana',        row:5, col:2, type:'passive', name:'Nirvana',           desc:'+20% Dmg, +3 HP/sec, +10% Atk Speed', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseRegen+=3; p.baseFireRateMult*=1.10; p.recomputeStats(); } },
+  ]},
+
+  paladin: { nodes: [
+    { id:'p_holy_fervor',    row:1, col:1, type:'passive', name:'Holy Fervor',       desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
+    { id:'p_blessed_armor',  row:1, col:2, type:'passive', name:'Blessed Armor',     desc:'+3 Armor',                     apply:(p)=>{ p.baseArmor+=3;               p.recomputeStats(); } },
+    { id:'p_devotion',       row:1, col:3, type:'passive', name:'Devotion',          desc:'+25 Max HP, +1 HP/sec',        apply:(p)=>{ p.baseMaxHp+=25; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'p_consecration',   row:2, col:1, type:'ability', abilityId:'consecration',  name:'Consecration',   desc:'Unlock: Consecration',    apply:(p)=>{ addAbilityToPlayer(p,'consecration'); } },
+    { id:'p_divine_grace',   row:2, col:2, type:'passive', name:'Divine Grace',      desc:'+2 HP/sec, +2 Armor',         apply:(p)=>{ p.baseRegen+=2; p.baseArmor+=2; p.recomputeStats(); } },
+    { id:'p_divine_shield',  row:2, col:3, type:'ability', abilityId:'divineShield',  name:'Divine Shield',  desc:'Unlock: Divine Shield',   apply:(p)=>{ addAbilityToPlayer(p,'divineShield'); } },
+    { id:'p_hammer',         row:3, col:1, type:'ability', abilityId:'hammerOfJustice',name:'Hammer of Justice',desc:'Unlock: Hammer of Justice',apply:(p)=>{ addAbilityToPlayer(p,'hammerOfJustice'); } },
+    { id:'p_sacred_ground',  row:3, col:2, type:'passive', name:'Sacred Ground',     desc:'+3 Armor, +1 HP/sec',         apply:(p)=>{ p.baseArmor+=3; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'p_holy_light',     row:3, col:3, type:'passive', name:'Holy Light',        desc:'+2 HP/sec, +15 Max HP',       apply:(p)=>{ p.baseRegen+=2; p.baseMaxHp+=15; p.recomputeStats(); } },
+    { id:'p_lay_on_hands',   row:4, col:1, type:'ability', abilityId:'layOnHands',    name:'Lay on Hands',   desc:'Unlock: Lay on Hands',    apply:(p)=>{ addAbilityToPlayer(p,'layOnHands'); } },
+    { id:'p_indomitable',    row:4, col:3, type:'passive', name:'Indomitable',       desc:'+40 Max HP, +2 Armor',        apply:(p)=>{ p.baseMaxHp+=40; p.baseArmor+=2; p.recomputeStats(); } },
+    { id:'p_avatar',         row:5, col:2, type:'passive', name:'Avatar of Light',   desc:'+20% Dmg, +5 Armor, +3 HP/sec',apply:(p)=>{ p.baseDmgMult*=1.20; p.baseArmor+=5; p.baseRegen+=3; p.recomputeStats(); } },
+  ]},
+
+  witchdoctor: { nodes: [
+    { id:'wd_dark_pact',     row:1, col:1, type:'passive', name:'Dark Pact',         desc:'+12% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.12;          p.recomputeStats(); } },
+    { id:'wd_spirit_walk',   row:1, col:2, type:'passive', name:'Spirit Walk',       desc:'+15 Move Speed',               apply:(p)=>{ p.baseSpeed+=15;              p.recomputeStats(); } },
+    { id:'wd_fetish_power',  row:1, col:3, type:'passive', name:'Fetish Power',      desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
+    { id:'wd_soul_harvest',  row:2, col:1, type:'ability', abilityId:'soulHarvest',   name:'Soul Harvest',   desc:'Unlock: Soul Harvest',    apply:(p)=>{ addAbilityToPlayer(p,'soulHarvest'); } },
+    { id:'wd_mojo_mastery',  row:2, col:2, type:'passive', name:'Mojo Mastery',      desc:'+6 Resource Regen',            apply:(p)=>{ p.baseResourceRegen+=6;       p.recomputeStats(); } },
+    { id:'wd_voodoo',        row:2, col:3, type:'ability', abilityId:'bigBadVoodoo',  name:'Big Bad Voodoo', desc:'Unlock: Big Bad Voodoo',  apply:(p)=>{ addAbilityToPlayer(p,'bigBadVoodoo'); } },
+    { id:'wd_locust',        row:3, col:1, type:'ability', abilityId:'locustSwarm',   name:'Locust Swarm',   desc:'Unlock: Locust Swarm',    apply:(p)=>{ addAbilityToPlayer(p,'locustSwarm'); } },
+    { id:'wd_hex_master',    row:3, col:2, type:'passive', name:'Hex Master',        desc:'+15% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.15;          p.recomputeStats(); } },
+    { id:'wd_plague_bearer', row:3, col:3, type:'passive', name:'Plague Bearer',     desc:'+8% Dmg, +5 Regen',           apply:(p)=>{ p.baseDmgMult*=1.08; p.baseResourceRegen+=5; p.recomputeStats(); } },
+    { id:'wd_spiders',       row:4, col:1, type:'ability', abilityId:'corpseSpiders', name:'Corpse Spiders', desc:'Unlock: Corpse Spiders',  apply:(p)=>{ addAbilityToPlayer(p,'corpseSpiders'); } },
+    { id:'wd_voodoo_rush',   row:4, col:3, type:'passive', name:'Voodoo Rush',       desc:'+25 Max Mojo, +5 Regen',      apply:(p)=>{ p.baseMaxResource+=25; p.baseResourceRegen+=5; p.recomputeStats(); } },
+    { id:'wd_gargantuan',    row:5, col:2, type:'passive', name:'Gargantuan',        desc:'+25% Dmg, +6 Resource Regen', apply:(p)=>{ p.baseDmgMult*=1.25; p.baseResourceRegen+=6; p.recomputeStats(); } },
+  ]},
+
+  necromancer: { nodes: [
+    { id:'n_bone_mastery',   row:1, col:1, type:'passive', name:'Bone Mastery',      desc:'+12% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.12;          p.recomputeStats(); } },
+    { id:'n_death_embrace',  row:1, col:2, type:'passive', name:'Death Embrace',     desc:'+25 Max HP',                   apply:(p)=>{ p.baseMaxHp+=25;              p.recomputeStats(); } },
+    { id:'n_corpse_power',   row:1, col:3, type:'passive', name:'Corpse Power',      desc:'+8% Dmg, +4 Essence/sec',     apply:(p)=>{ p.baseDmgMult*=1.08; p.baseResourceRegen+=4; p.recomputeStats(); } },
+    { id:'n_bone_armor',     row:2, col:1, type:'ability', abilityId:'boneArmor',     name:'Bone Armor',     desc:'Unlock: Bone Armor',      apply:(p)=>{ addAbilityToPlayer(p,'boneArmor'); } },
+    { id:'n_brittle_bones',  row:2, col:2, type:'passive', name:'Brittle Bones',     desc:'+15% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.15;          p.recomputeStats(); } },
+    { id:'n_death_nova',     row:2, col:3, type:'ability', abilityId:'deathNova',     name:'Death Nova',     desc:'Unlock: Death Nova',      apply:(p)=>{ addAbilityToPlayer(p,'deathNova'); } },
+    { id:'n_blood_nova',     row:3, col:1, type:'ability', abilityId:'bloodNova',     name:'Blood Nova',     desc:'Unlock: Blood Nova',      apply:(p)=>{ addAbilityToPlayer(p,'bloodNova'); } },
+    { id:'n_essence_tap',    row:3, col:2, type:'passive', name:'Essence Tap',       desc:'+6 Essence/sec',               apply:(p)=>{ p.baseResourceRegen+=6;       p.recomputeStats(); } },
+    { id:'n_necrotic_aura',  row:3, col:3, type:'passive', name:'Necrotic Aura',     desc:'+10% Dmg, +2 Armor',          apply:(p)=>{ p.baseDmgMult*=1.10; p.baseArmor+=2; p.recomputeStats(); } },
+    { id:'n_corpse_lance',   row:4, col:1, type:'ability', abilityId:'corpseLance',   name:'Corpse Lance',   desc:'Unlock: Corpse Lance',    apply:(p)=>{ addAbilityToPlayer(p,'corpseLance'); } },
+    { id:'n_death_shroud',   row:4, col:3, type:'passive', name:'Death Shroud',      desc:'+4 Armor, +1 HP/sec',         apply:(p)=>{ p.baseArmor+=4; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'n_lich_form',      row:5, col:2, type:'passive', name:'Lich Form',         desc:'+20% Dmg, +5 Essence/sec, +4 Armor', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseResourceRegen+=5; p.baseArmor+=4; p.recomputeStats(); } },
+  ]},
+};
+
+// ============================================================
 // LEVEL-UP STAT POOL — 4 tiers (Common / Uncommon / Rare / Legendary)
 // ============================================================
 const TIER_DEFS = [

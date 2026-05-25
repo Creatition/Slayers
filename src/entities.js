@@ -1272,7 +1272,6 @@ function handleEnemyDeath(enemy) {
     spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
     xpGems.push(new XPGem(enemy.x, enemy.y, 1));
     player.gold += rngInt(1, 3);
-    goldFlashTimer = 0.8;
     if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
     shake = Math.min(shake + 1, 3);
     Sfx.enemyDie();
