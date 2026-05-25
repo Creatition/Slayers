@@ -401,7 +401,7 @@
       y: y - 4,
       vx: (opts.vx !== undefined) ? opts.vx : (Math.random() - 0.5) * 20,
       vy: (opts.vy !== undefined) ? opts.vy : -38 - Math.random() * 14,
-      text: String(Math.round(amount)),
+      text: (typeof amount === 'string') ? amount : String(Math.round(amount)),
       color: opts.color || '#fff7a0',
       size: opts.size || (opts.crit ? 11 : 8),
       life: opts.life || 0.65,
@@ -581,7 +581,7 @@
     let dmg = shooter.weaponDamage * (shooter.effectiveDmgMult ? shooter.effectiveDmgMult() : shooter.dmgMult);
     const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
     const isCrit = Math.random() * 100 < crit;
-    if (isCrit) { dmg *= 2; if (shooter.onCrit) shooter.onCrit(); }
+    if (isCrit) { dmg *= (shooter.critDmg || 2); if (shooter.onCrit) shooter.onCrit(); }
     projectiles.push(new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit));
     Sfx.shoot();
   }
@@ -1667,14 +1667,17 @@
     const cardY = (H - cardH) / 2 + 10;
     for (let i = 0; i < levelUpChoices.length; i++) {
       const choice = levelUpChoices[i];
+      const tierDef = (typeof TIER_DEFS !== 'undefined' ? TIER_DEFS : []).find(t => t.tier === choice.tier) || { name: 'Common', color: '#aaaaaa' };
       const cx = startX + i * (cardW + gap); const cy = cardY;
       const hovered = mouseX >= cx && mouseX <= cx + cardW && mouseY >= cy && mouseY <= cy + cardH;
       ctx.fillStyle = hovered ? '#3a3a45' : '#2a2a35'; ctx.fillRect(cx, cy, cardW, cardH);
-      ctx.strokeStyle = choice.color; ctx.lineWidth = hovered ? 3 : 2;
+      ctx.strokeStyle = tierDef.color; ctx.lineWidth = hovered ? 3 : 2;
       ctx.strokeRect(cx + 1, cy + 1, cardW - 2, cardH - 2); ctx.lineWidth = 1;
       ctx.fillStyle = '#666'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`[${i + 1}]`, cx + 6, cy + 14);
-      ctx.fillStyle = choice.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = tierDef.color; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(tierDef.name.toUpperCase(), cx + cardW - 6, cy + 14);
+      ctx.fillStyle = tierDef.color; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
       ctx.fillText(choice.name, cx + cardW / 2, cy + 64);
       ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
       ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);

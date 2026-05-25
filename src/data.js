@@ -57,14 +57,14 @@ const ITEM_BASES = [
   // Jewelry
   { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A' },
   { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R' },
-  // Weapons
-  { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W' },
-  { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W' },
-  { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W' },
-  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W' },
-  { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W' },
-  { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W' },
-  { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W' },
+  // Weapons — kind: 'melee' swings in an arc; 'ranged' fires a projectile
+  { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W', kind: 'ranged' },
+  { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W', kind: 'melee'  },
+  { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W', kind: 'melee'  },
+  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W', kind: 'melee'  },
+  { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W', kind: 'ranged' },
+  { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W', kind: 'ranged' },
+  { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W', kind: 'melee'  },
   // Off-hands
   { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q' },
   { id: 'shield', name: 'Wooden Shield',  slot: 'offhand', letter: 'O' },
@@ -173,6 +173,7 @@ const CLASS = {
     desc: 'Fast and crit-heavy. Auto-fires arrows. Crits refund Focus.',
     baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
     weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
+    defaultWeapon: 'bow', defaultWeaponKind: 'ranged',
     resourceName: 'FOCUS', resourceColor: '#ffd23f',
     baseMaxResource: 100, baseResourceRegen: 15, critResourceGain: 18,
     signature: 'multishot',
@@ -182,6 +183,7 @@ const CLASS = {
     desc: 'Glass cannon. Slow heavy spells. Bigger Mana pool, slower regen.',
     baseMaxHp: 60, baseSpeed: 95, baseCritChance: 3,
     weaponDamage: 7, weaponFireRate: 1.4, weaponRange: 240, weaponProjSpeed: 240,
+    defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
     resourceName: 'MANA', resourceColor: '#5599ff',
     baseMaxResource: 140, baseResourceRegen: 8, critResourceGain: 0,
     signature: 'fireball',
@@ -191,6 +193,7 @@ const CLASS = {
     desc: 'Tanky melee cleaver. Rage builds from dealing and taking hits.',
     baseMaxHp: 140, baseSpeed: 90, baseCritChance: 4,
     weaponDamage: 11, weaponFireRate: 1.6, weaponRange: 52, weaponProjSpeed: 1,
+    defaultWeapon: 'sword', defaultWeaponKind: 'melee',
     meleeRange: 52,
     rageOnHit: 5, rageOnTake: 12,
     resourceName: 'RAGE', resourceColor: '#ff6060',
@@ -202,6 +205,7 @@ const CLASS = {
     desc: 'Fastest attacks, highest crit. ENERGY refills quickly.',
     baseMaxHp: 70, baseSpeed: 125, baseCritChance: 10,
     weaponDamage: 3, weaponFireRate: 3.0, weaponRange: 130, weaponProjSpeed: 340,
+    defaultWeapon: 'dagger', defaultWeaponKind: 'ranged',
     resourceName: 'ENERGY', resourceColor: '#cc88ff',
     baseMaxResource: 80, baseResourceRegen: 30, critResourceGain: 0,
     signature: 'shadowStrike',
@@ -211,6 +215,7 @@ const CLASS = {
     desc: 'Close-range brawler. Chi flows steadily. Heals through combat.',
     baseMaxHp: 90, baseSpeed: 115, baseCritChance: 5,
     weaponDamage: 5, weaponFireRate: 2.2, weaponRange: 110, weaponProjSpeed: 260,
+    defaultWeapon: 'dagger', defaultWeaponKind: 'ranged',
     resourceName: 'CHI', resourceColor: '#ffaa44',
     baseMaxResource: 80, baseResourceRegen: 12, critResourceGain: 8,
     signature: 'fistsOfThunder',
@@ -220,6 +225,7 @@ const CLASS = {
     desc: 'Holy tank. Hits heal. Consecrated ground burns the wicked.',
     baseMaxHp: 110, baseSpeed: 85, baseCritChance: 4,
     weaponDamage: 7, weaponFireRate: 1.5, weaponRange: 170, weaponProjSpeed: 230,
+    defaultWeapon: 'mace', defaultWeaponKind: 'ranged',
     resourceName: 'HOLY POWER', resourceColor: '#ffe866',
     baseMaxResource: 100, baseResourceRegen: 7, critResourceGain: 0,
     signature: 'holyNova',
@@ -229,6 +235,7 @@ const CLASS = {
     desc: 'Long-range hex caster. MOJO fuels devastating curses.',
     baseMaxHp: 75, baseSpeed: 88, baseCritChance: 3,
     weaponDamage: 4, weaponFireRate: 1.2, weaponRange: 260, weaponProjSpeed: 185,
+    defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
     resourceName: 'MOJO', resourceColor: '#55dd66',
     baseMaxResource: 120, baseResourceRegen: 8, critResourceGain: 0,
     signature: 'plagueFrogs',
@@ -238,6 +245,7 @@ const CLASS = {
     desc: 'Master of death. Bone spells pierce. Blood sacrifices shatter.',
     baseMaxHp: 65, baseSpeed: 88, baseCritChance: 4,
     weaponDamage: 5, weaponFireRate: 1.1, weaponRange: 230, weaponProjSpeed: 200,
+    defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
     resourceName: 'ESSENCE', resourceColor: '#9988cc',
     baseMaxResource: 100, baseResourceRegen: 10, critResourceGain: 0,
     signature: 'boneSpear',
@@ -1175,7 +1183,7 @@ function classAbilities(classId) {
 }
 
 function castAbility(slotIdx) {
-  if (slotIdx < 0 || slotIdx > 3) return;
+  if (slotIdx < 0 || slotIdx > 5) return;
   const slot = player.abilities[slotIdx];
   if (!slot) return;
   if (player.abilityCooldowns[slotIdx] > 0) return;
@@ -1189,19 +1197,87 @@ function castAbility(slotIdx) {
 }
 
 // ============================================================
-// LEVEL-UP STAT POOL
+// LEVEL-UP STAT POOL — 4 tiers (Common / Uncommon / Rare / Legendary)
 // ============================================================
-const STAT_POOL = [
-  { id: 'maxhp',       name: '+20 Max HP',        desc: 'Higher max + heal 20',  color: '#ff6b6b', apply: (p) => { p.baseMaxHp += 20; p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 20); } },
-  { id: 'damage',      name: '+15% Damage',        desc: 'Hits hit harder',       color: '#ffaa44', apply: (p) => { p.baseDmgMult *= 1.15; p.recomputeStats(); } },
-  { id: 'firerate',    name: '+20% Attack Speed',  desc: 'Fire faster',           color: '#ffd23f', apply: (p) => { p.baseFireRateMult *= 1.2; p.recomputeStats(); } },
-  { id: 'pickup',      name: '+10 Pickup Range',   desc: 'Magnet items further',  color: '#9b59ff', apply: (p) => { p.basePickupRange += 10; p.recomputeStats(); } },
-  { id: 'speed',       name: '+15 Move Speed',     desc: 'Run faster',            color: '#4ecdc4', apply: (p) => { p.baseSpeed += 15; p.recomputeStats(); } },
-  { id: 'regen',       name: '+1 HP / sec',        desc: 'Passive healing',       color: '#7ad96b', apply: (p) => { p.baseRegen += 1; p.recomputeStats(); } },
-  { id: 'focus_regen', name: '+3 Focus/sec',       desc: 'Regen abilities faster',color: '#ffd23f', apply: (p) => { p.baseResourceRegen += 3; p.recomputeStats(); } },
-  { id: 'crit',        name: '+5% Crit Chance',    desc: 'More crits',            color: '#ff8800', apply: (p) => { p.baseCritChance += 5; p.recomputeStats(); } },
+const TIER_DEFS = [
+  { tier: 1, name: 'Common',    color: '#aaaaaa', weight: 60 },
+  { tier: 2, name: 'Uncommon',  color: '#44dd44', weight: 25 },
+  { tier: 3, name: 'Rare',      color: '#4499ff', weight: 12 },
+  { tier: 4, name: 'Legendary', color: '#ffaa00', weight:  3 },
 ];
-function rollLevelUpChoices() { return [...STAT_POOL].sort(() => Math.random() - 0.5).slice(0, 3); }
+
+const STAT_POOL = [
+  // ── COMMON ───────────────────────────────────────────────────
+  { id: 'maxhp_1',       tier: 1, name: '+15 Max HP',          desc: 'Boost max HP, heal 15',    apply: (p) => { p.baseMaxHp += 15;          p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 15); } },
+  { id: 'damage_1',      tier: 1, name: '+10% Damage',         desc: 'Hits hit a bit harder',    apply: (p) => { p.baseDmgMult *= 1.10;       p.recomputeStats(); } },
+  { id: 'firerate_1',    tier: 1, name: '+15% Attack Speed',   desc: 'Fire a bit faster',        apply: (p) => { p.baseFireRateMult *= 1.15;  p.recomputeStats(); } },
+  { id: 'pickup_1',      tier: 1, name: '+8 Pickup Range',     desc: 'Magnet items further',     apply: (p) => { p.basePickupRange += 8;      p.recomputeStats(); } },
+  { id: 'speed_1',       tier: 1, name: '+10 Move Speed',      desc: 'Move a bit faster',        apply: (p) => { p.baseSpeed += 10;           p.recomputeStats(); } },
+  { id: 'regen_1',       tier: 1, name: '+1 HP/sec',           desc: 'Trickle of healing',       apply: (p) => { p.baseRegen += 1;            p.recomputeStats(); } },
+  { id: 'focus_1',       tier: 1, name: '+2 Focus/sec',        desc: 'Abilities recharge faster',apply: (p) => { p.baseResourceRegen += 2;    p.recomputeStats(); } },
+  { id: 'crit_1',        tier: 1, name: '+3% Crit Chance',     desc: 'Occasional crits',         apply: (p) => { p.baseCritChance += 3;       p.recomputeStats(); } },
+  { id: 'armor_1',       tier: 1, name: '+2 Armor',            desc: 'Shrug off small hits',     apply: (p) => { p.baseArmor += 2;            p.recomputeStats(); } },
+  { id: 'dodge_1',       tier: 1, name: '+3% Dodge',           desc: 'Chance to avoid a hit',    apply: (p) => { p.baseDodge += 3;            p.recomputeStats(); } },
+  { id: 'critdmg_1',     tier: 1, name: '+25% Crit Damage',    desc: 'Crits hit harder',         apply: (p) => { p.baseCritDmg += 0.25;       p.recomputeStats(); } },
+
+  // ── UNCOMMON ─────────────────────────────────────────────────
+  { id: 'maxhp_2',       tier: 2, name: '+35 Max HP',          desc: 'Solid health boost + heal',apply: (p) => { p.baseMaxHp += 35;          p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 35); } },
+  { id: 'damage_2',      tier: 2, name: '+20% Damage',         desc: 'Noticeably harder hits',   apply: (p) => { p.baseDmgMult *= 1.20;       p.recomputeStats(); } },
+  { id: 'firerate_2',    tier: 2, name: '+25% Attack Speed',   desc: 'Much faster fire rate',    apply: (p) => { p.baseFireRateMult *= 1.25;  p.recomputeStats(); } },
+  { id: 'pickup_2',      tier: 2, name: '+18 Pickup Range',    desc: 'Big magnet energy',        apply: (p) => { p.basePickupRange += 18;     p.recomputeStats(); } },
+  { id: 'speed_2',       tier: 2, name: '+22 Move Speed',      desc: 'Noticeably faster',        apply: (p) => { p.baseSpeed += 22;           p.recomputeStats(); } },
+  { id: 'regen_2',       tier: 2, name: '+2 HP/sec',           desc: 'Steady passive healing',   apply: (p) => { p.baseRegen += 2;            p.recomputeStats(); } },
+  { id: 'focus_2',       tier: 2, name: '+5 Focus/sec',        desc: 'Abilities up fast',        apply: (p) => { p.baseResourceRegen += 5;    p.recomputeStats(); } },
+  { id: 'crit_2',        tier: 2, name: '+7% Crit Chance',     desc: 'Crits all over the place', apply: (p) => { p.baseCritChance += 7;       p.recomputeStats(); } },
+  { id: 'armor_2',       tier: 2, name: '+4 Armor',            desc: 'Decent damage reduction',  apply: (p) => { p.baseArmor += 4;            p.recomputeStats(); } },
+  { id: 'dodge_2',       tier: 2, name: '+6% Dodge',           desc: 'Noticeable evasion',       apply: (p) => { p.baseDodge += 6;            p.recomputeStats(); } },
+  { id: 'critdmg_2',     tier: 2, name: '+50% Crit Damage',    desc: 'Crits really sting',       apply: (p) => { p.baseCritDmg += 0.50;       p.recomputeStats(); } },
+
+  // ── RARE ─────────────────────────────────────────────────────
+  { id: 'maxhp_3',       tier: 3, name: '+70 Max HP',          desc: 'Big health pool + heal',   apply: (p) => { p.baseMaxHp += 70;          p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 70); } },
+  { id: 'damage_3',      tier: 3, name: '+35% Damage',         desc: 'Heavy hitter',             apply: (p) => { p.baseDmgMult *= 1.35;       p.recomputeStats(); } },
+  { id: 'firerate_3',    tier: 3, name: '+40% Attack Speed',   desc: 'Rapid fire',               apply: (p) => { p.baseFireRateMult *= 1.40;  p.recomputeStats(); } },
+  { id: 'pickup_3',      tier: 3, name: '+30 Pickup Range',    desc: 'Massive magnet',           apply: (p) => { p.basePickupRange += 30;     p.recomputeStats(); } },
+  { id: 'speed_3',       tier: 3, name: '+38 Move Speed',      desc: 'Hard to catch',            apply: (p) => { p.baseSpeed += 38;           p.recomputeStats(); } },
+  { id: 'regen_3',       tier: 3, name: '+4 HP/sec',           desc: 'Strong regeneration',      apply: (p) => { p.baseRegen += 4;            p.recomputeStats(); } },
+  { id: 'focus_3',       tier: 3, name: '+9 Focus/sec',        desc: 'Abilities on demand',      apply: (p) => { p.baseResourceRegen += 9;    p.recomputeStats(); } },
+  { id: 'crit_3',        tier: 3, name: '+12% Crit Chance',    desc: 'Crit machine',             apply: (p) => { p.baseCritChance += 12;      p.recomputeStats(); } },
+  { id: 'armor_3',       tier: 3, name: '+7 Armor',            desc: 'Tanky',                    apply: (p) => { p.baseArmor += 7;            p.recomputeStats(); } },
+  { id: 'dodge_3',       tier: 3, name: '+10% Dodge',          desc: 'Hard to pin down',         apply: (p) => { p.baseDodge += 10;           p.recomputeStats(); } },
+  { id: 'critdmg_3',     tier: 3, name: '+75% Crit Damage',    desc: 'Crits are devastating',    apply: (p) => { p.baseCritDmg += 0.75;       p.recomputeStats(); } },
+
+  // ── LEGENDARY ────────────────────────────────────────────────
+  { id: 'maxhp_4',       tier: 4, name: '+130 Max HP',         desc: 'Godlike health + heal',    apply: (p) => { p.baseMaxHp += 130;         p.recomputeStats(); p.hp = Math.min(p.maxHp, p.hp + 130); } },
+  { id: 'damage_4',      tier: 4, name: '+60% Damage',         desc: 'Devastating power',        apply: (p) => { p.baseDmgMult *= 1.60;       p.recomputeStats(); } },
+  { id: 'firerate_4',    tier: 4, name: '+60% Attack Speed',   desc: 'Machine gun mode',         apply: (p) => { p.baseFireRateMult *= 1.60;  p.recomputeStats(); } },
+  { id: 'pickup_4',      tier: 4, name: '+50 Pickup Range',    desc: 'Everything comes to you',  apply: (p) => { p.basePickupRange += 50;     p.recomputeStats(); } },
+  { id: 'speed_4',       tier: 4, name: '+65 Move Speed',      desc: 'Untouchable',              apply: (p) => { p.baseSpeed += 65;           p.recomputeStats(); } },
+  { id: 'regen_4',       tier: 4, name: '+8 HP/sec',           desc: 'Practically unkillable',   apply: (p) => { p.baseRegen += 8;            p.recomputeStats(); } },
+  { id: 'focus_4',       tier: 4, name: '+15 Focus/sec',       desc: 'Infinite abilities',       apply: (p) => { p.baseResourceRegen += 15;   p.recomputeStats(); } },
+  { id: 'crit_4',        tier: 4, name: '+20% Crit Chance',    desc: 'All crits, all day',       apply: (p) => { p.baseCritChance += 20;      p.recomputeStats(); } },
+  { id: 'armor_4',       tier: 4, name: '+12 Armor',           desc: 'Damage? What damage?',     apply: (p) => { p.baseArmor += 12;           p.recomputeStats(); } },
+  { id: 'dodge_4',       tier: 4, name: '+18% Dodge',          desc: 'You are the ghost',        apply: (p) => { p.baseDodge += 18;           p.recomputeStats(); } },
+  { id: 'critdmg_4',     tier: 4, name: '+125% Crit Damage',   desc: 'Crits are execution',      apply: (p) => { p.baseCritDmg += 1.25;       p.recomputeStats(); } },
+];
+
+function rollLevelUpChoices() {
+  const totalWeight = TIER_DEFS.reduce((s, t) => s + t.weight, 0);
+  function pickTier() {
+    let r = Math.random() * totalWeight;
+    for (const t of TIER_DEFS) { r -= t.weight; if (r <= 0) return t.tier; }
+    return 1;
+  }
+  const chosen = []; const usedBase = new Set();
+  for (let attempts = 0; chosen.length < 3 && attempts < 60; attempts++) {
+    const tier = pickTier();
+    const pool = STAT_POOL.filter(u => u.tier === tier && !usedBase.has(u.id.replace(/_\d$/, '')));
+    if (!pool.length) continue;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    usedBase.add(pick.id.replace(/_\d$/, ''));
+    chosen.push(pick);
+  }
+  return chosen;
+}
 
 // ============================================================
 // WAVE / BOSS LOGIC

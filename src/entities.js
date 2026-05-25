@@ -306,14 +306,17 @@ class Player {
     this.baseCritChance = this.class.baseCritChance;
     this.baseMaxResource = this.class.baseMaxResource;
     this.baseResourceRegen = this.class.baseResourceRegen;
+    this.baseDodge = 0; this.baseCritDmg = 2.0;
     this.bonusMaxHp = 0; this.bonusDmgPct = 0; this.bonusFireRatePct = 0;
     this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
     this.bonusArmor = 0; this.bonusCritChance = 0;
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
+    this.bonusDodge = 0; this.bonusCritDmg = 0;
     this.maxHp = this.baseMaxHp; this.hp = this.maxHp;
     this.dmgMult = 1.0; this.fireRateMult = 1.0;
     this.pickupRange = this.basePickupRange; this.speed = this.baseSpeed;
     this.regen = 0; this.armor = 0; this.critChance = this.baseCritChance;
+    this.dodge = 0; this.critDmg = this.baseCritDmg;
     this.maxResource = this.baseMaxResource; this.resourceRegen = this.baseResourceRegen;
     this.resource = this.maxResource;
     this.iframeTimer = 0; this.IFRAME = 0.5; this.hitFlash = 0;
@@ -372,6 +375,7 @@ class Player {
     this.bonusPickupRange = 0; this.bonusMoveSpeed = 0; this.bonusRegen = 0;
     this.bonusArmor = 0; this.bonusCritChance = 0;
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
+    this.bonusDodge = 0; this.bonusCritDmg = 0;
     for (const k in this.equipped) {
       const it = this.equipped[k];
       if (!it) continue;
@@ -389,6 +393,8 @@ class Player {
     this.regen = this.baseRegen + this.bonusRegen;
     this.armor = this.baseArmor + this.bonusArmor;
     this.critChance = this.baseCritChance + this.bonusCritChance;
+    this.dodge = Math.min(75, this.baseDodge + this.bonusDodge);
+    this.critDmg = this.baseCritDmg + this.bonusCritDmg;
     this.maxResource = this.baseMaxResource + this.bonusMaxResource;
     this.resourceRegen = this.baseResourceRegen + this.bonusResourceRegen;
     if (this.maxHp !== oldMax) this.hp = Math.min(this.maxHp, Math.max(1, ratio * this.maxHp));
@@ -476,6 +482,11 @@ class Player {
   }
   takeDamage(amount) {
     if (this.iframeTimer > 0) return false;
+    if (this.dodge > 0 && Math.random() * 100 < this.dodge) {
+      if (typeof spawnDamageNumber === 'function') spawnDamageNumber(this.x, this.y - this.r, 'DODGE', { color: '#4ecdc4', crit: false, size: 11 });
+      this.iframeTimer = this.IFRAME;
+      return false;
+    }
     if (this.boneArmorCharges > 0) {
       this.boneArmorCharges -= 1;
       spawnBurst(this.x, this.y, ['#9988cc', '#ccbbff', '#ffffff'], 4);
