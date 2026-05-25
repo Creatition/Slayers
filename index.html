@@ -820,7 +820,26 @@
   // STATE TRANSITIONS
   // ============================================================
   function endWave() {
-    enemies = []; enemyProjectiles = []; bossRef = null; groundEffects = [];
+    // Vacuum: instantly collect all remaining XP gems and item drops on the field.
+    // XP gems grant their value; items auto-fill inventory or salvage to gold if full.
+    for (const gem of xpGems) {
+      if (!gem.dead) player.addXp(gem.value);
+    }
+    for (const drop of itemDrops) {
+      if (!drop.dead) {
+        if (player.inventory.length < player.INVENTORY_CAP) {
+          player.inventory.push(drop.item);
+          lastLootName = drop.item.base ? (drop.item.base.name || 'Item') : 'Item';
+          lootFlashTimer = 1.5;
+        } else {
+          // Inventory full — salvage to gold
+          player.gold += salvageGold(drop.item);
+          goldFlashTimer = 0.8;
+        }
+      }
+    }
+    xpGems = []; itemDrops = [];
+    enemies = []; enemyProjectiles = []; projectiles = []; bossRef = null; groundEffects = [];
     Sfx.waveComplete();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
@@ -2643,7 +2662,7 @@
       xpGems = xpGems.filter(g => !g.dead);
       itemDrops = itemDrops.filter(d => !d.dead);
       meleeSwings = meleeSwings.filter(sw => !sw.dead);
-      if (!isBossWave(currentWave) && waveTimer <= 0 && enemies.length === 0) endWave();
+      if (!isBossWave(currentWave) && waveTimer <= 0) endWave();
     }
     else if (state === STATE.LEVELUP) {
       updateVirtualCursor(dt);
