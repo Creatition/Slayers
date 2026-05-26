@@ -402,9 +402,9 @@
   }
 
   // Slayer Ordeals (Phase 9)
-  let savedEquipped = null;   // persisted across runs
-  let savedInventory = [];    // persisted across runs
-  let savedGems = [];         // persisted gem stash across runs
+  let charEquipped  = {};     // per-class equipped gear  { classId: {slot: serializedItem} }
+  let charInventory = {};     // per-class inventory      { classId: [serializedItem, ...] }
+  let savedGems     = [];     // shared gem stash (all classes share one gem pool)
   let hubSubMenu = null;      // null | 'stash' | 'blacksmith' | 'jeweler' | 'shop'
   let hubSelectedItem = null; // { source:'eq'|'inv'|'stash', key } for hub item ops
   let hubGemPick = null;      // { typeId, quality } gem being socketed
@@ -2120,10 +2120,18 @@
       paragonXp     = data.paragonXp    || 0;
       paragonPoints = data.paragonPoints || 0;
       spentParagon  = data.spentParagon  || {};
-      // Persist equipped gear + inventory across runs
-      savedEquipped  = data.savedEquipped  || null;
-      savedInventory = (data.savedInventory || []).map(s => s ? deserializeItem(s) : null);
-      savedGems      = data.savedGems || [];
+      // Per-class gear — v3+. v2 migration: copy single saved set to selectedClassId.
+      if (data.charEquipped) {
+        charEquipped = data.charEquipped;
+      } else if (data.savedEquipped) {
+        charEquipped[selectedClassId] = data.savedEquipped;
+      }
+      if (data.charInventory) {
+        charInventory = data.charInventory;
+      } else if (data.savedInventory) {
+        charInventory[selectedClassId] = data.savedInventory;
+      }
+      savedGems = data.savedGems || [];
     } catch (e) { console.warn('load save failed:', e); }
   }
   function saveData() {
@@ -2140,10 +2148,18 @@
         paragonXp,
         paragonPoints,
         spentParagon,
-        savedEquipped: player ? Object.fromEntries(
-          Object.entries(player.equipped).map(([k, v]) => [k, v ? serializeItem(v) : null])
-        ) : savedEquipped,
-        savedInventory: player ? player.inventory.map(it => it ? serializeItem(it) : null) : savedInventory,
+        charEquipped: (() => {
+          const _out = Object.assign({}, charEquipped);
+          if (player) _out[selectedClassId] = Object.fromEntries(
+            Object.entries(player.equipped).map(([k, v]) => [k, v ? serializeItem(v) : null])
+          );
+          return _out;
+        })(),
+        charInventory: (() => {
+          const _out = Object.assign({}, charInventory);
+          if (player) _out[selectedClassId] = player.inventory.map(it => it ? serializeItem(it) : null);
+          return _out;
+        })(),
         savedGems: player ? (player.gems || []) : savedGems,
       }));
     } catch (e) { console.warn('save failed:', e); }
@@ -2164,15 +2180,17 @@
     // Sync run-time globals to the class being played
     { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; treePoints = _cp.treePts; charStatPoints = _cp.statPts; }
     player = new Player(W / 2, H / 2, selectedClassId);
-    // Restore persisted equipment + inventory from last run
-    if (savedEquipped) {
-      for (const slot in savedEquipped) {
-        const s = savedEquipped[slot];
+    // Restore persisted equipment + inventory for this class
+    const _ceq = charEquipped[selectedClassId];
+    if (_ceq) {
+      for (const slot in _ceq) {
+        const s = _ceq[slot];
         if (s) player.equipped[slot] = deserializeItem(s);
       }
     }
-    if (savedInventory && savedInventory.length > 0) {
-      player.inventory = savedInventory.filter(Boolean).map(s => s.base ? s : deserializeItem(s));
+    const _cinv = charInventory[selectedClassId];
+    if (_cinv && _cinv.length > 0) {
+      player.inventory = _cinv.filter(Boolean).map(s => deserializeItem(s)).filter(Boolean);
     }
     if (savedGems && savedGems.length > 0) {
       player.gems = savedGems.slice(0, player.GEM_CAP);
@@ -3608,28 +3626,8 @@
         }
       }
 
-      // 3. Legend strip
-      ctx.textAlign = 'left'; ctx.font = '6px monospace'; ctx.fillStyle = '#555';
-      ctx.fillText('· minor  ● notable  ◆ ability  ★ keystone', treeOX, treeOY + 178);
     }
 
-    // ── Stats strip ────────────────────────────────────────────
-    const statsY = treeOY + 185;
-    const stats = [
-      ['HP', `${player ? Math.floor(player.baseMaxHp) : '—'}`],
-      ['DMG', `${player ? Math.round((player.baseDmgMult - 1) * 100) : 0}%`],
-      ['SPD', `${player ? Math.floor(player.baseSpeed) : '—'}`],
-      ['CRIT', `${player ? player.baseCritChance : 0}%`],
-      ['ARMOR', `${player ? player.baseArmor : 0}`],
-      ['DODGE', `${player ? player.baseDodge : 0}%`],
-    ];
-    const sw = Math.floor(W / stats.length);
-    for (let i = 0; i < stats.length; i++) {
-      ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(stats[i][0], 8 + i * sw + sw / 2, statsY + 8);
-      ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace';
-      ctx.fillText(stats[i][1], 8 + i * sw + sw / 2, statsY + 18);
-    }
 
     // ── Close tree clip + minimap ──────────────────────────────
     if (charTreeTab === 'tree' && SKILL_TREES[charTreeClass]) {
@@ -3670,6 +3668,11 @@
       ctx.strokeStyle = '#ff6633'; ctx.lineWidth = 1; ctx.strokeRect(W - 108, H - 26, 100, 20);
       ctx.fillStyle = resetHov2 ? '#000' : '#ff9966'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
       ctx.fillText('↺ RESET ALL', W - 58, H - 13);
+    }
+    // ── Node legend — bottom center, only on tree tab ────────
+    if (charTreeTab === 'tree') {
+      ctx.textAlign = 'center'; ctx.font = '12px monospace'; ctx.fillStyle = '#666';
+      ctx.fillText('· minor  ● notable  ◆ ability  ★ keystone', W / 2, H - 31);
     }
     drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
     ctx.textAlign = 'left';
@@ -6334,7 +6337,8 @@
       const viewAbl = classAbilities(charTreeClass);
       const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
-      const ablX0 = Math.floor((W - totalAblW) / 2), ablY0 = 92;
+      const ablX0 = Math.floor((W - totalAblW) / 2);
+      const ablY0 = (state === STATE.INVENTORY) ? 78 : 92; // match draw function
       for (let ai = 0; ai < viewAbl.length; ai++) {
         const adef = viewAbl[ai];
         const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
