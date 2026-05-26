@@ -154,9 +154,7 @@
     const tree = TALENT_TREES[classId];
     if (!tree) return;
     const spent = spentTalents[classId] || {};
-    // Apply in row order so dependencies are satisfied
-    const sorted = [...tree.nodes].sort((a, b) => a.row - b.row);
-    for (const node of sorted) {
+    for (const node of tree.nodes) {
       if (spent[node.id]) node.apply(p);
     }
   }
@@ -164,11 +162,16 @@
     if (talentPoints <= 0) return false;
     const spent = spentTalents[classId] || {};
     if (spent[node.id]) return false; // already bought
-    if (node.row === 1) return true;
+    if (node.origin) return true;     // origin always available
     const tree = TALENT_TREES[classId];
     if (!tree) return false;
-    // Need at least 1 spent node in the previous row
-    return tree.nodes.some(n => n.row === node.row - 1 && spent[n.id]);
+    // Unlockable if adjacent (in either direction) to any spent node
+    for (const n of tree.nodes) {
+      if (!spent[n.id]) continue;
+      if ((n.connections||[]).includes(node.id)) return true;
+      if ((node.connections||[]).includes(n.id)) return true;
+    }
+    return false;
   }
   function spendTalent(classId, node) {
     if (!canSpendTalent(classId, node)) return;
@@ -2778,64 +2781,108 @@
       ctx.textAlign = 'left';
       return; // skip talent tree rendering
     }
-    const rowH = 46, colW = 155;
-    const treeW = 3 * colW, treeX = Math.floor((W - treeW) / 2) + 20;
-    const nodeW = 130, nodeH = 32;
+    // ── PoE-style skill tree web ───────────────────────────────
+    const treeOX = 30, treeOY = treeStartY; // canvas offset for tree viewport
+    // Node radii by type
+    const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
+    // Build node map for quick lookup
+    const nodeMap = {};
+    if (tree) for (const n of tree.nodes) nodeMap[n.id] = n;
 
-    if (!tree) { ctx.fillStyle='#888'; ctx.textAlign='center'; ctx.font='10px monospace'; ctx.fillText('No tree defined', W/2, 150); }
-    else {
-      // Draw connection lines first (behind nodes)
+    if (!tree) {
+      ctx.fillStyle='#888'; ctx.textAlign='center'; ctx.font='10px monospace';
+      ctx.fillText('No tree defined', W/2, 150);
+    } else {
+      // 1. Draw connection lines (deduplicated)
+      const drawnPairs = new Set();
       for (const node of tree.nodes) {
-        if (node.row === 1) continue;
-        // Draw line from this node up to one representative node in previous row
-        const nx = treeX + (node.col - 1) * colW + nodeW / 2;
-        const ny = treeStartY + (node.row - 1) * rowH + nodeH / 2;
-        const prevRowNodes = tree.nodes.filter(n => n.row === node.row - 1);
-        const midN = prevRowNodes[Math.floor(prevRowNodes.length / 2)] || prevRowNodes[0];
-        if (midN) {
-          const px = treeX + (midN.col - 1) * colW + nodeW / 2;
-          const py = treeStartY + (midN.row - 1) * rowH + nodeH / 2;
-          const isSpent = spent[node.id];
-          ctx.strokeStyle = isSpent ? cl.color : '#333'; ctx.lineWidth = isSpent ? 2 : 1;
-          ctx.beginPath(); ctx.moveTo(px, py + nodeH / 2); ctx.lineTo(nx, ny - nodeH / 2); ctx.stroke();
+        for (const connId of (node.connections||[])) {
+          const key = [node.id, connId].sort().join('|');
+          if (drawnPairs.has(key)) continue;
+          drawnPairs.add(key);
+          const target = nodeMap[connId];
+          if (!target) continue;
+          const ax = treeOX + node.x, ay = treeOY + node.y;
+          const bx = treeOX + target.x, by = treeOY + target.y;
+          const aSpent = !!spent[node.id], bSpent = !!spent[target.id];
+          const lit = aSpent && bSpent;
+          ctx.strokeStyle = lit ? cl.color : (aSpent || bSpent) ? '#556633' : '#2a2a2a';
+          ctx.lineWidth = lit ? 2 : 1;
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
           ctx.lineWidth = 1;
         }
       }
-      // Draw nodes
+
+      // 2. Draw nodes
       for (const node of tree.nodes) {
-        const nx = treeX + (node.col - 1) * colW;
-        const ny = treeStartY + (node.row - 1) * rowH;
-        const isSpent = !!spent[node.id];
-        const canBuy  = canSpendTalent(charTreeClass, node);
-        const hovered = mouseX >= nx && mouseX <= nx + nodeW && mouseY >= ny && mouseY <= ny + nodeH;
-        // Card bg
-        ctx.fillStyle = isSpent ? '#1a1a08' : canBuy ? '#0e1a0e' : '#111';
-        ctx.fillRect(nx, ny, nodeW, nodeH);
-        // Border
-        ctx.strokeStyle = isSpent ? cl.color : canBuy ? '#44dd44' : '#333';
-        ctx.lineWidth = isSpent ? 2 : (hovered && canBuy) ? 2 : 1;
-        ctx.strokeRect(nx, ny, nodeW, nodeH); ctx.lineWidth = 1;
-        // Ability/passive icon dot
-        ctx.fillStyle = node.type === 'ability' ? '#ffaa44' : '#5599ff';
-        ctx.fillRect(nx + 4, ny + 4, 6, 6);
-        // Name
-        ctx.fillStyle = isSpent ? cl.color : canBuy ? '#ccffcc' : '#555';
-        ctx.font = `bold 8px monospace`; ctx.textAlign = 'left';
-        ctx.fillText(node.name, nx + 14, ny + 12);
-        // Desc
-        ctx.fillStyle = isSpent ? '#aaa' : canBuy ? '#888' : '#444';
-        ctx.font = '7px monospace';
-        ctx.fillText(node.desc, nx + 4, ny + 26);
-        // SPENT badge
+        const cx = treeOX + node.x, cy = treeOY + node.y;
+        const r = NODE_R[node.type] || 7;
+        const isSpent  = !!spent[node.id];
+        const canBuy   = canSpendTalent(charTreeClass, node);
+        const dx = mouseX - cx, dy = mouseY - cy;
+        const hovered  = dx*dx + dy*dy <= (r+4)*(r+4);
+        // Glow ring for keystone
+        if (node.type === 'keystone') {
+          ctx.beginPath(); ctx.arc(cx, cy, r+4, 0, Math.PI*2);
+          ctx.strokeStyle = isSpent ? cl.color : '#333'; ctx.lineWidth = 1.5;
+          ctx.stroke(); ctx.lineWidth = 1;
+        }
+        // Node fill
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
         if (isSpent) {
-          ctx.fillStyle = cl.color; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'right';
-          ctx.fillText('✓', nx + nodeW - 4, ny + 12);
+          ctx.fillStyle = cl.color;
+        } else if (canBuy) {
+          ctx.fillStyle = node.type === 'ability' ? '#3a2a00' :
+                          node.type === 'keystone'  ? '#001a22' : '#0a1a0a';
+        } else {
+          ctx.fillStyle = '#181818';
+        }
+        ctx.fill();
+        // Border ring
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.strokeStyle = isSpent   ? cl.color :
+                          canBuy    ? (node.type==='ability' ? '#ffaa44' :
+                                       node.type==='keystone' ? '#44ccff' : '#44dd44') :
+                                      '#333';
+        ctx.lineWidth = (hovered && canBuy) ? 2.5 : isSpent ? 1.5 : 1;
+        ctx.stroke(); ctx.lineWidth = 1;
+        // Inner icon
+        ctx.font = 'bold ' + (r >= 10 ? '7' : '5') + 'px monospace';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const icon = node.type==='keystone' ? '★' : node.type==='ability' ? '◆' :
+                     node.type==='notable'  ? '●' : '·';
+        ctx.fillStyle = isSpent ? '#000' : canBuy ? '#fff' : '#555';
+        ctx.fillText(icon, cx, cy);
+        ctx.textBaseline = 'alphabetic';
+        // Hover tooltip — name above, desc below
+        if (hovered) {
+          const tipY = cy - r - 18;
+          ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+          ctx.fillStyle = isSpent ? cl.color : canBuy ? '#fff' : '#777';
+          ctx.fillText(node.name, cx, tipY);
+          ctx.font = '6px monospace';
+          ctx.fillStyle = '#aaa';
+          ctx.fillText(node.desc, cx, tipY + 9);
+          if (canBuy) {
+            ctx.fillStyle = '#44dd44'; ctx.font = 'bold 6px monospace';
+            ctx.fillText('CLICK TO UNLOCK', cx, tipY + 18);
+          }
+        }
+        // Spent checkmark badge on keystone
+        if (isSpent && node.type === 'keystone') {
+          ctx.font = 'bold 6px monospace'; ctx.textAlign = 'center';
+          ctx.fillStyle = cl.color;
+          ctx.fillText('✓', cx, cy + r + 8);
         }
       }
+
+      // 3. Legend strip
+      ctx.textAlign = 'left'; ctx.font = '6px monospace'; ctx.fillStyle = '#555';
+      ctx.fillText('· minor  ● notable  ◆ ability  ★ keystone', treeOX, treeOY + 178);
     }
 
     // ── Stats strip ────────────────────────────────────────────
-    const statsY = treeStartY + 5 * rowH + 4;
+    const statsY = treeOY + 185;
     const stats = [
       ['HP', `${player ? Math.floor(player.baseMaxHp) : '—'}`],
       ['DMG', `${player ? Math.round((player.baseDmgMult - 1) * 100) : 0}%`],
@@ -5076,16 +5123,21 @@
             }
           }
         } else {
-          // ── TALENTS tab click — talent nodes ────────────────────
+          // ── TALENTS tab click — PoE-style circle hit test ────────
           const tree = TALENT_TREES[charTreeClass];
           if (tree) {
-            const treeStartY = 80, rowH = 46, colW = 155, nodeW = 130, nodeH = 32;
-            const treeX = Math.floor((W - 3 * colW) / 2) + 20;
+            const treeOX = 30, treeOY = 80;
+            const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
             for (const node of tree.nodes) {
-              const nx = treeX + (node.col - 1) * colW;
-              const ny = treeStartY + (node.row - 1) * rowH;
-              if (isHovering(nx, ny, nodeW, nodeH)) {
+              const cx = treeOX + node.x, cy = treeOY + node.y;
+              const r = (NODE_R[node.type] || 7) + 4; // +4 px hit margin
+              const dx = mouseX - cx, dy = mouseY - cy;
+              if (dx*dx + dy*dy <= r*r) {
                 spendTalent(charTreeClass, node);
+                if (canSpendTalent(charTreeClass, node) === false) {
+                  // If just spent, play confirmation SFX
+                  Sfx.uiConfirm && Sfx.uiConfirm();
+                }
                 break;
               }
             }
