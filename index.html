@@ -2350,16 +2350,35 @@
   }
   function drawButton(x, y, w, h, label, enabled, accent) {
     const hovered = isHovering(x, y, w, h) && enabled;
-    ctx.fillStyle = !enabled ? '#1a1a22' : (hovered ? '#3a3a45' : '#2a2a35');
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = !enabled ? '#333' : (accent || '#888');
-    ctx.lineWidth = hovered ? 2 : 1;
-    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    const accentCol = accent || '#8855ff';
+    // Background gradient
+    const _bg = ctx.createLinearGradient(x, y, x, y + h);
+    if (!enabled)     { _bg.addColorStop(0, '#141418'); _bg.addColorStop(1, '#0d0d12'); }
+    else if (hovered) { _bg.addColorStop(0, '#282840'); _bg.addColorStop(1, '#161628'); }
+    else              { _bg.addColorStop(0, '#1c1c2c'); _bg.addColorStop(1, '#12121e'); }
+    ctx.fillStyle = _bg; ctx.fillRect(x, y, w, h);
+    // Left accent bar
+    if (enabled) {
+      ctx.fillStyle = accentCol; ctx.globalAlpha = hovered ? 1.0 : 0.65;
+      ctx.fillRect(x, y, 2, h); ctx.globalAlpha = 1;
+    }
+    // Border
+    ctx.strokeStyle = !enabled ? '#1e1e28' : (hovered ? accentCol : '#383850');
+    ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    // Hover glow
+    if (hovered) {
+      ctx.shadowColor = accentCol; ctx.shadowBlur = 12;
+      ctx.strokeStyle = accentCol; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      ctx.shadowBlur = 0;
+    }
     ctx.lineWidth = 1;
-    ctx.fillStyle = !enabled ? '#555' : (accent || '#eee');
+    // Label
+    ctx.fillStyle = !enabled ? '#404050' : (hovered ? '#ffffff' : '#c8c8e0');
     ctx.font = 'bold 9px monospace';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (hovered) { ctx.shadowColor = accentCol; ctx.shadowBlur = 6; }
     ctx.fillText(label, x + w / 2, y + h / 2 + 1);
+    ctx.shadowBlur = 0;
     ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
     return hovered;
   }
@@ -2517,60 +2536,92 @@
   }
   function drawBossBar() {
     if (!bossRef || !bossRef.alive) return;
-    const bw = 360, bh = 8;
-    const bx = (W - bw) / 2, by = 8;
-    ctx.fillStyle = '#000'; ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-    ctx.fillStyle = '#3a1818'; ctx.fillRect(bx, by, bw, bh);
+    const bw = 380, bh = 10;
+    const bx = (W - bw) / 2, by = 6;
+    // Panel
+    ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(bx - 6, by - 14, bw + 12, bh + 22);
+    ctx.strokeStyle = '#5a1010'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx - 6, by - 14, bw + 12, bh + 22); ctx.lineWidth = 1;
+    // Boss name above bar
+    ctx.fillStyle = '#cc6666'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(bossRef.name.toUpperCase(), W / 2, by - 3);
+    // Bar track
+    ctx.fillStyle = '#2a0808'; ctx.fillRect(bx, by, bw, bh);
     const ratio = Math.max(0, bossRef.hp / bossRef.maxHp);
-    ctx.fillStyle = ratio > 0.5 ? '#cc3030' : ratio > 0.25 ? '#dd6020' : '#ff2020';
-    ctx.fillRect(bx, by, bw * ratio, bh);
-    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(`${bossRef.name.toUpperCase()}  -  ${Math.ceil(bossRef.hp)} / ${bossRef.maxHp}`, W / 2, by + 7);
+    const _bc1 = ratio > 0.5 ? '#aa1818' : ratio > 0.25 ? '#cc4010' : '#aa0808';
+    const _bc2 = ratio > 0.5 ? '#ff4444' : ratio > 0.25 ? '#ff7030' : '#ff1010';
+    const _bg = ctx.createLinearGradient(bx, by, bx, by + bh);
+    _bg.addColorStop(0, _bc2); _bg.addColorStop(1, _bc1);
+    ctx.fillStyle = _bg; ctx.fillRect(bx, by, bw * ratio, bh);
+    // Glow on bar
+    if (ratio < 0.3) { ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 8; ctx.fillRect(bx, by, bw * ratio, bh); ctx.shadowBlur = 0; }
+    // Bar border
+    ctx.strokeStyle = '#4a1818'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh); ctx.lineWidth = 1;
+    // HP text in bar
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(`${Math.ceil(bossRef.hp)} / ${bossRef.maxHp}`, W / 2, by + 8);
     ctx.textAlign = 'left';
   }
   function drawHud() {
     // Skip player-stat bars on pure menu screens
     if (state === STATE.CLASS_SELECT || state === STATE.TRIAL_LOADOUT) return;
-    const hpx = 8, hpy = 8;
-    ctx.fillStyle = '#000'; ctx.fillRect(hpx - 1, hpy - 1, 122, 8);
-    ctx.fillStyle = '#3a2020'; ctx.fillRect(hpx, hpy, 120, 6);
+    const hpx = 8, hpy = 10;
+    // Dark panel behind stat bars
+    ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(4, 4, 132, 50);
+    ctx.strokeStyle = '#252535'; ctx.lineWidth = 1;
+    ctx.strokeRect(4.5, 4.5, 131, 49); ctx.lineWidth = 1;
+    // HP bar
+    ctx.fillStyle = '#200808'; ctx.fillRect(hpx, hpy, 120, 8);
     const hpRatio = Math.max(0, player.hp / player.maxHp);
-    ctx.fillStyle = hpRatio > 0.5 ? '#ff5050' : hpRatio > 0.25 ? '#ff8030' : '#ff3030';
-    ctx.fillRect(hpx, hpy, 120 * hpRatio, 6);
-    ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
-    ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 2, hpy + 5);
-
-    const xpx = 8, xpy = 19;
-    ctx.fillStyle = '#000'; ctx.fillRect(xpx - 1, xpy - 1, 122, 5);
-    ctx.fillStyle = '#1a2030'; ctx.fillRect(xpx, xpy, 120, 3);
+    const _hg = ctx.createLinearGradient(hpx, hpy, hpx, hpy + 8);
+    _hg.addColorStop(0, hpRatio > 0.5 ? '#ff5555' : hpRatio > 0.25 ? '#ff8030' : '#ff2020');
+    _hg.addColorStop(1, hpRatio > 0.5 ? '#bb2020' : hpRatio > 0.25 ? '#cc4010' : '#880808');
+    ctx.fillStyle = _hg; ctx.fillRect(hpx, hpy, 120 * hpRatio, 8);
+    if (hpRatio < 0.3) { ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 8; ctx.fillRect(hpx, hpy, 120 * hpRatio, 8); ctx.shadowBlur = 0; }
+    ctx.strokeStyle = '#1a0808'; ctx.lineWidth = 1; ctx.strokeRect(hpx, hpy, 120, 8); ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`HP  ${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 3, hpy + 7);
+    // XP bar
+    const xpx = 8, xpy = 22;
+    ctx.fillStyle = '#0e0820'; ctx.fillRect(xpx, xpy, 120, 4);
     const xpRatio = player.xp / player.xpToNext;
-    ctx.fillStyle = '#9b59ff'; ctx.fillRect(xpx, xpy, 120 * xpRatio, 3);
-
-    const rx = 8, ry = 28;
-    ctx.fillStyle = '#000'; ctx.fillRect(rx - 1, ry - 1, 122, 5);
-    ctx.fillStyle = '#2a2515'; ctx.fillRect(rx, ry, 120, 3);
+    const _xg = ctx.createLinearGradient(xpx, xpy, xpx + 120 * xpRatio, xpy);
+    _xg.addColorStop(0, '#6620cc'); _xg.addColorStop(1, '#cc88ff');
+    ctx.fillStyle = _xg; ctx.fillRect(xpx, xpy, 120 * xpRatio, 4);
+    ctx.strokeStyle = '#1a0a30'; ctx.lineWidth = 1; ctx.strokeRect(xpx, xpy, 120, 4); ctx.lineWidth = 1;
+    // Resource bar
+    const rx = 8, ry = 30;
+    ctx.fillStyle = '#0e0e0e'; ctx.fillRect(rx, ry, 120, 4);
     const resRatio = player.resource / player.maxResource;
+    const _rg = ctx.createLinearGradient(rx, ry, rx + 120 * resRatio, ry);
+    _rg.addColorStop(0, player.class.resourceColor + '88'); _rg.addColorStop(1, player.class.resourceColor);
+    ctx.fillStyle = _rg; ctx.fillRect(rx, ry, 120 * resRatio, 4);
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, 120, 4); ctx.lineWidth = 1;
+    // Labels
+    ctx.fillStyle = '#a080e0'; ctx.font = 'bold 7px monospace';
+    ctx.fillText(`LV ${player.level}`, hpx + 1, 44);
+    ctx.fillStyle = '#606070';
+    ctx.fillText(player.class.name.toUpperCase(), hpx + 26, 44);
     ctx.fillStyle = player.class.resourceColor;
-    ctx.fillRect(rx, ry, 120 * resRatio, 3);
-
-    ctx.fillStyle = '#c89aff'; ctx.font = '8px monospace';
-    ctx.fillText(`LV ${player.level}`, hpx + 1, 42);
-    ctx.fillStyle = '#888';
-    ctx.fillText(`${player.class.name.toUpperCase()}`, hpx + 36, 42);
-    ctx.fillStyle = player.class.resourceColor;
-    ctx.fillText(`${player.class.resourceName} ${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`, hpx + 80, 42);
+    ctx.fillText(`${player.class.resourceName.toUpperCase()} ${Math.floor(player.resource)}/${Math.floor(player.maxResource)}`, hpx + 76, 44);
 
     ctx.textAlign = 'center';
     if (state === STATE.PLAYING) {
       if (!bossRef) {
-        ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-        ctx.fillText(`WAVE ${currentWave} / 20`, W / 2, 12);
-        ctx.fillStyle = '#999'; ctx.font = '8px monospace';
-        ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s`, W / 2, 22);
+        // Wave counter panel
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(W/2 - 52, 3, 104, 24);
+        ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
+        ctx.strokeRect(W/2 - 52, 3, 104, 24); ctx.lineWidth = 1;
+        ctx.fillStyle = '#e0e0ff'; ctx.font = 'bold 10px monospace';
+        ctx.fillText(`WAVE  ${currentWave} / 20`, W / 2, 14);
+        ctx.fillStyle = '#606070'; ctx.font = '7px monospace';
+        ctx.fillText(`${Math.ceil(Math.max(0, waveTimer))}s remaining`, W / 2, 23);
       }
     }
-    ctx.fillStyle = currentBiome().decoColors[3] || '#557755';
-    ctx.font = '7px monospace';
+    ctx.fillStyle = (currentBiome().decoColors[3] || '#557755') + 'cc';
+    ctx.font = 'bold 7px monospace';
     ctx.fillText(currentBiome().name.toUpperCase(), W / 2, H - 86);
 
     // Audio mute indicator (small, bottom-right of the HUD)
@@ -2579,15 +2630,25 @@
       ctx.fillText('MUTED [M]', W - 8, H - 4);
     }
 
-    ctx.fillStyle = '#fff'; ctx.textAlign = 'right'; ctx.font = '8px monospace';
-    ctx.fillText(`KILLS  ${player.kills}`, W - 8, 12);
-    ctx.fillStyle = '#aaa';
-    ctx.fillText(`ENEMIES  ${enemies.filter(e => e.alive).length}`, W - 8, 22);
-    ctx.fillText(`BAG  ${player.inventory.length}/${player.INVENTORY_CAP}`, W - 8, 32);
-    // Gold
-    const gFlash = goldFlashTimer > 0 ? 'bold 9px monospace' : 'bold 8px monospace';
-    ctx.fillStyle = '#ffd23f'; ctx.font = gFlash;
-    ctx.fillText(`GOLD  ${player.gold}`, W - 8, 44);
+    // Right stat panel
+    ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(W - 102, 4, 98, 46);
+    ctx.strokeStyle = '#252535'; ctx.lineWidth = 1;
+    ctx.strokeRect(W - 102, 4, 98, 46); ctx.lineWidth = 1;
+    ctx.textAlign = 'right'; ctx.font = '8px monospace';
+    ctx.fillStyle = '#cc4444';
+    ctx.fillText(`⚔ ${player.kills}`, W - 55, 14);
+    ctx.fillStyle = '#6688aa';
+    ctx.fillText(`enemies: ${enemies.filter(e => e.alive).length}`, W - 8, 14);
+    ctx.fillStyle = '#8899bb';
+    ctx.fillText(`bag: ${player.inventory.length}/${player.INVENTORY_CAP}`, W - 8, 26);
+    // Gold with flash
+    const gFlash = goldFlashTimer > 0 ? 'bold 9px monospace' : '8px monospace';
+    ctx.fillStyle = goldFlashTimer > 0 ? '#ffe860' : '#ccaa30'; ctx.font = gFlash;
+    if (goldFlashTimer > 0) { ctx.shadowColor = '#ffd040'; ctx.shadowBlur = 8; }
+    ctx.fillText(`◈ ${player.gold}g`, W - 8, 38);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#505060'; ctx.font = '7px monospace';
+    ctx.fillText(`KILLS`, W - 55 + 6, 14);
     if (runMode === 'trial') {
       ctx.fillStyle = '#ff4080'; ctx.font = 'bold 8px monospace';
       ctx.fillText(`ORDEAL ${["I","II","III","IV","V"][trialTier-1]||trialTier} ×${TRIAL_MULT[trialTier].toFixed(1)}`, W - 8, 54);
@@ -2643,50 +2704,78 @@
     drawBossBar();
   }
   function drawAbilityBar() {
-    const slotSize = 30, gap = 6;
+    const slotSize = 32, gap = 5;
     const slotCount = 6;
     const totalW = slotCount * slotSize + (slotCount - 1) * gap;
-    const startX = (W - totalW) / 2;
-    const y = H - slotSize - 6;
+    const startX = Math.floor((W - totalW) / 2);
+    const y = H - slotSize - 5;
+    // Panel backdrop
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(startX - 6, y - 4, totalW + 12, slotSize + 10);
+    ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
+    ctx.strokeRect(startX - 6, y - 4, totalW + 12, slotSize + 10); ctx.lineWidth = 1;
     for (let i = 0; i < slotCount; i++) {
       const x = startX + i * (slotSize + gap);
       const ability = player.abilities[i];
       const cd = player.abilityCooldowns[i];
-      ctx.fillStyle = ability ? '#22222a' : '#13131a';
-      ctx.fillRect(x, y, slotSize, slotSize);
-      if (ability) {
-        ctx.strokeStyle = ability.rarity.color; ctx.lineWidth = 2;
-        ctx.strokeRect(x + 1, y + 1, slotSize - 2, slotSize - 2);
-        ctx.lineWidth = 1;
-      } else {
-        ctx.strokeStyle = '#2a2a30';
-        ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
-      }
-      ctx.fillStyle = ability ? '#888' : '#444';
-      ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`${i + 1}`, x + 3, y + 8);
+      // Slot background
+      const _sbg = ctx.createLinearGradient(x, y, x, y + slotSize);
+      if (ability) { _sbg.addColorStop(0, '#1e1e2e'); _sbg.addColorStop(1, '#141420'); }
+      else         { _sbg.addColorStop(0, '#111118'); _sbg.addColorStop(1, '#0c0c12'); }
+      ctx.fillStyle = _sbg; ctx.fillRect(x, y, slotSize, slotSize);
+      // Border
       if (ability) {
         const canCast = cd <= 0 && player.resource >= ability.def.cost;
-        ctx.fillStyle = canCast ? ability.def.color : '#666';
-        ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.strokeStyle = canCast ? ability.rarity.color : '#2a2a3a';
+        ctx.lineWidth = canCast ? 1.5 : 1;
+        if (canCast) { ctx.shadowColor = ability.rarity.color; ctx.shadowBlur = 6; }
+        ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+        ctx.shadowBlur = 0; ctx.lineWidth = 1;
+        // Inner color tint on top edge
+        ctx.fillStyle = ability.def.color + '22';
+        ctx.fillRect(x + 1, y + 1, slotSize - 2, 3);
+      } else {
+        ctx.strokeStyle = '#1e1e28'; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+      }
+      // Key hint
+      ctx.fillStyle = ability ? '#505060' : '#303038';
+      ctx.font = 'bold 6px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`${i + 1}`, x + 3, y + 7);
+      if (ability) {
+        const canCast = cd <= 0 && player.resource >= ability.def.cost;
+        // Ability letter
+        if (canCast) { ctx.shadowColor = ability.def.color; ctx.shadowBlur = 10; }
+        ctx.fillStyle = canCast ? ability.def.color : '#444454';
+        ctx.font = 'bold 15px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(ability.def.letter, x + slotSize / 2, y + slotSize / 2 + 1);
-        ctx.textBaseline = 'alphabetic';
-        ctx.fillStyle = player.resource >= ability.def.cost ? '#ffd23f' : '#664020';
+        ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
+        // Cost
+        ctx.fillStyle = player.resource >= ability.def.cost ? '#ccaa20' : '#4a2e10';
         ctx.font = '6px monospace'; ctx.textAlign = 'right';
         ctx.fillText(`${ability.def.cost}`, x + slotSize - 2, y + slotSize - 2);
+        // Rank dots (bottom center)
+        const maxR = ability.def.maxRank || 5, curR = ability.rank || 1;
+        const dotW = 3, dotGap = 2, dotsW = maxR * dotW + (maxR - 1) * dotGap;
+        const dotX = x + (slotSize - dotsW) / 2, dotY = y + slotSize - 4;
+        for (let r = 0; r < maxR; r++) {
+          ctx.fillStyle = r < curR ? ability.def.color : '#252530';
+          ctx.fillRect(dotX + r * (dotW + dotGap), dotY, dotW, 2);
+        }
+        // Cooldown overlay
         if (cd > 0) {
           const ratio = cd / ability.def.cooldown;
-          ctx.fillStyle = 'rgba(0,0,0,0.7)';
+          ctx.fillStyle = 'rgba(0,0,0,0.78)';
           ctx.fillRect(x, y + slotSize * (1 - ratio), slotSize, slotSize * ratio);
-          ctx.fillStyle = '#fff'; ctx.font = 'bold 10px monospace';
+          ctx.fillStyle = '#ffffff'; ctx.font = 'bold 9px monospace';
           ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(cd.toFixed(1), x + slotSize / 2, y + slotSize / 2);
           ctx.textBaseline = 'alphabetic';
         }
       } else {
-        ctx.fillStyle = '#333'; ctx.font = '6px monospace';
+        ctx.fillStyle = '#252530'; ctx.font = '6px monospace';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText('LOCKED', x + slotSize / 2, y + slotSize / 2);
+        ctx.fillText('EMPTY', x + slotSize / 2, y + slotSize / 2);
         ctx.textBaseline = 'alphabetic';
       }
     }
