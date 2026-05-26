@@ -9,7 +9,7 @@
 // ============================================================
 const STASH_SIZE_INIT = 10;
 const SAVE_KEY = 'slayers-save';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const TRIAL_MAX_TIER = 5;
 const TRIAL_MULT = { 1: 1.5, 2: 2.0, 3: 2.7, 4: 3.6, 5: 5.0 };
 
@@ -722,7 +722,7 @@ function getClassById(id) {
 // ============================================================
 const ABILITIES = {
   multishot: {
-    id: 'multishot', tier: 1, name: 'Multishot', tier: 1, letter: 'M', classOf: 'ranger',
+    id: 'multishot', name: 'Multishot', tier: 1, letter: 'M', classOf: 'ranger',
     desc: '3 arrows in spread (+20% dmg)',
     maxRank: 5, rankDesc: ['3 arrows +20% dmg', '4 arrows +30% dmg', '4 arrows piercing +50% dmg ★Notable', '5 arrows pierce-all +70% dmg', '6 arrows pierce-all +100% dmg ★Capstone: AoE burst per arrow'],
     cost: 25, cooldown: 1.8, color: '#ffd23f',
@@ -755,7 +755,7 @@ const ABILITIES = {
     },
   },
   rainOfArrows: {
-    id: 'rainOfArrows', tier: 1, name: 'Rain of Arrows', tier: 2, letter: 'R', classOf: 'ranger',
+    id: 'rainOfArrows', name: 'Rain of Arrows', tier: 2, letter: 'R', classOf: 'ranger',
     desc: 'AoE rain on target (3x dmg)',
     maxRank: 5, rankDesc: ['AoE rain 3× dmg r=50', '3× dmg r=60 +20% power', '3.5× dmg r=70 ★Notable: burning ground 2s', '4× dmg r=80', '5× dmg r=100 ★Capstone: chains to 2nd target'],
     cost: 40, cooldown: 4.0, color: '#ffaa44',
@@ -795,7 +795,7 @@ const ABILITIES = {
     },
   },
   piercingShot: {
-    id: 'piercingShot', tier: 1, name: 'Piercing Shot', tier: 1, letter: 'P', classOf: 'ranger',
+    id: 'piercingShot', name: 'Piercing Shot', tier: 1, letter: 'P', classOf: 'ranger',
     desc: 'Pierces all enemies (+150% dmg)',
     maxRank: 5, rankDesc: ['+250% dmg piercing', '300% dmg faster proj', '350% dmg ★Notable: slows hit enemies 2s', '425% dmg bigger hitbox', '500% dmg ★Capstone: shatters into 3 arcs'],
     cost: 30, cooldown: 2.5, color: '#5599ff',
@@ -823,7 +823,7 @@ const ABILITIES = {
     },
   },
   hawkEye: {
-    id: 'hawkEye', tier: 1, name: 'Hawk Eye', tier: 1, letter: 'E', classOf: 'ranger',
+    id: 'hawkEye', name: 'Hawk Eye', tier: 1, letter: 'E', classOf: 'ranger',
     desc: '+30% crit & atk speed (5s)',
     maxRank: 5, rankDesc: ['+30% crit+spd 5s', '+35% crit+spd 6s', '+40% crit+spd 7s ★Notable: +50% crit dmg', '50% crit+spd 8s', '60% crit+spd 10s ★Capstone: auto-crits for duration'],
     cost: 50, cooldown: 12.0, color: '#33cc55',
@@ -839,7 +839,7 @@ const ABILITIES = {
     },
   },
   arrowVolley: {
-    id: 'arrowVolley', tier: 1, name: 'Arrow Volley', tier: 2, letter: 'V', classOf: 'ranger',
+    id: 'arrowVolley', name: 'Arrow Volley', tier: 2, letter: 'V', classOf: 'ranger',
     desc: '8 arrows in full circle',
     maxRank: 5, rankDesc: ['8 arrows full circle', '10 arrows', '12 arrows ★Notable: arrows return once', '14 arrows return', '16 arrows ★Capstone: arrows orbit + homing'],
     cost: 35, cooldown: 3.0, color: '#ff8000',
@@ -863,7 +863,7 @@ const ABILITIES = {
     },
   },
   fireball: {
-    id: 'fireball', tier: 1, name: 'Fireball', tier: 1, letter: 'F', classOf: 'sorcerer',
+    id: 'fireball', name: 'Fireball', tier: 1, letter: 'F', classOf: 'sorcerer',
     desc: 'Big projectile, explodes on impact', cost: 30, cooldown: 1.5, color: '#ff5520',
     maxRank: 5, rankDesc: ['Explodes r=40 1.4× dmg', '1.6× dmg r=50', '1.8× dmg r=60 ★Notable: explosion chains 1', '2.1× dmg r=70', '2.5× dmg r=80 ★Capstone: leaves 3s fire puddle'],
     cast: (player, slot) => {
@@ -893,7 +893,7 @@ const ABILITIES = {
     },
   },
   frostNova: {
-    id: 'frostNova', tier: 1, name: 'Frost Nova', tier: 1, letter: 'N', classOf: 'sorcerer',
+    id: 'frostNova', name: 'Frost Nova', tier: 1, letter: 'N', classOf: 'sorcerer',
     desc: 'AoE around player, slows enemies', cost: 50, cooldown: 5.0, color: '#aaccff',
     maxRank: 5, rankDesc: ['AoE freeze r=80 1.8× slow', '2.0× dmg wider', '2.2× dmg ★Notable: full freeze 1.5s', '2.6× dmg', '3.0× dmg ★Capstone: ice shards burst outward'],
     cast: (player, slot) => {
@@ -936,7 +936,7 @@ const ABILITIES = {
     },
   },
   chainLightning: {
-    id: 'chainLightning', tier: 1, name: 'Chain Lightning', tier: 2, letter: 'L', classOf: 'sorcerer',
+    id: 'chainLightning', name: 'Chain Lightning', tier: 2, letter: 'L', classOf: 'sorcerer',
     desc: 'Hits target, chains to 3 nearby', cost: 40, cooldown: 2.5, color: '#ffff80',
     maxRank: 5, rankDesc: ['Chains 3 targets 1.8× dmg', 'Chains 4 1.9×', 'Chains 6 2.0× ★Notable: +2 chains', 'Chains 7 2.3×', 'Chains 8 2.8× ★Capstone: stun each jump 0.5s'],
     cast: (player, slot) => {
@@ -981,7 +981,7 @@ const ABILITIES = {
     },
   },
   arcaneOrb: {
-    id: 'arcaneOrb', tier: 1, name: 'Arcane Orb', tier: 2, letter: 'O', classOf: 'sorcerer',
+    id: 'arcaneOrb', name: 'Arcane Orb', tier: 2, letter: 'O', classOf: 'sorcerer',
     desc: 'Slow piercing orb, big damage', cost: 45, cooldown: 3.0, color: '#aa66ff',
     maxRank: 5, rankDesc: ['Slow piercing 3.0× dmg', '3.3× bigger orb', '3.6× ★Notable: splits into 2 on expiry', '4.0×', '5.0× ★Capstone: splits into 4 seeking orbs'],
     cast: (player, slot) => {
@@ -1009,7 +1009,7 @@ const ABILITIES = {
     },
   },
   whirlwind: {
-    id: 'whirlwind', tier: 1, name: 'Whirlwind', tier: 2, letter: 'W', classOf: 'berserker',
+    id: 'whirlwind', name: 'Whirlwind', tier: 1, letter: 'W', classOf: 'berserker',
     desc: 'Spin attack, big AoE around you', cost: 30, cooldown: 2.0, color: '#ff6060',
     maxRank: 5, rankDesc: ['AoE spin 2.4× dmg r=75', '2.6× r=80', '2.8× r=90 ★Notable: lifesteal 6% per hit', '3.2×', '4.0× ★Capstone: pulls enemies in while spinning'],
     cast: (player, slot) => {
@@ -1043,7 +1043,7 @@ const ABILITIES = {
     },
   },
   cleave: {
-    id: 'cleave', tier: 1, name: 'Cleave', tier: 1, letter: 'C', classOf: 'berserker',
+    id: 'cleave', name: 'Cleave', tier: 1, letter: 'C', classOf: 'berserker',
     desc: 'Massive forward swing (250% dmg)', cost: 25, cooldown: 2.0, color: '#ffaa40',
     maxRank: 5, rankDesc: ['Cone 2.6× dmg', '2.8× wider cone', '3.0× ★Notable: applies bleed 3s', '3.5× wide', '4.0× ★Capstone: 180° sweep + 2s knockback'],
     cast: (player, slot) => {
@@ -1080,7 +1080,7 @@ const ABILITIES = {
     },
   },
   warCry: {
-    id: 'warCry', tier: 1, name: 'War Cry', tier: 1, letter: 'Y', classOf: 'berserker',
+    id: 'warCry', name: 'War Cry', tier: 1, letter: 'Y', classOf: 'berserker',
     desc: '+40% damage for 6s', cost: 50, cooldown: 14.0, color: '#cc4040',
     maxRank: 5, rankDesc: ['+40% dmg 6s', '+40% dmg+speed 7s', '+50% dmg+spd 8s ★Notable: resets lowest CD', '60% 9s', '70% 12s ★Capstone: instantly fills resource'],
     cast: (player, slot) => {
@@ -1099,7 +1099,7 @@ const ABILITIES = {
     },
   },
   charge: {
-    id: 'charge', tier: 1, name: 'Charge', tier: 2, letter: 'H', classOf: 'berserker',
+    id: 'charge', name: 'Charge', tier: 2, letter: 'H', classOf: 'berserker',
     desc: 'Dash to enemy, damage path (200% dmg)', cost: 35, cooldown: 3.0, color: '#ffaa40',
     maxRank: 5, rankDesc: ['Dash+path 2.0× dmg', '2.2× wider path', '2.5× ★Notable: stuns hit enemies 1.5s', '3.0×', '3.5× ★Capstone: triple charge + reset on kill'],
     cast: (player, slot) => {
@@ -1143,7 +1143,7 @@ const ABILITIES = {
     },
   },
   groundSlam: {
-    id: 'groundSlam', tier: 1, name: 'Ground Slam', tier: 2, letter: 'S', classOf: 'berserker',
+    id: 'groundSlam', name: 'Ground Slam', tier: 2, letter: 'S', classOf: 'berserker',
     desc: 'AoE slam, slows enemies', cost: 45, cooldown: 4.5, color: '#cc6020',
     maxRank: 5, rankDesc: ['AoE slow 2.2× dmg r=90', '2.4× r=100', '2.6× r=110 ★Notable: cracks persist 3s', '3.0×', '3.5× ★Capstone: 2× radius shockwave'],
     cast: (player, slot) => {
@@ -1175,7 +1175,7 @@ const ABILITIES = {
     },
   },
   meteor: {
-    id: 'meteor', tier: 1, name: 'Meteor', tier: 3, letter: 'T', classOf: 'sorcerer',
+    id: 'meteor', name: 'Meteor', tier: 3, letter: 'T', classOf: 'sorcerer',
     desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
     maxRank: 5, rankDesc: ['Meteor 4.0× dmg r=60', '4.5× r=70', '5.0× r=80 ★Notable: scorches ground 3s', '5.8×', '7.0× ★Capstone: 2 simultaneous meteors'],
     cast: (player, slot) => {
@@ -1199,7 +1199,7 @@ const ABILITIES = {
 
   // ── ROGUE ────────────────────────────────────────────────────
   shadowStrike: {
-    id: 'shadowStrike', tier: 1, name: 'Shadow Strike', tier: 1, letter: 'S', classOf: 'assassin',
+    id: 'shadowStrike', name: 'Shadow Strike', tier: 1, letter: 'S', classOf: 'assassin',
     desc: 'Blink behind nearest enemy, 350% dmg + brief iframe',
     maxRank: 5, rankDesc: ['Blink+stab 2.5× dmg', '2.8× leaves shadow', '3.0× ★Notable: shadow copy fights 3s', '3.5×', '4.5× ★Capstone: 2 copies + vanish 1s'],
     cost: 20, cooldown: 4.0, color: '#cc88ff',
@@ -1223,7 +1223,7 @@ const ABILITIES = {
     },
   },
   bladeFlurry: {
-    id: 'bladeFlurry', tier: 1, name: 'Blade Flurry', tier: 1, letter: 'F', classOf: 'assassin',
+    id: 'bladeFlurry', name: 'Blade Flurry', tier: 1, letter: 'F', classOf: 'assassin',
     desc: '5 daggers in a forward arc',
     maxRank: 5, rankDesc: ['6-hit flurry 1.5× each', '7 hits 1.6×', '8 hits ★Notable: applies poison 3s', '9 hits 2.0×', '12 hits ★Capstone: triggers again on dodge'],
     cost: 30, cooldown: 2.5, color: '#dd99ff',
@@ -1248,7 +1248,7 @@ const ABILITIES = {
     },
   },
   smokeBomb: {
-    id: 'smokeBomb', tier: 1, name: 'Smoke Bomb', tier: 2, letter: 'B', classOf: 'assassin',
+    id: 'smokeBomb', name: 'Smoke Bomb', tier: 2, letter: 'B', classOf: 'assassin',
     desc: 'Slow nearby enemies, gain +40% speed for 4s',
     maxRank: 5, rankDesc: ['AoE slow 1.5× dmg', '1.6× + bigger', '1.8× ★Notable: invulnerable 1s on entry', '2.0×', '2.5× ★Capstone: explodes on exit dealing 3×'],
     cost: 35, cooldown: 8.0, color: '#887799',
@@ -1266,7 +1266,7 @@ const ABILITIES = {
     },
   },
   backstab: {
-    id: 'backstab', tier: 1, name: 'Backstab', tier: 2, letter: 'K', classOf: 'assassin',
+    id: 'backstab', name: 'Backstab', tier: 2, letter: 'K', classOf: 'assassin',
     desc: 'Guaranteed crit for 450% dmg on nearest',
     maxRank: 5, rankDesc: ['Rear 3.0× dmg', '3.3× from any angle', '3.6× ★Notable: stuns 1.5s', '4.0× bleeds', '5.0× ★Capstone: guaranteed crit + triggers dodge'],
     cost: 40, cooldown: 5.0, color: '#ff66cc',
@@ -1287,7 +1287,7 @@ const ABILITIES = {
     },
   },
   evasion: {
-    id: 'evasion', tier: 1, name: 'Evasion', tier: 1, letter: 'E', classOf: 'assassin',
+    id: 'evasion', name: 'Evasion', tier: 1, letter: 'E', classOf: 'assassin',
     desc: 'Dash away from nearest threat, 0.5s iframe',
     maxRank: 5, rankDesc: ['Dodge +2 charges', 'Dodge +3 faster', 'Dodge ★Notable: leaves afterimage decoy', 'Afterimage taunts', '★Capstone: counter-attack after each dodge'],
     cost: 15, cooldown: 3.0, color: '#aa66cc',
@@ -1680,7 +1680,7 @@ const ABILITIES = {
 
   // ── MONK ─────────────────────────────────────────────────────
   fistsOfThunder: {
-    id: 'fistsOfThunder', tier: 1, name: 'Fists of Thunder', tier: 1, letter: 'F', classOf: 'templar',
+    id: 'fistsOfThunder', name: 'Fists of Thunder', tier: 1, letter: 'F', classOf: 'templar',
     desc: '5 rapid strikes on nearest for 120% dmg each',
     maxRank: 5, rankDesc: ['5-hit lightning 1.2×', '6-hit 1.4×', '7-hit ★Notable: knockback + stun last hit', '8-hit 1.8×', '10-hit ★Capstone: lightning chain on final blow'],
     cost: 25, cooldown: 2.0, color: '#ffaa44',
@@ -1705,7 +1705,7 @@ const ABILITIES = {
     },
   },
   innerSanctuary: {
-    id: 'innerSanctuary', tier: 1, name: 'Inner Sanctuary', tier: 1, letter: 'I', classOf: 'templar',
+    id: 'innerSanctuary', name: 'Inner Sanctuary', tier: 1, letter: 'I', classOf: 'templar',
     desc: 'Heal 25% max HP',
     maxRank: 5, rankDesc: ['Shield zone 3s 2.5× dmg', '3.5s bigger', '4s ★Notable: regen 8 hp/s inside', '4.5s regen+speed', '5s ★Capstone: reflects projectiles 50%'],
     cost: 40, cooldown: 8.0, color: '#ffe0a0',
@@ -1717,7 +1717,7 @@ const ABILITIES = {
     },
   },
   cycloneStrike: {
-    id: 'cycloneStrike', tier: 1, name: 'Cyclone Strike', tier: 2, letter: 'C', classOf: 'templar',
+    id: 'cycloneStrike', name: 'Cyclone Strike', tier: 2, letter: 'C', classOf: 'templar',
     desc: 'Pull enemies in 120px toward you, then deal AoE',
     maxRank: 5, rankDesc: ['Pull+AoE 2.2×', '2.4× wider pull', '2.6× ★Notable: pulls 2× harder', '3.0× stun center', '3.5× ★Capstone: leaves tornado 3s'],
     cost: 35, cooldown: 4.0, color: '#ffcc66',
@@ -1747,7 +1747,7 @@ const ABILITIES = {
     },
   },
   sevenSidedStrike: {
-    id: 'sevenSidedStrike', tier: 1, name: 'Seven-Sided Strike', tier: 3, letter: 'V', classOf: 'templar',
+    id: 'sevenSidedStrike', name: 'Seven-Sided Strike', tier: 3, letter: 'V', classOf: 'templar',
     desc: '7 hits distributed among nearby enemies',
     maxRank: 5, rankDesc: ['7 strikes 1.8× each', '7 hits 2.0×', '9 hits ★Notable: each hit stuns 0.3s', '11 hits 2.5×', '14 hits ★Capstone: last hit AoE explosion'],
     cost: 50, cooldown: 5.0, color: '#ff8822',

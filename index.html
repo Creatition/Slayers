@@ -1040,12 +1040,8 @@
       state = STATE.VICTORY;
     } else {
       Sfx.waveComplete();
-      // Boss kill unlocks next ability tier — offer tier-pick if player doesn't already have a T(n) ability
-      const bossNum = runBossesKilled; // 1=wave5, 2=wave10, 3=wave15
-      const unlockedTier = Math.min(bossNum + 1, 4); // boss 1 → tier 2, boss 2 → tier 3, boss 3 → tier 4
-      if (unlockedTier <= 4) {
-        enterTierDraft(unlockedTier);
-      } else if (player.pendingLevelUps > 0) {
+      // Tier draft removed — ability tiers unlock via character level (T1 always, T2@5, T3@10, T4@15)
+      if (player.pendingLevelUps > 0) {
         enterLevelUp();
       } else {
         enterShop();
@@ -3382,20 +3378,23 @@
     if (charTreeTab === 'abilities') {
       // ── ABILITIES VIEW ─────────────────────────────────────
       const viewCl = getClassById(charTreeClass);
-      const allAbl = classAbilities(charTreeClass);
-      const cardW2 = 116, cardH2 = 110, gap2 = 8;
+      // Sort abilities by tier so T1 → T2 → T3 → T4
+      const allAbl = classAbilities(charTreeClass).slice().sort((a, b) => (a.tier || 1) - (b.tier || 1));
+      const cardW2 = 116, cardH2 = 116, gap2 = 8;
       const ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
       const ablX0 = Math.floor((W - totalAblW) / 2);
-      const ablY0 = _inRun ? 78 : 92; // shift cards up when class tabs are hidden
+      const ablY0 = _inRun ? 78 : 92;
       // Clamp scroll
       const ablTotalRows = Math.ceil(allAbl.length / ablPerRow);
       const ablMaxScroll = Math.max(0, ablTotalRows * (cardH2 + gap2) - (H - ablY0 - 10));
       charAbilScroll = Math.max(0, Math.min(ablMaxScroll, charAbilScroll));
-      // Skill point header — fixed, above scroll area
-      ctx.fillStyle = (player && player.skillPoints > 0) ? '#aaffaa' : '#666';
+      // Header: ability points available
+      const _ap = player ? (player.skillPoints || 0) : 0;
+      const _charLvl = ensureCP(charTreeClass).level;
+      ctx.fillStyle = _ap > 0 ? '#aaffaa' : '#666';
       ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(player ? `Skill Points: ${player.skillPoints || 0}  — scroll to see all abilities` : 'Scroll to browse abilities', W / 2, ablY0 - 4);
+      ctx.fillText(player ? `${_ap} Ability Point${_ap !== 1 ? 's' : ''} — T2 unlocks Lv5 · T3 Lv10 · T4 Lv15` : 'Scroll to browse abilities', W / 2, ablY0 - 4);
       // Clip cards to scroll area
       ctx.save();
       ctx.beginPath(); ctx.rect(0, ablY0 - 1, W, H - ablY0 + 1); ctx.clip();
@@ -3404,79 +3403,114 @@
         const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
         const ax = ablX0 + col * (cardW2 + gap2);
         const ay = ablY0 + row * (cardH2 + gap2) - charAbilScroll;
-        if (ay + cardH2 < ablY0 || ay > H) continue; // outside scroll viewport, skip draw
-        // Find if player owns this ability
+        if (ay + cardH2 < ablY0 || ay > H) continue;
+        // Tier gate: T1 always, T2 @ lv5, T3 @ lv10, T4 @ lv15
+        const ablTier = adef.tier || 1;
+        const reqLv = ablTier <= 1 ? 0 : ablTier === 2 ? 5 : ablTier === 3 ? 10 : 15;
+        const tierGateMet = _charLvl >= reqLv;
         const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
         const curRank = owned2 ? (owned2.rank || 1) : 0;
-        const maxRank = adef.maxRank || 5;
-        const canRankUp = player && owned2 && curRank < maxRank && (player.skillPoints || 0) >= 1;
+        const maxRank = adef.maxRank || 10;
+        const canRankUp = player && owned2 && curRank < maxRank && _ap >= 1 && charTreeClass === player.class.id;
         const isMaxed = owned2 && curRank >= maxRank;
+        const freeSlot = player ? player.abilities.indexOf(null, 1) : -1;
+        const canUnlock = !owned2 && tierGateMet && player && _ap >= 1 && freeSlot >= 0 && charTreeClass === player.class.id;
         const hovered2 = mouseX >= ax && mouseX <= ax + cardW2 && mouseY >= ay && mouseY <= ay + cardH2;
         // Card bg
-        ctx.fillStyle = owned2 ? (isMaxed ? '#1a180a' : '#0e1410') : '#111';
+        ctx.fillStyle = !tierGateMet ? '#0a0a0a' : owned2 ? (isMaxed ? '#1a180a' : '#0e1410') : '#111';
         ctx.fillRect(ax, ay, cardW2, cardH2);
-        ctx.strokeStyle = owned2 ? (isMaxed ? '#ffd040' : viewCl.color) : '#333';
-        ctx.lineWidth = (hovered2 && canRankUp) ? 3 : 1;
+        ctx.strokeStyle = !tierGateMet ? '#222' : owned2 ? (isMaxed ? '#ffd040' : viewCl.color) : (tierGateMet ? '#3a3a3a' : '#222');
+        ctx.lineWidth = (hovered2 && (canRankUp || canUnlock)) ? 3 : 1;
         ctx.strokeRect(ax, ay, cardW2, cardH2); ctx.lineWidth = 1;
+        // Tier badge (top-right corner)
+        const tierBadgeColors = ['', '#888', '#44dd44', '#4499ff', '#ffaa00'];
+        ctx.fillStyle = tierBadgeColors[ablTier] || '#888'; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(`T${ablTier}`, ax + cardW2 - 3, ay + 9);
         // Letter icon
-        ctx.fillStyle = owned2 ? adef.color : '#444'; ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(adef.letter, ax + 16, ay + cardH2 / 2 - 8);
+        ctx.fillStyle = !tierGateMet ? '#333' : (owned2 ? adef.color : '#555');
+        ctx.font = 'bold 22px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(adef.letter, ax + 16, ay + cardH2 / 2 - 10);
         ctx.textBaseline = 'alphabetic';
         // Name
-        ctx.fillStyle = owned2 ? adef.color : '#555'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
+        ctx.fillStyle = !tierGateMet ? '#444' : (owned2 ? adef.color : '#777');
+        ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
         ctx.fillText(adef.name, ax + 32, ay + 14);
-        // Rank pips
-        const pipW2 = 8, pipGap2 = 3;
+        // Rank pips (10 pips, smaller to fit)
+        const pipW2 = 6, pipGap2 = 2;
         for (let p = 0; p < maxRank; p++) {
           const px2 = ax + 32 + p * (pipW2 + pipGap2);
-          const milestoneCol = (p === 2) ? '#aaffaa' : (p === 4) ? '#ffd040' : (owned2 ? adef.color : '#333');
+          const milestoneCol = (p === 4) ? '#aaffaa' : (p === 9) ? '#ffd040' : (owned2 ? adef.color : '#333');
           ctx.fillStyle = p < curRank ? milestoneCol : '#2a2a2a';
-          ctx.fillRect(px2, ay + 19, pipW2, 4);
-          if (p === 2 || p === 4) { ctx.strokeStyle = milestoneCol; ctx.lineWidth = 1; ctx.strokeRect(px2, ay + 19, pipW2, 4); ctx.lineWidth = 1; }
+          ctx.fillRect(px2, ay + 19, pipW2, 3);
+          if (p === 4 || p === 9) { ctx.strokeStyle = milestoneCol; ctx.lineWidth = 1; ctx.strokeRect(px2, ay + 19, pipW2, 3); ctx.lineWidth = 1; }
         }
-        // Rank label
-        ctx.fillStyle = owned2 ? '#aaa' : '#444'; ctx.font = '6px monospace'; ctx.textAlign = 'left';
-        ctx.fillText(owned2 ? (isMaxed ? 'MAXED' : `Rank ${curRank}/${maxRank}`) : 'LOCKED', ax + 32, ay + 33);
-        // Current rank desc (or lock desc)
+        // Rank label / status
+        ctx.font = '6px monospace'; ctx.textAlign = 'left';
+        if (!tierGateMet) {
+          ctx.fillStyle = '#555';
+          ctx.fillText(`Requires Lv ${reqLv}`, ax + 32, ay + 33);
+        } else if (owned2) {
+          ctx.fillStyle = isMaxed ? '#ffd040' : '#aaa';
+          ctx.fillText(isMaxed ? 'MAXED (10/10)' : `${curRank}/${maxRank} AP`, ax + 32, ay + 33);
+        } else {
+          ctx.fillStyle = '#666';
+          ctx.fillText('LOCKED', ax + 32, ay + 33);
+        }
+        // Description text
         const descIdx = curRank > 0 ? curRank - 1 : 0;
         const descTxt = owned2 ? ((adef.rankDesc || [])[descIdx] || adef.desc) : adef.desc;
-        ctx.fillStyle = owned2 ? '#999' : '#444'; ctx.font = '6px monospace'; ctx.textAlign = 'left';
-        // wrap text in 2 lines max
+        ctx.fillStyle = !tierGateMet ? '#333' : (owned2 ? '#999' : '#555');
+        ctx.font = '6px monospace'; ctx.textAlign = 'left';
         const dWords = descTxt.split(' '); let dLine = ''; let dY = ay + 46;
         for (const dw of dWords) {
           const dt = dLine + (dLine ? ' ' : '') + dw;
           if (ctx.measureText(dt).width > cardW2 - 36 && dLine) {
-            ctx.fillText(dLine, ax + 32, dY); dLine = dw; dY += 9; if (dY > ay + 65) break;
+            ctx.fillText(dLine, ax + 32, dY); dLine = dw; dY += 9; if (dY > ay + 64) break;
           } else { dLine = dt; }
         }
-        if (dLine && dY <= ay + 65) ctx.fillText(dLine, ax + 32, dY);
-        // Next rank preview (if owned and not maxed)
+        if (dLine && dY <= ay + 64) ctx.fillText(dLine, ax + 32, dY);
+        // Next rank preview
         if (owned2 && !isMaxed && adef.rankDesc) {
           const nextDesc = adef.rankDesc[curRank] || '';
           if (nextDesc) {
             ctx.fillStyle = '#445544'; ctx.font = '6px monospace';
-            ctx.fillText('Next: ' + nextDesc.substring(0, 22) + (nextDesc.length > 22 ? '…' : ''), ax + 4, ay + 82);
+            ctx.fillText('Next: ' + nextDesc.substring(0, 22) + (nextDesc.length > 22 ? '…' : ''), ax + 4, ay + 84);
           }
         }
-        // [+] rank up button
+        // Bottom action buttons
+        const btnY2 = ay + cardH2 - 16;
         if (canRankUp) {
-          const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
-          ctx.fillStyle = hovered2 ? '#aaffaa' : '#225522'; ctx.fillRect(btnX, btnY, 18, 12);
-          ctx.strokeStyle = '#aaffaa'; ctx.lineWidth = 1; ctx.strokeRect(btnX, btnY, 18, 12);
-          ctx.fillStyle = hovered2 ? '#002200' : '#aaffaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-          ctx.fillText('+1', btnX + 9, btnY + 9);
+          // [+1] rank up button (right)
+          const btnX = ax + cardW2 - 22;
+          const bHov = mouseX >= btnX && mouseX < btnX + 18 && mouseY >= btnY2 && mouseY < btnY2 + 12;
+          ctx.fillStyle = bHov ? '#aaffaa' : '#225522'; ctx.fillRect(btnX, btnY2, 18, 12);
+          ctx.strokeStyle = '#aaffaa'; ctx.lineWidth = 1; ctx.strokeRect(btnX, btnY2, 18, 12); ctx.lineWidth = 1;
+          ctx.fillStyle = bHov ? '#002200' : '#aaffaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('+1', btnX + 9, btnY2 + 9);
         } else if (isMaxed) {
           ctx.fillStyle = '#ffd040'; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'center';
-          ctx.fillText('★MAX', ax + cardW2 - 11, ay + cardH2 - 6);
+          ctx.fillText('★MAX', ax + cardW2 - 11, btnY2 + 6);
         }
-        // [-1] refund button — only for purchased ranks (rank > 1 was bought with skill pts)
+        // [-1] refund button (left) — only owned, rank > 1, playing this class
         if (owned2 && curRank > 1 && player && charTreeClass === player.class.id) {
-          const rdBtnX = ax + 4, rdBtnY = ay + cardH2 - 16;
-          const rdHov = mouseX >= rdBtnX && mouseX < rdBtnX + 18 && mouseY >= rdBtnY && mouseY < rdBtnY + 12;
-          ctx.fillStyle = rdHov ? '#ff6655' : '#3a1111'; ctx.fillRect(rdBtnX, rdBtnY, 18, 12);
-          ctx.strokeStyle = '#ff6655'; ctx.lineWidth = 1; ctx.strokeRect(rdBtnX, rdBtnY, 18, 12); ctx.lineWidth = 1;
+          const rdBtnX = ax + 4;
+          const rdHov = mouseX >= rdBtnX && mouseX < rdBtnX + 18 && mouseY >= btnY2 && mouseY < btnY2 + 12;
+          ctx.fillStyle = rdHov ? '#ff6655' : '#3a1111'; ctx.fillRect(rdBtnX, btnY2, 18, 12);
+          ctx.strokeStyle = '#ff6655'; ctx.lineWidth = 1; ctx.strokeRect(rdBtnX, btnY2, 18, 12); ctx.lineWidth = 1;
           ctx.fillStyle = rdHov ? '#000' : '#ff8866'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-          ctx.fillText('-1', rdBtnX + 9, rdBtnY + 9);
+          ctx.fillText('-1', rdBtnX + 9, btnY2 + 9);
+        }
+        // [UNLOCK] button — unowned, tier unlocked, has AP, has free slot
+        if (!owned2 && tierGateMet && player && charTreeClass === player.class.id) {
+          const ulW = cardW2 - 8, ulX = ax + 4;
+          const ulHov = mouseX >= ulX && mouseX < ulX + ulW && mouseY >= btnY2 && mouseY < btnY2 + 12;
+          const ulCanDo = _ap >= 1 && freeSlot >= 0;
+          ctx.fillStyle = ulCanDo ? (ulHov ? '#aaffaa' : '#193319') : '#1a1a1a';
+          ctx.fillRect(ulX, btnY2, ulW, 12);
+          ctx.strokeStyle = ulCanDo ? '#aaffaa' : '#333'; ctx.lineWidth = 1; ctx.strokeRect(ulX, btnY2, ulW, 12); ctx.lineWidth = 1;
+          ctx.fillStyle = ulCanDo ? (ulHov ? '#002200' : '#88cc88') : '#444';
+          ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+          ctx.fillText(ulCanDo ? 'UNLOCK  [1 AP]' : (freeSlot < 0 ? 'SLOTS FULL' : 'NEED AP'), ax + cardW2 / 2, btnY2 + 9);
         }
       }
       ctx.restore(); // end clip
@@ -3485,9 +3519,9 @@
         ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
         ctx.fillText('scroll ▼  ' + Math.round(charAbilScroll / ablMaxScroll * 100) + '%', W - 30, H - 8);
       }
-      // RESET ALL — refund ability rank-ups + skill tree nodes for this class
+      // RESET ALL button — show if any non-signature abilities unlocked or ranks > 1
       const _hasAblRanks = player && charTreeClass === player.class.id &&
-        player.abilities.some(a => a && (a.rank || 1) > 1);
+        player.abilities.some((a, si) => a && (si > 0 || (a.rank || 1) > 1));
       const _hasTreeNodes = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
       if (_hasAblRanks || _hasTreeNodes) {
         const resetHov = isHovering(W - 108, H - 26, 100, 20);
@@ -3660,7 +3694,7 @@
     // ── Back button + Reset button ────────────────────────────
     const _hasTreeNodes2 = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
     const _hasAblRanks2  = player && charTreeClass === player.class.id &&
-      player.abilities.some(a => a && (a.rank || 1) > 1);
+      player.abilities.some((a, si) => a && (si > 0 || (a.rank || 1) > 1));
     if (_hasTreeNodes2 || _hasAblRanks2) {
       const resetHov2 = isHovering(W - 108, H - 26, 100, 20);
       ctx.fillStyle = resetHov2 ? '#ff6633' : '#331100';
@@ -6289,13 +6323,19 @@
     const _rcp = ensureCP(cid);
     _rcp.treePts += treeRefund;
     if (cid === selectedClassId) treePoints = _rcp.treePts;
-    // Refund all ability rank-ups for current player (rank > 1 was purchased)
+    // Refund all ability points spent (rank = AP invested; slot 0 = signature, refund ranks > 1 only)
     let ablRefund = 0;
     if (player && cid === player.class.id) {
-      for (const abl of player.abilities) {
-        if (abl && (abl.rank || 1) > 1) {
-          ablRefund += (abl.rank || 1) - 1;
-          abl.rank = 1;
+      for (let _si = 0; _si < player.abilities.length; _si++) {
+        const abl = player.abilities[_si];
+        if (!abl) continue;
+        if (_si === 0) {
+          // Signature: refund extra ranks only (rank 1 is free)
+          if ((abl.rank || 1) > 1) { ablRefund += (abl.rank || 1) - 1; abl.rank = 1; }
+        } else {
+          // Unlocked via AP: refund ALL points (rank = AP spent), then remove from slot
+          ablRefund += (abl.rank || 1);
+          player.abilities[_si] = null;
         }
       }
       player.skillPoints = (player.skillPoints || 0) + ablRefund;
@@ -6320,7 +6360,7 @@
     if (isHovering(W - 108, H - 26, 100, 20)) {
       const _hasNodes = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
       const _hasRanks = player && charTreeClass === player.class.id &&
-        player.abilities.some(a => a && (a.rank || 1) > 1);
+        player.abilities.some((a, si) => a && (si > 0 || (a.rank || 1) > 1));
       if (_hasNodes || _hasRanks) { resetClassProgress(charTreeClass); return; }
     }
     if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'tree'; fitTreeView(); }
@@ -6334,39 +6374,55 @@
       }
     }
     if (charTreeTab === 'abilities') {
-      const viewAbl = classAbilities(charTreeClass);
-      const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
+      // Sort matches draw order (by tier ascending)
+      const viewAbl = classAbilities(charTreeClass).slice().sort((a, b) => (a.tier || 1) - (b.tier || 1));
+      const cardW2 = 116, cardH2 = 116, gap2 = 8, ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
       const ablX0 = Math.floor((W - totalAblW) / 2);
-      const ablY0 = (state === STATE.INVENTORY) ? 78 : 92; // match draw function
+      const ablY0 = (state === STATE.INVENTORY) ? 78 : 92;
+      const _charLvl2 = ensureCP(charTreeClass).level;
       for (let ai = 0; ai < viewAbl.length; ai++) {
         const adef = viewAbl[ai];
         const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
         const ax = ablX0 + col * (cardW2 + gap2), ay = ablY0 + row * (cardH2 + gap2) - charAbilScroll;
         if (ay + cardH2 < ablY0 || ay > H) continue;
-        const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
-        // [+1] rank up
-        if (isHovering(btnX, btnY, 18, 12)) {
-          const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
-          const curRank = owned2 ? (owned2.rank || 1) : 0;
-          if (owned2 && curRank < (adef.maxRank || 5) && player && (player.skillPoints || 0) >= 1) {
+        const ablTier = adef.tier || 1;
+        const reqLv2 = ablTier <= 1 ? 0 : ablTier === 2 ? 5 : ablTier === 3 ? 10 : 15;
+        const tierGateMet2 = _charLvl2 >= reqLv2;
+        if (!tierGateMet2) continue; // can't interact with level-locked abilities
+        const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        const curRank = owned2 ? (owned2.rank || 1) : 0;
+        const maxRank = adef.maxRank || 10;
+        const btnY2 = ay + cardH2 - 16;
+        // [+1] rank up (right button, only for owned)
+        if (owned2 && isHovering(ax + cardW2 - 22, btnY2, 18, 12)) {
+          if (curRank < maxRank && player && (player.skillPoints || 0) >= 1 && charTreeClass === player.class.id) {
             player.skillPoints--;
             owned2.rank = curRank + 1;
-            const lbl = owned2.rank >= 5 ? '★CAPSTONE!' : owned2.rank >= 3 ? '★Notable!' : `Rank ${owned2.rank}`;
+            const lbl = owned2.rank >= 10 ? '★CAPSTONE!' : owned2.rank >= 5 ? '★Notable!' : `${owned2.rank}/10`;
             spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${lbl}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
-            Sfx.uiConfirm();
+            Sfx.uiConfirm && Sfx.uiConfirm();
           }
           break;
         }
-        // [-1] refund click — only for purchased ranks (rank > 1)
-        const rdBtnX = ax + 4, rdBtnY = ay + cardH2 - 16;
-        if (isHovering(rdBtnX, rdBtnY, 18, 12)) {
-          const owned2r = player ? player.abilities.find(s => s && s.id === adef.id) : null;
-          if (owned2r && (owned2r.rank || 1) > 1 && player && charTreeClass === player.class.id) {
-            owned2r.rank--;
+        // [-1] refund (left button, only for owned rank > 1)
+        if (owned2 && curRank > 1 && isHovering(ax + 4, btnY2, 18, 12)) {
+          if (player && charTreeClass === player.class.id) {
+            owned2.rank--;
             player.skillPoints = (player.skillPoints || 0) + 1;
             spawnDamageNumber(player.x, player.y - 28, `${adef.name} refunded`, { color: '#ff8866', size: 10, vy: -50, life: 1.8 });
             Sfx.uiClick && Sfx.uiClick();
+          }
+          break;
+        }
+        // [UNLOCK] button (full-width bottom, only for unowned)
+        if (!owned2 && isHovering(ax + 4, btnY2, cardW2 - 8, 12)) {
+          const freeSlot = player ? player.abilities.indexOf(null, 1) : -1;
+          if (player && (player.skillPoints || 0) >= 1 && freeSlot >= 0 && charTreeClass === player.class.id) {
+            player.skillPoints--;
+            player.abilities[freeSlot] = { id: adef.id, def: adef, rarity: RARITY.WHITE, rank: 1 };
+            spawnDamageNumber(player.x, player.y - 28, `${adef.name} UNLOCKED!`, { color: adef.color || '#ffdd44', size: 12, vy: -60, life: 2.2 });
+            Sfx.uiConfirm && Sfx.uiConfirm();
           }
           break;
         }
@@ -7503,7 +7559,7 @@
     ctx.restore();
 
     drawHud();
-    if (state === STATE.PLAYING) drawAbilityBar();
+    if (state === STATEE.PLAYING) drawAbilityBar();
     else if (state === STATE.PAUSED) drawPauseScreen();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
