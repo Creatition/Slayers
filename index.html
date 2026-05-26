@@ -95,7 +95,12 @@
   let netRoomCode  = '';
   let netPlayerId  = null;
   let netServerUrl = 'ws://localhost:8765';
-  let netBroadcastTimer = 0;
+  let netBroadcastTimer    = 0;
+  let netHostSnapshotTimer = 0;   // host: 20-Hz enemy-snapshot timer
+  let netClientInputTimer  = 0;   // client: 20-Hz input-send timer
+  let netClientInputs    = {};    // host only: { playerId: {x,y} }
+  let netKilledIds       = new Set(); // client: locally-killed ghost IDs, not re-created until host confirms
+  let netPlayerIdToSlot  = {};    // host only: { playerId: extraPlayers index }
   // Per-player input state (P2 arrow keys, P3/P4 gamepad)
   const EXTRA_INPUT_SCHEMES = [
     { keys: { up:'arrowup', down:'arrowdown', left:'arrowleft', right:'arrowright' }, gpIdx: 1 },
@@ -115,6 +120,9 @@
     }
     return best;
   }
+  function netIsOnlineClient() { return multiMode === 'online' && !!netSocket && !netIsHost; }
+  function netIsOnlineHost()   { return multiMode === 'online' && !!netSocket &&  netIsHost; }
+
   let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
   let pauseInSettings = false;
   const gameSettings = { soundMuted: false, screenShake: true };
@@ -541,10 +549,14 @@
   }
   // Get move vector for an extra player slot (0-based = P2 is slot 0)
   function getExtraPlayerMove(slotIdx) {
+    // Online host: drive extra players from client inputs
+    if (netIsOnlineHost()) {
+      const pid = Object.keys(netPlayerIdToSlot).find(k => netPlayerIdToSlot[k] === slotIdx);
+      if (pid) return netClientInputs[pid] || { x: 0, y: 0 };
+    }
+    // Local co-op: keyboard / gamepad
     const scheme = EXTRA_INPUT_SCHEMES[slotIdx] || {};
-    // Keyboard (P2 slot 0 uses arrows)
     if (slotIdx === 0) { const kb = pollKeyboardP2(); if (kb) return kb; }
-    // Gamepad
     if (scheme.gpIdx != null) { const gm = pollGamepadIdx(scheme.gpIdx); if (gm) return gm; }
     return { x: 0, y: 0 };
   }
@@ -823,6 +835,8 @@
   // ============================================================
   function handleEnemyDeath(e) {
     if (netIsHost && e._netId) netBroadcastEnemyDeath(e._netId);
+    // Client: mark ghost kills so snapshot doesn't re-create them until host confirms dead
+    if (netIsOnlineClient() && e._netGhost && e._netId) netKilledIds.add(e._netId);
     player.kills++;
     // Legendary on-kill procs
     if (player.legendaryEffects) {
@@ -2114,17 +2128,31 @@
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     runWavesCompleted = 0; runBossesKilled = 0; runXpAwarded = false; runXpEarned = 0;
+    netHostSnapshotTimer = 0; netClientInputTimer = 0; netKilledIds.clear();
     xpVacuumTimer = 0; xpVacuumDone = false; xpVacuumAmount = 0;
     legendaryEliteSpawned = false; uniqueEliteSpawned = false;
     uniqueEliteAvailable  = Math.random() < 0.20; // ~1 in 5 runs gets a unique elite
-    // Spawn extra local players at staggered positions
+    // Spawn extra players: local co-op slots first, then online clients
     extraPlayers = [];
     for (let _ei = 0; _ei < extraPlayerCfg.length; _ei++) {
       const _cfg = extraPlayerCfg[_ei];
       const _ep = new Player(W / 2 + (_ei + 1) * 28, H / 2, _cfg.classId);
-      applyPrimaryStatsToPlayer(_ep);
-      applySkillTreeToPlayer(_ep);
+      applyPrimaryStatsToPlayer(_ep); applySkillTreeToPlayer(_ep);
       extraPlayers.push(_ep);
+    }
+    // Online host: create a slot for each connected client
+    if (netIsOnlineHost()) {
+      for (const [_pid, _slot] of Object.entries(netPlayerIdToSlot)) {
+        const _si = extraPlayerCfg.length + _slot;
+        const _ep = new Player(W / 2 + (_si + 1) * 28, H / 2, selectedClassId);
+        applyPrimaryStatsToPlayer(_ep); applySkillTreeToPlayer(_ep);
+        extraPlayers.push(_ep);
+        netClientInputs[_pid] = { x: 0, y: 0 };
+      }
+      // Tell all clients to start the run
+      if (netSocket && netSocket.readyState === 1) {
+        netSocket.send(JSON.stringify({ type: 'netEvent', event: 'startRun', wave: 1 }));
+      }
     }
     player.attackCount = 0;           // razorwind_4th_crit tracker
     player.shadowcloakReady = true;   // shadowcloak_first_dodge per wave
@@ -5857,31 +5885,141 @@
     } else if (msg.type === 'joined') {
       netPlayerId = msg.playerId;
       Sfx.uiConfirm && Sfx.uiConfirm();
+    } else if (msg.type === 'playerJoined') {
+      // Host: reserve a slot for this new client (extraPlayer created at run start)
+      if (netIsHost) {
+        const slot = Object.keys(netPlayerIdToSlot).length;
+        netPlayerIdToSlot[msg.playerId] = slot;
+        netClientInputs[msg.playerId]   = { x: 0, y: 0 };
+        // If already in a run, create their extraPlayer immediately
+        if (state === STATE.PLAYING) {
+          const _ep = new Player(W / 2 + (slot + 1) * 28, H / 2, selectedClassId);
+          applyPrimaryStatsToPlayer(_ep); applySkillTreeToPlayer(_ep);
+          extraPlayers.push(_ep);
+        }
+      }
     } else if (msg.type === 'playerState') {
       if (msg.playerId !== netPlayerId) netPlayerStates[msg.playerId] = msg;
     } else if (msg.type === 'netEvent') {
       if (msg.event === 'enemyDied') {
+        // Legacy relay-mode kill (kept for fallback)
         const e = enemies.find(en => en._netId === msg.enemyId && en.alive);
         if (e) { e.hp = 0; handleEnemyDeath(e); }
       } else if (msg.event === 'startRun') {
-        // Sync run start with host's seed
-        if (!netIsHost) { selectedClassId = selectedClassId; resetWorld(); }
+        if (!netIsHost) { resetWorld(); }
+      } else if (msg.event === 'clientInput') {
+        // Host receives movement input from a client
+        if (netIsHost && msg.fromPlayerId) {
+          netClientInputs[msg.fromPlayerId] = { x: msg.x || 0, y: msg.y || 0 };
+        }
+      } else if (msg.event === 'gameSnapshot') {
+        // Client receives authoritative world state from host
+        if (!netIsHost) {
+          // Sync wave
+          if (msg.wave != null) currentWave = msg.wave;
+          // Sync game state transitions (intermission, victory, dead)
+          if (msg.gameState != null && msg.gameState !== STATE.PLAYING &&
+              state === STATE.PLAYING) {
+            state = msg.gameState;
+          }
+          // Sync enemies from snapshot
+          const snap = msg.enemies || [];
+          const snapMap = {};
+          for (const s of snap) snapMap[s.id] = s;
+          // Kill enemies no longer in snapshot
+          for (const e of enemies) {
+            if (!snapMap[e._netId] && e.alive) { e.alive = false; }
+          }
+          // Update or create enemies from snapshot
+          for (const s of snap) {
+            // If we killed this enemy locally, wait until host confirms it dead (hp=0)
+            if (netKilledIds.has(s.id) && s.hp > 0) continue;
+            if (netKilledIds.has(s.id) && s.hp <= 0) { netKilledIds.delete(s.id); continue; }
+            let e = enemies.find(en => en._netId === s.id);
+            if (!e) {
+              try { e = new Enemy(s.x, s.y, s.type || 'skeleton', 1, 1, 1); } catch(_) { continue; }
+              e._netId = s.id; e._netGhost = true;
+              enemies.push(e);
+            }
+            e.x = s.x; e.y = s.y;
+            e.hp = s.hp; e.maxHp = s.maxHp; e.r = s.r;
+            e.isBoss = !!s.isBoss; e.elite = !!s.elite;
+            e.alive = s.hp > 0;
+            e._netGhost = true;
+          }
+          enemies = enemies.filter(e => e.alive);
+          // Sync other player states
+          if (msg.players) {
+            for (const [pid, ps] of Object.entries(msg.players)) {
+              if (pid !== netPlayerId) netPlayerStates[pid] = ps;
+            }
+          }
+        }
       }
     } else if (msg.type === 'playerLeft') {
+      if (netIsHost) {
+        const slot = netPlayerIdToSlot[msg.playerId];
+        if (slot != null && slot < extraPlayers.length) {
+          extraPlayers.splice(slot, 1);
+          // Shift slots above this one down
+          for (const pid of Object.keys(netPlayerIdToSlot)) {
+            if (netPlayerIdToSlot[pid] > slot) netPlayerIdToSlot[pid]--;
+          }
+        }
+        delete netPlayerIdToSlot[msg.playerId];
+        delete netClientInputs[msg.playerId];
+      }
       delete netPlayerStates[msg.playerId];
     }
   }
-  function netBroadcastState(dt) {
-    if (!netSocket || netSocket.readyState !== 1) return;
-    netBroadcastTimer += dt;
-    if (netBroadcastTimer < 0.05) return; // 20 Hz
-    netBroadcastTimer = 0;
+  // ── HOST: broadcast full game snapshot at 20 Hz ──────────────────────────
+  function netHostBroadcast(dt) {
+    if (!netIsOnlineHost()) return;
+    netHostSnapshotTimer += dt;
+    if (netHostSnapshotTimer < 0.05) return;
+    netHostSnapshotTimer = 0;
+    // Build compact enemy list
+    const esnap = enemies.filter(e => e.alive).map(e => ({
+      id: e._netId, x: Math.round(e.x), y: Math.round(e.y),
+      hp: e.hp, maxHp: e.maxHp, r: e.r,
+      type: e.type || 'skeleton', isBoss: !!e.isBoss, elite: !!e.elite,
+    }));
+    // All active player states
+    const psnap = { [netPlayerId]: {
+      x: player.x, y: player.y, hp: player.hp, maxHp: player.maxHp,
+      facing: player.facing, classId: selectedClassId,
+    }};
+    const clientPids = Object.keys(netPlayerIdToSlot);
+    for (let _i = 0; _i < clientPids.length; _i++) {
+      const _pid = clientPids[_i];
+      const _ep  = extraPlayers[netPlayerIdToSlot[_pid]];
+      if (_ep) psnap[_pid] = { x: _ep.x, y: _ep.y, hp: _ep.hp, maxHp: _ep.maxHp, facing: _ep.facing || 1, classId: selectedClassId };
+    }
+    netSocket.send(JSON.stringify({
+      type: 'netEvent', event: 'gameSnapshot',
+      wave: currentWave, gameState: state,
+      enemies: esnap, players: psnap,
+    }));
+  }
+
+  // ── CLIENT: send own movement input to host at 20 Hz ─────────────────────
+  function netSendInput(dt) {
+    if (!netIsOnlineClient()) return;
+    netClientInputTimer += dt;
+    if (netClientInputTimer < 0.05) return;
+    netClientInputTimer = 0;
+    netSocket.send(JSON.stringify({
+      type: 'netEvent', event: 'clientInput',
+      x: Actions.moveX, y: Actions.moveY,
+    }));
+    // Also broadcast own player state so host can render us
     netSocket.send(JSON.stringify({
       type: 'playerState', playerId: netPlayerId,
       x: player.x, y: player.y, hp: player.hp, maxHp: player.maxHp,
       classId: selectedClassId, dead: player.hp <= 0, facing: player.facing,
     }));
   }
+
   function netBroadcastEnemyDeath(enemyId) {
     if (!netSocket || netSocket.readyState !== 1) return;
     netSocket.send(JSON.stringify({ type: 'netEvent', event: 'enemyDied', enemyId }));
@@ -6279,18 +6417,23 @@
       const wdt = frozen ? 0 : dt;
 
       const cfg = waveConfig(currentWave);
-      waveTimer -= wdt;
-      if (!isBossWave(currentWave) && waveTimer > 0) {
-        spawnTimer += wdt;
-        while (spawnTimer >= cfg.spawnInterval) {
-          spawnTimer -= cfg.spawnInterval;
-          spawnEnemy(cfg);
+      // ── Enemy simulation — host-authoritative: skip on online clients ──────
+      if (!netIsOnlineClient()) {
+        waveTimer -= wdt;
+        if (!isBossWave(currentWave) && waveTimer > 0) {
+          spawnTimer += wdt;
+          while (spawnTimer >= cfg.spawnInterval) {
+            spawnTimer -= cfg.spawnInterval;
+            spawnEnemy(cfg);
+          }
         }
       }
       player.update(wdt);
       updateClassMechanics(wdt);
-      if (multiMode === 'online') netBroadcastState(dt);
-      // ── Extra players (local co-op) ────────────────────────
+      // Online host: broadcast game snapshot; client: send input
+      netHostBroadcast(dt);
+      netSendInput(dt);
+      // ── Extra players (local co-op + online host slots) ────────────────────
       for (let _ei = 0; _ei < extraPlayers.length; _ei++) {
         const _ep = extraPlayers[_ei];
         if (_ep.hp <= 0) continue;
@@ -6302,8 +6445,8 @@
         _ep.update(wdt);
         player = _savedPlayer; Actions.moveX = _savedMX; Actions.moveY = _savedMY;
       }
-      // Enemy + gem target = nearest alive player
-      for (const e of enemies) if (e.alive) e.update(wdt, nearestPlayerTo(e.x, e.y));
+      // Enemy updates — skip net-ghost enemies (positions come from snapshot)
+      for (const e of enemies) if (e.alive && !e._netGhost) e.update(wdt, nearestPlayerTo(e.x, e.y));
       for (const p of projectiles) if (!p.dead) p.update(wdt);
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(wdt);
       for (const g of xpGems) if (!g.dead) g.update(wdt, nearestPlayerTo(g.x, g.y));

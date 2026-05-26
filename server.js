@@ -1,8 +1,12 @@
 // Slayers — Multiplayer WebSocket Relay Server
 // Run: npm install && npm start
-// Players connect and are assigned to rooms. The server is a pure relay —
-// each client is authoritative for their own character. The host's enemy
-// death events are broadcast so all clients stay in sync.
+//
+// Architecture: HOST-AUTHORITATIVE (Brotato-style)
+//   • Host runs the full simulation (enemies, waves, spawning, damage)
+//   • Host broadcasts a gameSnapshot (enemies + all player positions) at 20 Hz
+//   • Clients send clientInput (moveX, moveY) at 20 Hz; host drives their character
+//   • This server is a pure relay — it passes messages between players verbatim
+//   • netEvent messages get fromPlayerId injected so clients know the source
 
 const WebSocket = require('ws');
 const PORT = process.env.PORT || 8765;
