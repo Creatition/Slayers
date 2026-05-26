@@ -727,6 +727,9 @@
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
     if (player.uniqueEffects && player.uniqueEffects.includes('stormrider_kill_speed'))
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 1.5);
+    // Spirit Bond: Wolf — kill grants 2s speed burst
+    if (player.bondWolf)
+      player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
     const isElite = e.elite === true;
     const eliteTier = e.eliteTier || 'rare';
     const auraCol = (isElite && e.eliteMods && e.eliteMods[0]) ? e.eliteMods[0].auraColor : '#ffd040';
@@ -980,7 +983,8 @@
     const dx = target.x - shooter.x, dy = target.y - shooter.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.01) return;
-    const sp = shooter.weaponProjSpeed;
+    let sp = shooter.weaponProjSpeed;
+    if (shooter === player && player.bondEagle) sp *= 1.30; // Eagle bond
     const life = shooter.weaponRange / sp + 0.05;
     let dmg = shooter.weaponDamage * (shooter.effectiveDmgMult ? shooter.effectiveDmgMult() : shooter.dmgMult);
     const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
@@ -1213,6 +1217,26 @@
           }
           const died = enemy.takeDamage(projDmg, { crit: proj.isCrit });
           if (proj.onHit) proj.onHit(enemy);
+          // Wild Shape: Dragon — 40% chance on-hit fire spawn
+          if (enemy.alive && player.class && player.class.wildShape === 'dragon' && Math.random() < 0.40) {
+            const fireDmg = Math.max(1, Math.ceil(projDmg * 0.25));
+            groundEffects.push({ type: 'burn', x: enemy.x, y: enemy.y, r: 22,
+              life: 2.0, maxLife: 2.0, dmgPerSec: fireDmg, color: '#ff5500', hit: new Set() });
+            spawnBurst(enemy.x, enemy.y, ['#ff5500', '#ff8800', '#ffdd44'], 5);
+          }
+          // Wild Shape: Panther — bleed on crit (3s, ~18% wpn dmg/sec)
+          if (proj.isCrit && enemy.alive && player.class && player.class.wildShape === 'panther') {
+            const bleedDmg = Math.max(1, Math.ceil(player.weaponDamage * player.effectiveDmgMult() * 0.09));
+            enemy.bleedTimer = Math.max(enemy.bleedTimer || 0, 3.0);
+            enemy.bleedDmg   = Math.max(enemy.bleedDmg  || 0, bleedDmg);
+            enemy.bleedElapsed = enemy.bleedElapsed || 0;
+            spawnDamageNumber(enemy.x, enemy.y - enemy.r - 6, 'BLEED',
+              { color: '#cc2244', size: 9, vy: -38, life: 0.8 });
+          }
+          // Spirit Bond: Serpent — slow on every hit (45% speed, 1.5s)
+          if (enemy.alive && player.bondSerpent) {
+            slowTimers.set(enemy, { mult: 0.45, timer: 1.5 });
+          }
           // Legendary on-hit procs
           if (player.legendaryEffects && enemy.alive) {
             for (const eid of player.legendaryEffects) {
@@ -2308,6 +2332,22 @@
       ctx.fillStyle = `rgba(255,255,255,${a * 0.85})`;
       ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
       ctx.fillText(`ENTERING  ${currentBiome().name.toUpperCase()}`, W / 2, H / 2 + 40);
+    }
+    // Wild Shape / Spirit Bond indicator badge (bottom-left, y=54)
+    if (player && player.class) {
+      const _wsForm = player.class.wildShape;
+      const _sbBond = player.class.spiritBond;
+      if (_wsForm && _wsForm !== 'human') {
+        const _formCol = { dragon: '#ff6622', panther: '#44dd88', hybrid: '#ff44ff' };
+        ctx.fillStyle = _formCol[_wsForm] || '#ffffff';
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('◆ ' + _wsForm.toUpperCase() + ' FORM', 8, 54);
+      } else if (_sbBond) {
+        const _bondCol = { eagle: '#ffcc22', serpent: '#44cc44', wolf: '#44aadd', bear: '#cc7733' };
+        ctx.fillStyle = _bondCol[_sbBond] || '#aaaaaa';
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('◆ ' + _sbBond.toUpperCase() + ' BOND', 8, 54);
+      }
     }
     ctx.textAlign = 'left';
     drawBossBar();

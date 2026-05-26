@@ -666,6 +666,8 @@ class Player {
     if (_pVit) { this.bonusMaxHp += _pVit * 12; this.bonusRegen += _pVit * 0.4; this.bonusArmor += _pVit * 1.5; }
     if (_pSpi) { this.bonusMaxResource += _pSpi * 3; this.bonusResourceRegen += _pSpi * 0.3; this.bonusDodge += _pSpi * 0.4; }
     // ─────────────────────────────────────────────────────────
+    // Spirit Bond: Bear — +30% of accumulated armor
+    if (this.bondBear) this.bonusArmor += (this.baseArmor + this.bonusArmor) * 0.30;
     const oldMax = this.maxHp;
     const ratio = oldMax > 0 ? this.hp / oldMax : 1;
     const oldMaxR = this.maxResource;
