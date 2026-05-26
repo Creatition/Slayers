@@ -5751,7 +5751,12 @@
     Sfx.uiClick && Sfx.uiClick();
     if (i === 0) { state = STATE.PLAYING; }
     else if (i === 1) { pauseInSettings = true; pauseMenuSel = 0; }
-    else if (i === 2) { state = STATE.CLASS_SELECT; }
+    else if (i === 2) {
+      // Award run XP before quitting so progress is never lost
+      if (!runXpAwarded) { awardRunXp(runWavesCompleted, runBossesKilled, false); runXpAwarded = true; }
+      else saveData(); // ensure any mid-run pickLevelUp saves are flushed
+      state = STATE.CLASS_SELECT;
+    }
   }
 
   function activateSettingsOption(i) {
