@@ -1233,6 +1233,380 @@ const ABILITIES = {
     },
   },
 
+  // ── ASSASSIN T2 (3rd slot) ───────────────────────────────────
+  poisonBlade: {
+    id: 'poisonBlade', name: 'Poison Blade', letter: 'X', tier: 2, classOf: 'assassin',
+    desc: 'Coat your weapon with venom. Next 8 attacks apply stacking Poison. 5 stacks = burst.',
+    maxRank: 5, rankDesc: ['8 poison hits', '10 hits stack faster', '10 hits ★Notable: Poison burst spreads stacks to nearby', '12 hits Poison deals 2× dmg', '★Capstone: 15 hits, burst leaves toxic cloud 4s'],
+    cost: 20, cooldown: 9.0, color: '#44cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const charges = [8,10,10,12,15][rank-1];
+      player.venomCharges = charges;
+      player.venomDmg = player.weaponDamage * player.dmgMult * 0.30 * rDmg * rScale;
+      player.venomBurstRadius = rank >= 3 ? 55 : 36;
+      player.venomDoubleStack = false;
+      player.venomDmgMult = rank >= 4 ? 2.0 : 1.0;
+      player.venomCloud = rank >= 5;
+      spawnBurst(player.x, player.y, ['#44cc44','#aaffaa','#ffffff'], 10);
+      return true;
+    },
+  },
+
+  // ── ASSASSIN T3 ───────────────────────────────────────────────
+  shadowClone: {
+    id: 'shadowClone', name: 'Shadow Clone', letter: 'C', tier: 3, classOf: 'assassin',
+    desc: 'Summon a shadow clone that mimics your attacks for 6s.',
+    maxRank: 5, rankDesc: ['1 clone 6s 60% dmg', '2 clones', '2 clones ★Notable: clones taunt enemies', '3 clones 8s', '★Capstone: 3 clones, clone deaths trigger Shadow Strike'],
+    cost: 35, cooldown: 16.0, color: '#882299',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank >= 4 ? 3 : rank >= 2 ? 2 : 1;
+      const dur = rank >= 4 ? 8 : 6;
+      if (!player.summons) player.summons = [];
+      for (let i = 0; i < count; i++) {
+        const ox = (Math.random()-0.5)*40, oy = (Math.random()-0.5)*40;
+        player.summons.push({
+          type: 'clone', x: player.x+ox, y: player.y+oy,
+          hp: 999, maxHp: 999, timer: dur,
+          dmg: player.weaponDamage * player.dmgMult * 0.6 * rDmg * rScale,
+          speed: player.speed * 0.9, r: 5, color: '#882299',
+          attackRate: player.weaponFireRate * 0.9, attackTimer: 0,
+          taunt: rank >= 3, deathStrike: rank >= 5, rank
+        });
+      }
+      spawnBurst(player.x, player.y, ['#882299','#cc88ff','#ffffff'], 16);
+      return true;
+    },
+  },
+  bladestorm: {
+    id: 'bladestorm', name: 'Bladestorm', letter: 'Z', tier: 3, classOf: 'assassin',
+    desc: 'Spin through enemies in a path from cursor, dealing 12 rapid hits.',
+    maxRank: 5, rankDesc: ['12 hits along path 1.2× each', '16 hits path wider', '16 hits ★Notable: each hit applies Shadow Bleed', '20 hits crits spread poison', '★Capstone: 20 hits, re-cast free if 8+ hit'],
+    cost: 30, cooldown: 10.0, color: '#cc66ff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const hits = rank >= 4 ? 20 : rank >= 2 ? 16 : 12;
+      const dmgPer = player.weaponDamage * player.dmgMult * 1.2 * rDmg * rScale;
+      const dx = mouseX-player.x, dy = mouseY-player.y, d=Math.hypot(dx,dy)||1;
+      const dist = 180;
+      const pathW = rank >= 2 ? 30 : 22;
+      const tx = Math.max(player.r,Math.min(W-player.r,player.x+(dx/d)*dist));
+      const ty = Math.max(player.r,Math.min(H-player.r,player.y+(dy/d)*dist));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.35);
+      const hitSet = new Set(); let hitCount = 0;
+      const steps = Math.ceil(dist/8);
+      for (let s=0;s<=steps;s++) {
+        const px=player.x+(dx/d)*(dist/steps)*s, py=player.y+(dy/d)*(dist/steps)*s;
+        for (const e of enemies) {
+          if (!e.alive||hitSet.has(e)) continue;
+          if (Math.hypot(e.x-px,e.y-py)<pathW) {
+            hitSet.add(e); hitCount++;
+            const isCrit=Math.random()*100<player.critChance;
+            const dmg=dmgPer*(isCrit?2:1);
+            const died=e.takeDamage(dmg,{crit:isCrit});
+            if(isCrit)player.onCrit();
+            if(rank>=3){e.bleedTimer=(e.bleedTimer||0)+2;e.bleedDmg=dmgPer*0.12;}
+            spawnBurst(e.x,e.y,['#cc66ff','#ffffff'],4);
+            if(died)handleEnemyDeath(e);
+          }
+        }
+      }
+      player.x=tx;player.y=ty;
+      spawnBurst(tx,ty,['#cc66ff','#882299','#ffffff'],18);
+      shake=Math.min(shake+3,7);
+      if(rank>=5&&hitCount>=8)player.abilityCooldowns[player.abilities.findIndex(a=>a&&a.id==='bladestorm')]=0;
+      return true;
+    },
+  },
+  deathMark: {
+    id: 'deathMark', name: 'Death Mark', letter: 'M', tier: 3, classOf: 'assassin',
+    desc: 'Mark the target. Your next 3 hits against it deal 3× damage. Spreads on kill.',
+    maxRank: 5, rankDesc: ['3× dmg next 3 hits', '4× dmg', '4× ★Notable: all abilities also deal 4×', '5× dmg, mark 2 targets', '★Capstone: marked target is silenced and cannot dodge'],
+    cost: 15, cooldown: 7.0, color: '#ff2266',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const count = rank >= 4 ? 2 : 1;
+      const sorted = enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y));
+      if (!sorted.length) return false;
+      if (!player.markedEnemies) player.markedEnemies = new Set();
+      player.markedEnemies.clear();
+      for (let i=0;i<Math.min(count,sorted.length);i++) {
+        const t=sorted[i];
+        player.markedEnemies.add(t);
+        if (rank>=5) { t.silenced=true; t.dodge=0; }
+        spawnBurst(t.x,t.y,['#ff2266','#ff88aa','#ffffff'],12);
+        spawnDamageNumber(t.x,t.y-t.r-8,'DEATH MARK',{color:'#ff2266',size:10,vy:-50,life:1.2});
+      }
+      player.eagleMarkBonus = rank>=4?4.0:rank>=2?3.0:2.0; // reuse eagle mark system
+      player.eagleMarkSpread = true;
+      player.deathMarkHits = 3;
+      player.resource=Math.min(player.maxResource,(player.resource||0)+10);
+      return true;
+    },
+  },
+
+  // ── ASSASSIN T4 (Ultimates) ───────────────────────────────────
+  deathBlossom: {
+    id: 'deathBlossom', name: 'Death Blossom', letter: 'O', tier: 4, classOf: 'assassin',
+    desc: 'Leap to cursor, vanish 0.5s, then explode 20 blades in all directions.',
+    maxRank: 5, rankDesc: ['20 blades 1.8× each', '25 blades poison', '25 blades ★Notable: blades pierce', '30 blades crits chain', '★Capstone: 40 blades, all guaranteed crit'],
+    cost: 40, cooldown: 30.0, color: '#cc0066',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const blades = rank>=5?40:rank>=4?30:rank>=2?25:20;
+      const dmg = player.weaponDamage * player.dmgMult * 1.8 * rDmg * rScale;
+      player.x = Math.max(player.r,Math.min(W-player.r,mouseX));
+      player.y = Math.max(player.r,Math.min(H-player.r,mouseY));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.5);
+      spawnBurst(player.x,player.y,['#cc0066','#ff88aa','#ffffff'],20);
+      for (let i=0;i<blades;i++) {
+        const a=(i/blades)*Math.PI*2;
+        const isCrit=rank>=5||Math.random()*100<player.critChance;
+        const d=dmg*(isCrit?2:1);
+        const proj=new Projectile(player.x,player.y,Math.cos(a)*player.weaponProjSpeed,Math.sin(a)*player.weaponProjSpeed,d,0.6,isCrit);
+        proj.r=2; proj.theme='shadow';
+        if(rank>=3)proj.piercing=true;
+        projectiles.push(proj);
+        if(isCrit)player.onCrit();
+      }
+      shake=Math.min(shake+6,10);hitPauseTimer=Math.max(hitPauseTimer,0.10);
+      return true;
+    },
+  },
+  shadowRealm: {
+    id: 'shadowRealm', name: 'Shadow Realm', letter: 'R', tier: 4, classOf: 'assassin',
+    desc: '10s: enter the Shadow Realm — untargetable, 2× damage, all hits guaranteed crit.',
+    maxRank: 5, rankDesc: ['Shadow Realm 8s 2×', '10s +50% speed', '10s ★Notable: cloak persists 2s after realm ends', '12s kills reduce CD', '★Capstone: 12s, exit triggers Death Blossom for free'],
+    cost: 50, cooldown: 45.0, color: '#330066',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.shadowRealmTimer = dur;
+      player.shadowRealmDmgMult = 2.0;
+      player.shadowRealmSpeedBonus = rank>=2?0.50:0;
+      player.shadowRealmCloakOnExit = rank>=3?2.0:0;
+      player.shadowRealmKillCDReduce = rank>=4;
+      player.shadowRealmExitBlossom = rank>=5;
+      player.iframeTimer = Math.max(player.iframeTimer, dur);
+      spawnBurst(player.x,player.y,['#330066','#882299','#cc88ff','#ffffff'],28);
+      spawnDamageNumber(player.x,player.y-28,'SHADOW REALM',{color:'#cc88ff',size:14,vy:-60,life:2.0});
+      return true;
+    },
+  },
+  assassinate: {
+    id: 'assassinate', name: 'Assassinate', letter: 'A', tier: 4, classOf: 'assassin',
+    desc: 'Instant blink + strike for massive damage. If target dies, CD resets to 5s.',
+    maxRank: 5, rankDesc: ['8× instant crit', '10× target below 50% = execute', '10× ★Notable: vanish 1.5s after kill', '12× chain to 2nd nearest', '★Capstone: 15× dmg, hits reset all non-ult CDs on kill'],
+    cost: 45, cooldown: 25.0, color: '#880033',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?15:rank>=4?12:rank>=2?10:8;
+      const target = findNearestEnemy(player.x,player.y,999);
+      if (!target) return false;
+      const dx=target.x-player.x,dy=target.y-player.y,d=Math.hypot(dx,dy)||1;
+      player.x=Math.max(player.r,Math.min(W-player.r,target.x-(dx/d)*12));
+      player.y=Math.max(player.r,Math.min(H-player.r,target.y-(dy/d)*12));
+      player.iframeTimer=Math.max(player.iframeTimer,0.3);
+      let dmg=player.weaponDamage*player.dmgMult*mult*rDmg*rScale*2;
+      const execute=rank>=2&&target.hp<target.maxHp*0.5;
+      if(execute)dmg=target.hp+1;
+      const died=target.takeDamage(dmg,{crit:true});
+      player.onCrit();
+      spawnBurst(target.x,target.y,['#880033','#ff2266','#ff88aa','#ffffff'],24);
+      hitPauseTimer=Math.max(hitPauseTimer,0.12);shake=Math.min(shake+7,12);
+      if(died){
+        handleEnemyDeath(target);
+        // Short CD reset
+        const si=player.abilities.findIndex(a=>a&&a.id==='assassinate');
+        if(si>=0)player.abilityCooldowns[si]=5;
+        if(rank>=3)player.iframeTimer=Math.max(player.iframeTimer,1.5);
+        if(rank>=5){for(let i=0;i<player.abilityCooldowns.length;i++){const ab=player.abilities[i];if(ab&&ab.def&&ab.def.tier<4)player.abilityCooldowns[i]=0;}}
+        // Chain to 2nd target
+        if(rank>=4){
+          const t2=enemies.filter(e=>e.alive&&e!==target).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y))[0];
+          if(t2){const d2=player.weaponDamage*player.dmgMult*mult*0.6*rDmg*rScale*2;const d3=t2.takeDamage(d2,{crit:true});player.onCrit();spawnBurst(t2.x,t2.y,['#880033','#ff2266'],14);if(d3)handleEnemyDeath(t2);}
+        }
+      }
+      return true;
+    },
+  },
+
+  // ── SORCERER T1 (3rd slot) ────────────────────────────────────
+  arcaneJolt: {
+    id: 'arcaneJolt', name: 'Arcane Jolt', letter: 'J', tier: 1, classOf: 'sorcerer',
+    desc: 'Instant hitscan bolt to nearest enemy. Applies Shocked — amplifies next hit by 30%.',
+    maxRank: 5, rankDesc: ['Hitscan 1.5× Shocked', '1.8× Shocked +50%', '2.0× ★Notable: Shocked spreads to 2 nearby', '2.5× Shocked stacks 2×', '★Capstone: 3.0×, Shocked is permanent until consumed'],
+    cost: 0, cooldown: 1.2, color: '#aaccff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?3.0:rank>=4?2.5:rank>=3?2.0:rank>=2?1.8:1.5;
+      const shockedAmp = rank>=2?0.50:0.30;
+      const target = findNearestEnemy(player.x,player.y,player.weaponRange*1.8);
+      if (!target) return false;
+      const isCrit = Math.random()*100<player.critChance;
+      let dmg = player.weaponDamage*player.dmgMult*mult*rDmg*rScale;
+      if(target.shocked)dmg*=(1+shockedAmp);
+      if(isCrit){dmg*=2;player.onCrit();}
+      const died = target.takeDamage(dmg,{crit:isCrit});
+      target.shocked = rank>=5 ? true : false; // rank 5: permanent until consumed
+      if(!died)target.shocked = true; // apply shocked
+      const spreadTargets = rank>=3?2:0;
+      let spread=0;
+      for(const e of enemies){
+        if(spread>=spreadTargets||!e.alive||e===target)continue;
+        if(Math.hypot(e.x-target.x,e.y-target.y)<70){e.shocked=true;spread++;}
+      }
+      spawnBurst(target.x,target.y,['#aaccff','#5599ff','#ffffff'],8);
+      spawnDamageNumber(target.x,target.y-target.r,dmg,{color:isCrit?'#5599ff':'#aaccff',crit:isCrit});
+      if(died)handleEnemyDeath(target);
+      return true;
+    },
+  },
+
+  // ── SORCERER T2 (3rd slot) ────────────────────────────────────
+  infernoStream: {
+    id: 'infernoStream', name: 'Inferno Stream', letter: 'I', tier: 2, classOf: 'sorcerer',
+    desc: 'Channeled cone of fire for 2s. Superheats after 1.5s: cone widens, +50% dmg.',
+    maxRank: 5, rankDesc: ['Cone 2s Ignite', '2.5s +dmg', '2.5s ★Notable: Steam Burst on Chilled targets', 'Cone 3s chain explosion', '★Capstone: 3s Superheat at 1s, leaves inferno trail'],
+    cost: 40, cooldown: 12.0, color: '#ff6622',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?3:rank>=2?2.5:2;
+      player.infernoStreamTimer = dur;
+      player.infernoStreamDmg = player.weaponDamage*player.dmgMult*0.9*rDmg*rScale;
+      player.infernoStreamWidth = 40;
+      player.infernoStreamSuperheatAt = rank>=5?1.0:1.5;
+      player.infernoStreamSteam = rank>=3;
+      player.infernoStreamChain = rank>=4;
+      player.infernoStreamTrail = rank>=5;
+      player.infernoStreamHitTimer = 0;
+      spawnBurst(player.x,player.y,['#ff6622','#ffaa44','#ffdd88','#ffffff'],18);
+      return true;
+    },
+  },
+
+  // ── SORCERER T3 ───────────────────────────────────────────────
+  blizzard: {
+    id: 'blizzard', name: 'Blizzard', letter: 'Z', tier: 3, classOf: 'sorcerer',
+    desc: 'Sustained frost storm over cursor for 5s. Slows all inside, deals periodic damage.',
+    maxRank: 5, rankDesc: ['Blizzard 5s slow 0.4', '6s freeze on 5 hits', '6s ★Notable: Chilled enemies explode when killed', '7s ice spikes burst', '★Capstone: 8s, storm collapses into Frost Nova at end'],
+    cost: 40, cooldown: 15.0, color: '#5599ff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=5?8:rank>=4?7:rank>=3?6:rank>=2?6:5;
+      const dmg = player.weaponDamage*player.dmgMult*0.5*rDmg*rScale;
+      groundEffects.push({
+        type:'blizzard', x:mouseX, y:mouseY, r:80, life:dur, maxLife:dur,
+        dmgPerSec:dmg*2, color:'#5599ff', hit:new Set(), hitTimer:0,
+        freeze:rank>=2, chiledExplode:rank>=3, spikes:rank>=4, novaOnEnd:rank>=5,
+        player, rScale, dmg
+      });
+      spawnBurst(mouseX,mouseY,['#5599ff','#aaccff','#ffffff'],16);
+      return true;
+    },
+  },
+  arcaneSurge: {
+    id: 'arcaneSurge', name: 'Arcane Surge', letter: 'U', tier: 3, classOf: 'sorcerer',
+    desc: '8s: arcane energy surges — all Mana costs 0, spells +40% dmg, auto-fire arcane bolts.',
+    maxRank: 5, rankDesc: ['Surge 6s free casts +40%', '8s +50%', '8s ★Notable: surging bolts chain', '10s bolts Pierce', '★Capstone: 10s, Surge detonates for massive AoE on end'],
+    cost: 50, cooldown: 22.0, color: '#dd66ff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?10:rank>=2?8:6;
+      player.arcaneSurgeTimer = dur;
+      player.arcaneSurgeDmgBonus = rank>=2?0.50:0.40;
+      player.arcaneSurgeBoltTimer = 0;
+      player.arcaneSurgeBoltDmg = player.weaponDamage*player.dmgMult*0.8*rDmg*rScale;
+      player.arcaneSurgeChain = rank>=3;
+      player.arcaneSurgePierce = rank>=4;
+      player.arcaneSurgeDetonate = rank>=5;
+      spawnBurst(player.x,player.y,['#dd66ff','#aa44ff','#ffffff'],22);
+      spawnDamageNumber(player.x,player.y-26,'ARCANE SURGE!',{color:'#dd66ff',size:13,vy:-55,life:1.8});
+      return true;
+    },
+  },
+
+  // ── SORCERER T4 (Ultimates) ───────────────────────────────────
+  timeFreeze: {
+    id: 'timeFreeze', name: 'Time Freeze', letter: 'Z', tier: 4, classOf: 'sorcerer',
+    desc: 'Freeze ALL enemies in place for 4s. You attack 2× faster during freeze.',
+    maxRank: 5, rankDesc: ['Freeze 3s 2× aspd', '4s', '4s ★Notable: frozen enemies shatter on death (AoE)', '5s also silences', '★Capstone: 6s, you phase (invulnerable) during freeze'],
+    cost: 60, cooldown: 35.0, color: '#aaccff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank>=5?6:rank>=4?5:rank>=2?4:3;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        e.stunTimer = Math.max(e.stunTimer||0, dur);
+        if(rank>=3)e.frozen=true;
+        if(rank>=4)e.silenced=true;
+      }
+      player.timeFreezeTimer = dur;
+      player.timeFreezeAspd = 2.0;
+      if(rank>=5)player.iframeTimer=Math.max(player.iframeTimer,dur);
+      spawnBurst(player.x,player.y,['#aaccff','#5599ff','#eef8ff','#ffffff'],32);
+      spawnDamageNumber(player.x,player.y-28,'TIME FREEZE!',{color:'#aaccff',size:15,vy:-60,life:2.0});
+      shake=Math.min(shake+4,8);
+      return true;
+    },
+  },
+  meteorShower: {
+    id: 'meteorShower', name: 'Meteor Shower', letter: 'E', tier: 4, classOf: 'sorcerer',
+    desc: '5s rain of meteors across the entire screen. Each impact leaves a fire puddle.',
+    maxRank: 5, rankDesc: ['Shower 5s 1 meteor/s', '2 meteors/s', '2/s ★Notable: meteors chain 2 nearby on impact', '3/s bigger impact', '★Capstone: 4/s, final meteor is 5× mega-meteor'],
+    cost: 60, cooldown: 45.0, color: '#ff4400',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = 5.0;
+      const rate = rank>=5?4:rank>=4?3:rank>=2?2:1;
+      player.meteorShowerTimer = dur;
+      player.meteorShowerRate = rate;
+      player.meteorShowerDmg = player.weaponDamage*player.dmgMult*2.5*rDmg*rScale;
+      player.meteorShowerMeteorTimer = 0;
+      player.meteorShowerChain = rank>=3;
+      player.meteorShowerBigger = rank>=4;
+      player.meteorShowerMegaFinal = rank>=5;
+      player.meteorShowerCount = 0;
+      player.meteorShowerTotal = Math.round(rate*dur);
+      spawnBurst(player.x,player.y-20,['#ff4400','#ffaa00','#ffdd44','#ffffff'],28);
+      spawnDamageNumber(player.x,player.y-28,'METEOR SHOWER!',{color:'#ff4400',size:15,vy:-60,life:2.0});
+      return true;
+    },
+  },
+  singularity: {
+    id: 'singularity', name: 'Singularity', letter: 'Y', tier: 4, classOf: 'sorcerer',
+    desc: 'Create an arcane black hole at cursor. Pulls all enemies for 6s then detonates.',
+    maxRank: 5, rankDesc: ['Black hole 4s + detonate 3×', '6s pull stronger', '6s ★Notable: pull applies Shocked', '7s detonate 5× + shockwave', '★Capstone: 8s, triggers Time Freeze on detonation'],
+    cost: 60, cooldown: 45.0, color: '#440066',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=5?8:rank>=4?7:rank>=2?6:4;
+      const detMult = rank>=4?5:3;
+      player.singularityTimer = dur;
+      player.singularityX = mouseX; player.singularityY = mouseY;
+      player.singularityDmg = player.weaponDamage*player.dmgMult*detMult*rDmg*rScale;
+      player.singularityPullForce = rank>=2?120:80;
+      player.singularityShocked = rank>=3;
+      player.singularityTimeFreeze = rank>=5;
+      player.singularityHitTimer = 0;
+      spawnBurst(mouseX,mouseY,['#440066','#882299','#cc88ff','#ffffff'],20);
+      spawnDamageNumber(mouseX,mouseY-16,'SINGULARITY',{color:'#882299',size:13,vy:-55,life:1.5});
+      return true;
+    },
+  },
+
   // ── MONK ─────────────────────────────────────────────────────
   fistsOfThunder: {
     id: 'fistsOfThunder', tier: 1, name: 'Fists of Thunder', tier: 1, letter: 'F', classOf: 'templar',
@@ -1383,7 +1757,7 @@ const ABILITIES = {
     },
   },
   divineShield: {
-    id: 'divineShield', tier: 1, name: 'Divine Shield', letter: 'D', classOf: 'crusader',
+    id: 'divineShield', tier: 2, name: 'Divine Shield', letter: 'D', classOf: 'crusader',
     desc: '2s full invincibility + knockback pulse',
     maxRank: 5, rankDesc: ['Invuln 2.5s', '3s + counter', '3.5s ★Notable: reflects 100% dmg taken', '4s + AoE on end', '5s ★Capstone: AoE holy explosion on exit'],
     cost: 60, cooldown: 15.0, color: '#ffffff',
@@ -1406,7 +1780,7 @@ const ABILITIES = {
     },
   },
   hammerOfJustice: {
-    id: 'hammerOfJustice', tier: 1, name: 'Hammer of Justice', letter: 'H', classOf: 'crusader',
+    id: 'hammerOfJustice', tier: 2, name: 'Hammer of Justice', letter: 'H', classOf: 'crusader',
     desc: 'Heavy projectile slows on impact (220% dmg)',
     maxRank: 5, rankDesc: ['Slow hammer 2.5×', '2.8× faster', '3.0× ★Notable: pierces + stuns 1s', '3.5× splits', '4.5× ★Capstone: 3 hammers + chain stun'],
     cost: 30, cooldown: 3.0, color: '#ffcc44',
@@ -1431,7 +1805,7 @@ const ABILITIES = {
     },
   },
   layOnHands: {
-    id: 'layOnHands', tier: 1, name: 'Lay on Hands', letter: 'L', classOf: 'crusader',
+    id: 'layOnHands', tier: 3, name: 'Lay on Hands', letter: 'L', classOf: 'crusader',
     desc: 'Restore 70% max HP',
     maxRank: 5, rankDesc: ['Full heal', '+ cleanse debuffs', '★Notable: invuln 1.5s after cast', '+ AoE heal nearby', '★Capstone: heal + burst of holy energy 5×'],
     cost: 80, cooldown: 20.0, color: '#fffacc',
@@ -1439,6 +1813,366 @@ const ABILITIES = {
       const heal = Math.round(player.maxHp * 0.70);
       player.hp = Math.min(player.maxHp, player.hp + heal);
       spawnBurst(player.x, player.y, ['#ffffff', '#ffe866', '#fffacc'], 24);
+      return true;
+    },
+  },
+
+  // ── TEMPLAR T2 ───────────────────────────────────────────────
+  tempestRush: {
+    id: 'tempestRush', name: 'Tempest Rush', letter: 'T', tier: 2, classOf: 'templar',
+    desc: 'Rush through enemies in a line, dealing Chi damage. Each hit restores Chi.',
+    maxRank: 5, rankDesc: ['Rush 1.8× per hit', '2.0× wider path', '2.2× ★Notable: leave tornado 2s at end', '2.5× double-rush', '★Capstone: 3.0×, tornado seeks enemies 4s'],
+    cost: 20, cooldown: 6.0, color: '#ffcc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dmg = player.weaponDamage*player.dmgMult*1.8*rDmg*rScale;
+      const pathW = rank>=2?30:22; const dist=220;
+      const dx=mouseX-player.x,dy=mouseY-player.y,d=Math.hypot(dx,dy)||1;
+      const tx=Math.max(player.r,Math.min(W-player.r,player.x+(dx/d)*dist));
+      const ty=Math.max(player.r,Math.min(H-player.r,player.y+(dy/d)*dist));
+      player.iframeTimer=Math.max(player.iframeTimer,0.3);
+      const steps=Math.ceil(dist/10); const hitSet=new Set();
+      for(let s=0;s<=steps;s++){
+        const px=player.x+(dx/d)*(dist/steps)*s,py=player.y+(dy/d)*(dist/steps)*s;
+        for(const e of enemies){
+          if(!e.alive||hitSet.has(e))continue;
+          if(Math.hypot(e.x-px,e.y-py)<pathW){
+            hitSet.add(e);
+            const isCrit=Math.random()*100<player.critChance;
+            const died=e.takeDamage(isCrit?dmg*2:dmg,{crit:isCrit});
+            if(isCrit)player.onCrit();
+            player.resource=Math.min(player.maxResource,(player.resource||0)+6);
+            spawnBurst(e.x,e.y,['#ffcc44','#ffffff'],4);
+            if(died)handleEnemyDeath(e);
+          }
+        }
+      }
+      player.x=tx;player.y=ty;
+      if(rank>=3)groundEffects.push({type:'tornado',x:tx,y:ty,r:30,life:rank>=5?4:2,maxLife:2,dmgPerSec:dmg*2,color:'#ffcc44',vx:0,vy:0,seek:rank>=5,spiritPerHit:0,explodeOnEnd:false,player,rScale,hit:new Set()});
+      if(rank>=4){
+        // Double rush back
+        const rx=player.x-(dx/d)*dist*0.5,ry=player.y-(dy/d)*dist*0.5;
+        player.x=Math.max(player.r,Math.min(W-player.r,rx));
+        player.y=Math.max(player.r,Math.min(H-player.r,ry));
+      }
+      spawnBurst(tx,ty,['#ffcc44','#ffaa44','#ffffff'],14);
+      return true;
+    },
+  },
+  cripplingWave: {
+    id: 'cripplingWave', name: 'Crippling Wave', letter: 'W', tier: 2, classOf: 'templar',
+    desc: 'Three rapid Chi waves hit all nearby enemies. Final wave cripples movement.',
+    maxRank: 5, rankDesc: ['3 waves 1.3× each', '1.5× wider', '1.6× ★Notable: 3rd wave silences 1.5s', '4 waves bigger', '★Capstone: 4 waves, 4th detonates all Chi stacks'],
+    cost: 25, cooldown: 5.0, color: '#ffaa44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const waves = rank>=4?4:3; const radius = rank>=2?100:80;
+      const dmg = player.weaponDamage*player.dmgMult*1.3*rDmg*rScale;
+      for(let w=0;w<waves;w++){
+        const waveDmg=dmg*(1+w*0.1);
+        const isFinal=(w===waves-1);
+        for(const e of enemies){
+          if(!e.alive)continue;
+          if(Math.hypot(e.x-player.x,e.y-player.y)<radius*(1+w*0.1)){
+            const isCrit=Math.random()*100<player.critChance;
+            const died=e.takeDamage(isCrit?waveDmg*2:waveDmg,{crit:isCrit});
+            if(isCrit)player.onCrit();
+            if(isFinal){e.slowTimer=Math.max(e.slowTimer||0,2.5);e.slowFactor=0.4;}
+            if(isFinal&&rank>=3)e.silenced=true;
+            if(died)handleEnemyDeath(e);
+          }
+        }
+      }
+      groundEffects.push({type:'shockwave',x:player.x,y:player.y,r:10,maxR:radius,damage:0,life:0.5,maxLife:0.5,color:'#ffaa44',hit:new Set(),target:'none'});
+      player.resource=Math.min(player.maxResource,(player.resource||0)+12);
+      spawnBurst(player.x,player.y,['#ffaa44','#ffcc66','#ffffff'],16);
+      shake=Math.min(shake+2,5);
+      return true;
+    },
+  },
+
+  // ── TEMPLAR T3 ───────────────────────────────────────────────
+  epiphany: {
+    id: 'epiphany', name: 'Epiphany', letter: 'P', tier: 3, classOf: 'templar',
+    desc: '8s Enlightened state: Chi costs 0, +40% move speed, pull enemies to you.',
+    maxRank: 5, rankDesc: ['Epiphany 6s free casts', '8s +40% speed', '8s ★Notable: all abilities trigger Cyclone Strike', '10s enemies drawn in', '★Capstone: 10s, on exit deal 5× AoE holy damage'],
+    cost: 40, cooldown: 20.0, color: '#ffeecc',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank>=4?10:rank>=2?8:6;
+      player.epiphanyTimer = dur;
+      player.epiphanySpeedBonus = rank>=2?0.40:0.20;
+      player.epiphanyFreeCasts = true;
+      player.epiphanyPull = rank>=4;
+      player.epiphanyExitAoE = rank>=5;
+      player.epiphanyCyclone = rank>=3;
+      spawnBurst(player.x,player.y,['#ffeecc','#ffdd44','#ffffff'],22);
+      spawnDamageNumber(player.x,player.y-26,'EPIPHANY!',{color:'#ffeecc',size:13,vy:-55,life:1.8});
+      return true;
+    },
+  },
+  innerFire: {
+    id: 'innerFire', name: 'Inner Fire', letter: 'Y', tier: 3, classOf: 'templar',
+    desc: 'Ignite your Chi: 8s of fire-damage aura and +30% dmg on every hit.',
+    maxRank: 5, rankDesc: ['Aura 8s 1.5× fire', '10s wider', '10s ★Notable: crits Explode enemies on kill', '12s fire trail on move', '★Capstone: 12s, aura detonates for 6× on end'],
+    cost: 35, cooldown: 16.0, color: '#ff8822',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.innerFireTimer = dur;
+      player.innerFireDmg = player.weaponDamage*player.dmgMult*0.6*rDmg*rScale;
+      player.innerFireRadius = rank>=2?65:50;
+      player.innerFireExplodeKill = rank>=3;
+      player.innerFireTrail = rank>=4;
+      player.innerFireDetonate = rank>=5;
+      player.innerFireHitTimer = 0;
+      spawnBurst(player.x,player.y,['#ff8822','#ffcc44','#ffffff'],20);
+      spawnDamageNumber(player.x,player.y-24,'INNER FIRE!',{color:'#ff8822',size:12,vy:-50,life:1.5});
+      return true;
+    },
+  },
+
+  // ── TEMPLAR T4 (Ultimates) ────────────────────────────────────
+  transcendence: {
+    id: 'transcendence', name: 'Transcendence', letter: 'N', tier: 4, classOf: 'templar',
+    desc: '10s: become pure energy — untargetable, each step deals Chi AoE, infinite Chi.',
+    maxRank: 5, rankDesc: ['Transcend 8s path AoE', '10s +AoE size', '10s ★Notable: kills restore HP equal to dmg dealt', '12s immunity lingers 2s', '★Capstone: 12s, detonates all enemies as you re-materialize'],
+    cost: 60, cooldown: 45.0, color: '#ffeecc',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.transcendenceTimer = dur;
+      player.transcendenceDmg = player.weaponDamage*player.dmgMult*0.8*rDmg*rScale;
+      player.transcendenceRadius = rank>=2?55:40;
+      player.transcendenceHealKill = rank>=3;
+      player.transcendenceLingerIframe = rank>=4?2.0:0;
+      player.transcendenceDetonate = rank>=5;
+      player.iframeTimer = Math.max(player.iframeTimer, dur);
+      player.transcendenceStepTimer = 0;
+      spawnBurst(player.x,player.y,['#ffeecc','#ffdd44','#ffaa44','#ffffff'],28);
+      spawnDamageNumber(player.x,player.y-28,'TRANSCENDENCE!',{color:'#ffeecc',size:14,vy:-60,life:2.0});
+      return true;
+    },
+  },
+  serenity: {
+    id: 'serenity', name: 'Serenity', letter: 'S', tier: 4, classOf: 'templar',
+    desc: 'Instant full heal + remove all debuffs + invuln 3s. Every enemy within range frozen.',
+    maxRank: 5, rankDesc: ['Full heal + invuln 2s', '3s + freeze all', '3s ★Notable: heal overflows as shield', '4s + freeze 4s', '★Capstone: 4s + AoE holy burst 5× dmg + resurrect if at 0HP'],
+    cost: 60, cooldown: 40.0, color: '#ffffff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?4:rank>=2?3:2;
+      player.hp = player.maxHp;
+      player.iframeTimer = Math.max(player.iframeTimer, dur);
+      if(rank>=3)player.chiShield = player.maxHp*0.3;
+      const freezeDur = rank>=4?4:2;
+      if(rank>=2){for(const e of enemies){if(!e.alive)continue;e.stunTimer=Math.max(e.stunTimer||0,freezeDur);}}
+      if(rank>=5){
+        const dmg=player.weaponDamage*player.dmgMult*5*rDmg*rScale;
+        for(const e of enemies){if(!e.alive)continue;if(Math.hypot(e.x-player.x,e.y-player.y)<120){const died=e.takeDamage(dmg,{crit:true});player.onCrit();if(died)handleEnemyDeath(e);}}
+      }
+      spawnBurst(player.x,player.y,['#ffffff','#ffe866','#ffeecc'],30);
+      spawnDamageNumber(player.x,player.y-28,'SERENITY',{color:'#ffffff',size:14,vy:-60,life:2.0});
+      shake=Math.min(shake+4,8);
+      return true;
+    },
+  },
+  divinePalm: {
+    id: 'divinePalm', name: 'Divine Palm', letter: 'L', tier: 4, classOf: 'templar',
+    desc: 'Channel Chi into your palm for 0.5s then release: 12× single-target guaranteed crit.',
+    maxRank: 5, rankDesc: ['12× single-target crit', '15× + stun 3s', '15× ★Notable: if kills: explode for 8× AoE', '18× + chain to 3 nearest', '★Capstone: 20×, any nearby enemy dies triggers another Palm'],
+    cost: 50, cooldown: 20.0, color: '#ffcc66',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?20:rank>=4?18:rank>=2?15:12;
+      const target = findNearestEnemy(player.x,player.y,160);
+      if (!target) return false;
+      const dmg = player.weaponDamage*player.dmgMult*mult*rDmg*rScale*2;
+      const died = target.takeDamage(dmg,{crit:true});
+      player.onCrit();
+      spawnBurst(target.x,target.y,['#ffcc66','#ffeecc','#ffffff'],24);
+      hitPauseTimer=Math.max(hitPauseTimer,0.12);shake=Math.min(shake+6,10);
+      if(rank>=2)target.stunTimer=Math.max(target.stunTimer||0,3);
+      if(died){
+        handleEnemyDeath(target);
+        if(rank>=3){const aoe=player.weaponDamage*player.dmgMult*8*rDmg*rScale;for(const e of enemies){if(!e.alive)continue;if(Math.hypot(e.x-target.x,e.y-target.y)<80){const d2=e.takeDamage(aoe,{crit:true});player.onCrit();spawnBurst(e.x,e.y,['#ffcc66','#ffffff'],8);if(d2)handleEnemyDeath(e);}}}
+        if(rank>=4){
+          const chain=enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-target.x,a.y-target.y)-Math.hypot(b.x-target.x,b.y-target.y)).slice(0,3);
+          for(const c of chain){const cd=player.weaponDamage*player.dmgMult*mult*0.5*rDmg*rScale*2;const d3=c.takeDamage(cd,{crit:true});player.onCrit();spawnBurst(c.x,c.y,['#ffcc66','#ffffff'],10);if(d3)handleEnemyDeath(c);}
+        }
+      }
+      return true;
+    },
+  },
+
+  // ── CRUSADER T2 (3rd slot) ────────────────────────────────────
+  holyBeam: {
+    id: 'holyBeam', name: 'Holy Beam', letter: 'B', tier: 2, classOf: 'crusader',
+    desc: 'Fire a piercing beam of holy light. Heals 2% max HP per enemy hit.',
+    maxRank: 5, rankDesc: ['Pierce beam 2× heal 2%', '2.5× heal 3%', '2.5× ★Notable: beam splits into 2 at 150px', '3.0× heal 5%', '★Capstone: 3.5×, beam bounces off walls once'],
+    cost: 30, cooldown: 5.0, color: '#ffe866',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?3.5:rank>=4?3.0:rank>=2?2.5:2.0;
+      const healPct = rank>=4?0.05:rank>=3?0.03:0.02;
+      const target = findNearestEnemy(player.x,player.y,player.weaponRange*1.8)||{x:mouseX,y:mouseY};
+      const dx=target.x-player.x,dy=target.y-player.y,d=Math.hypot(dx,dy)||1;
+      const dmg=player.weaponDamage*player.dmgMult*mult*rDmg*rScale;
+      let healed=0;
+      for(const e of enemies){
+        if(!e.alive)continue;
+        const ex=e.x-player.x,ey=e.y-player.y;
+        const along=ex*(dx/d)+ey*(dy/d);
+        const perp=Math.abs(-ex*(dy/d)+ey*(dx/d));
+        if(along>0&&perp<14+e.r){
+          const isCrit=Math.random()*100<player.critChance;
+          const died=e.takeDamage(isCrit?dmg*2:dmg,{crit:isCrit});
+          if(isCrit)player.onCrit();
+          healed++;
+          spawnBurst(e.x,e.y,['#ffe866','#ffffff'],6);
+          if(died)handleEnemyDeath(e);
+        }
+      }
+      player.hp=Math.min(player.maxHp,player.hp+player.maxHp*healPct*healed);
+      spawnBurst(player.x,player.y,['#ffe866','#ffdd44','#ffffff'],10);
+      return true;
+    },
+  },
+
+  // ── CRUSADER T3 ───────────────────────────────────────────────
+  avengerShield: {
+    id: 'avengerShield', name: "Avenger's Shield", letter: 'G', tier: 3, classOf: 'crusader',
+    desc: 'Throw a holy shield that bounces between 5 enemies, stunning each.',
+    maxRank: 5, rankDesc: ['Bounce 3 targets 2.5× stun 1s', '5 targets 3×', '5 targets ★Notable: leaves holy field on last bounce', '7 targets 3.5×', '★Capstone: 7 targets 4×, shield returns to player for one final strike'],
+    cost: 30, cooldown: 8.0, color: '#ffe866',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const bounces = rank>=4?7:rank>=2?5:3;
+      const mult = rank>=5?4.0:rank>=4?3.5:rank>=2?3.0:2.5;
+      const stunDur = 1.0;
+      const dmg=player.weaponDamage*player.dmgMult*mult*rDmg*rScale;
+      const hit=new Set(); let last=null;
+      for(let b=0;b<bounces;b++){
+        const pool=enemies.filter(e=>e.alive&&!hit.has(e));
+        if(!pool.length)break;
+        const t=pool.sort((a,b2)=>Math.hypot(a.x-(last?last.x:player.x),a.y-(last?last.y:player.y))-Math.hypot(b2.x-(last?last.x:player.x),b2.y-(last?last.y:player.y)))[0];
+        hit.add(t); last=t;
+        const isCrit=Math.random()*100<player.critChance;
+        const bd=dmg*(isCrit?2:1)*Math.pow(0.85,b);
+        const died=t.takeDamage(bd,{crit:isCrit});
+        if(isCrit)player.onCrit();
+        t.stunTimer=Math.max(t.stunTimer||0,stunDur);
+        spawnBurst(t.x,t.y,['#ffe866','#ffffff'],10);
+        spawnDamageNumber(t.x,t.y-t.r,bd,{color:isCrit?'#ffcc00':'#ffe866',crit:isCrit});
+        if(died)handleEnemyDeath(t);
+      }
+      if(rank>=3&&last)groundEffects.push({type:'holy_zone',x:last.x,y:last.y,r:55,life:4.0,maxLife:4.0,damage:Math.round(player.weaponDamage*player.dmgMult*0.4),cooldowns:new Map()});
+      spawnBurst(player.x,player.y,['#ffe866','#ffffff'],10);
+      return true;
+    },
+  },
+  blessingOfMight: {
+    id: 'blessingOfMight', name: 'Blessing of Might', letter: 'M', tier: 3, classOf: 'crusader',
+    desc: '10s: +50% damage, +25% attack speed. Every kill grants a burst of holy light.',
+    maxRank: 5, rankDesc: ['Blessing 8s +50% dmg', '10s +30% aspd', '10s ★Notable: kill bursts deal holy AoE', '12s +40% aspd', '★Capstone: 12s, also shields you for 30% max HP'],
+    cost: 40, cooldown: 18.0, color: '#ffcc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.blessingTimer = dur;
+      player.blessingDmgBonus = 0.50;
+      player.blessingAspdBonus = rank>=4?0.40:rank>=2?0.30:0.25;
+      player.blessingKillBurst = rank>=3;
+      if(rank>=5)player.chiShield=(player.chiShield||0)+player.maxHp*0.30;
+      spawnBurst(player.x,player.y,['#ffcc44','#ffeecc','#ffffff'],20);
+      spawnDamageNumber(player.x,player.y-24,'BLESSED!',{color:'#ffcc44',size:12,vy:-50,life:1.5});
+      return true;
+    },
+  },
+
+  // ── CRUSADER T4 (Ultimates) ───────────────────────────────────
+  wrathOfHeaven: {
+    id: 'wrathOfHeaven', name: 'Wrath of Heaven', letter: 'E', tier: 4, classOf: 'crusader',
+    desc: 'Call down a column of holy lightning on ALL enemies simultaneously.',
+    maxRank: 5, rankDesc: ['All enemies 3× holy', '3.5×', '3.5× ★Notable: each strike Blinds 2s', '4× chain to 2 nearby', '★Capstone: 5× dmg, each killed enemy rains 3 bolts'],
+    cost: 60, cooldown: 40.0, color: '#ffee66',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult=rank>=5?5:rank>=4?4:rank>=2?3.5:3;
+      const dmg=player.weaponDamage*player.dmgMult*mult*rDmg*rScale;
+      for(const e of [...enemies]){
+        if(!e.alive)continue;
+        const isCrit=Math.random()*100<player.critChance;
+        const d=dmg*(isCrit?2:1);
+        const died=e.takeDamage(d,{crit:isCrit});
+        if(isCrit)player.onCrit();
+        spawnBurst(e.x,e.y,['#ffee66','#ffdd44','#ffffff'],12);
+        spawnDamageNumber(e.x,e.y-e.r-10,d,{color:'#ffee66',crit:isCrit});
+        if(rank>=4){const near=enemies.filter(n=>n.alive&&n!==e&&Math.hypot(n.x-e.x,n.y-e.y)<60).slice(0,2);for(const n of near){const nd=n.takeDamage(d*0.5);spawnBurst(n.x,n.y,['#ffee66','#ffffff'],6);if(nd)handleEnemyDeath(n);}}
+        if(died)handleEnemyDeath(e);
+      }
+      shake=Math.min(shake+8,14);hitPauseTimer=Math.max(hitPauseTimer,0.14);
+      spawnDamageNumber(player.x,player.y-30,'WRATH OF HEAVEN!',{color:'#ffee66',size:15,vy:-65,life:2.0});
+      return true;
+    },
+  },
+  divineIntervention: {
+    id: 'divineIntervention', name: 'Divine Intervention', letter: 'V', tier: 4, classOf: 'crusader',
+    desc: 'Full heal, invuln 4s, massive holy AoE. Enemies hit are Judged (take 2× for 8s).',
+    maxRank: 5, rankDesc: ['Heal+invuln 3s AoE 3×', '4s 4× AoE', '4s ★Notable: Judged enemies explode on death', '5s AoE 5×', '★Capstone: 5s + resets all non-ult cooldowns'],
+    cost: 60, cooldown: 45.0, color: '#ffffff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?5:rank>=2?4:3;
+      const mult = rank>=4?5:rank>=2?4:3;
+      player.hp = player.maxHp;
+      player.iframeTimer=Math.max(player.iframeTimer,dur);
+      const radius=120; const dmg=player.weaponDamage*player.dmgMult*mult*rDmg*rScale;
+      for(const e of enemies){
+        if(!e.alive)continue;
+        if(Math.hypot(e.x-player.x,e.y-player.y)<radius){
+          const isCrit=Math.random()*100<player.critChance;
+          const died=e.takeDamage(isCrit?dmg*2:dmg,{crit:isCrit});
+          if(isCrit)player.onCrit();
+          e.judged=8.0; e.judgedMult=2.0;
+          spawnBurst(e.x,e.y,['#ffffff','#ffe866','#ffcc44'],10);
+          if(died)handleEnemyDeath(e);
+        }
+      }
+      if(rank>=5){for(let i=0;i<player.abilityCooldowns.length;i++){const ab=player.abilities[i];if(ab&&ab.def&&ab.def.tier<4)player.abilityCooldowns[i]=0;}}
+      groundEffects.push({type:'shockwave',x:player.x,y:player.y,r:10,maxR:radius,damage:0,life:0.5,maxLife:0.5,color:'#ffe866',hit:new Set(),target:'none'});
+      spawnBurst(player.x,player.y,['#ffffff','#ffe866','#ffcc44','#ffeecc'],36);
+      spawnDamageNumber(player.x,player.y-30,'DIVINE INTERVENTION!',{color:'#ffffff',size:13,vy:-65,life:2.0});
+      shake=Math.min(shake+6,12);
+      return true;
+    },
+  },
+  crusadersEdge: {
+    id: 'crusadersEdge', name: "Crusader's Edge", letter: 'K', tier: 4, classOf: 'crusader',
+    desc: '12s: every attack cleaves in a holy arc, all hits generate Wrath. At max Wrath: Righteous Fury.',
+    maxRank: 5, rankDesc: ['Edge 10s holy cleave', '12s Wrath 3× faster', '12s ★Notable: Righteous Fury also heals 20% HP', '14s cleave pierces', '★Capstone: 14s, Righteous Fury triggers every 10s automatically'],
+    cost: 60, cooldown: 45.0, color: '#ffcc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank>=4?14:rank>=2?12:10;
+      player.crusaderEdgeTimer = dur;
+      player.crusaderEdgeDmgBonus = 0.40;
+      player.crusaderEdgeHealFury = rank>=3;
+      player.crusaderEdgePierce = rank>=4;
+      player.crusaderEdgeAutoFury = rank>=5;
+      player.crusaderFuryFill = rank>=2?3:1; // multiplier for wrath gain speed
+      spawnBurst(player.x,player.y,['#ffcc44','#ffe866','#ffffff'],24);
+      spawnDamageNumber(player.x,player.y-28,"CRUSADER'S EDGE!",{color:'#ffcc44',size:14,vy:-60,life:2.0});
       return true;
     },
   },

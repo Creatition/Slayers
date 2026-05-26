@@ -574,6 +574,7 @@ class Player {
     if (this.bondEagle) r *= 1.20;
     if ((this.packHuntTimer > 0 || this.packHuntPersist) && this.packHuntStacks)
       r *= (1 + this.packHuntStacks * (this.packHuntPerKill || 0.05));
+    if (this.blessingTimer > 0 && this.blessingAspdBonus) r *= (1 + this.blessingAspdBonus);
     return r;
   }
   effectiveSpeed() {
@@ -585,6 +586,7 @@ class Player {
     if (this.wildShapePantherSpd) s *= (1 + this.wildShapePantherSpd);
     if (this.wildShapeDragonSlowSpd) s *= (1 + this.wildShapeDragonSlowSpd);
     if (this.bondWolf) s *= 1.35;
+    if (this.epiphanyTimer > 0 && this.epiphanySpeedBonus) s *= (1 + this.epiphanySpeedBonus);
     return s;
   }
   effectiveDmgMult() {
@@ -595,6 +597,8 @@ class Player {
     if (this.shoutTimer > 0 && this.shoutDmgBonus) d *= (1 + this.shoutDmgBonus);
     if (this.wildShapeDragonDmg) d *= (1 + this.wildShapeDragonDmg);
     if (this.primalRageTimer > 0 && this.primalRageDmgBonus) d *= (1 + this.primalRageDmgBonus);
+    if (this.blessingTimer > 0 && this.blessingDmgBonus) d *= (1 + this.blessingDmgBonus);
+    if (this.crusaderEdgeTimer > 0 && this.crusaderEdgeDmgBonus) d *= (1 + this.crusaderEdgeDmgBonus);
     return d;
   }
   recomputeStats() {
@@ -762,6 +766,12 @@ class Player {
       if (typeof spawnDamageNumber === 'function') spawnDamageNumber(this.x, this.y - this.r, 'DODGE', { color: '#4ecdc4', crit: false, size: 11 });
       this.iframeTimer = this.IFRAME;
       return false;
+    }
+    if ((this.chiShield || 0) > 0) {
+      const csAbs = Math.min(this.chiShield, amount);
+      this.chiShield -= csAbs; amount -= csAbs;
+      spawnBurst(this.x, this.y, ['#ffeecc', '#ffcc66', '#ffffff'], 4);
+      if (amount <= 0) { this.hitFlash = 0.1; return false; }
     }
     if (this.boneArmorCharges > 0) {
       this.boneArmorCharges -= 1;
@@ -1082,6 +1092,7 @@ class Enemy {
       if (this.hp <= 0) { this.alive = false; return true; }
       return false;
     }
+    if ((this.judged || 0) > 0) amount = Math.ceil(amount * (this.judgedMult || 2.0));
     this.hp -= amount; this.hitFlash = 0.1;
     if (typeof spawnDamageNumber === 'function') {
       const o = opts || {};

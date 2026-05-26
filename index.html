@@ -3811,7 +3811,382 @@
         }
       }
     }
+
+    // ─ SORCERER ──────────────────────────────────────────────────────────────
+    if (cls === 'sorcerer') {
+      // Inferno Stream: channeled fire cone damage every 0.08s
+      if (player.infernoStreamTimer > 0) {
+        player.infernoStreamTimer -= dt;
+        player.infernoStreamHitTimer = (player.infernoStreamHitTimer||0) - dt;
+        const elapsed = (player.infernoStreamTimer > 0) ? 0 : 0;
+        const superheated = player.infernoStreamTimer < player.infernoStreamSuperheatAt;
+        const coneW = player.infernoStreamWidth * (superheated ? 2 : 1);
+        const coneDmg = (player.infernoStreamDmg||1) * (superheated ? 1.5 : 1);
+        const coneAngle = Math.atan2(mouseY-player.y, mouseX-player.x);
+        if (player.infernoStreamHitTimer <= 0) {
+          player.infernoStreamHitTimer = 0.08;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            const ex=e.x-player.x, ey=e.y-player.y;
+            const along = ex*Math.cos(coneAngle)+ey*Math.sin(coneAngle);
+            const perp = Math.abs(-ex*Math.sin(coneAngle)+ey*Math.cos(coneAngle));
+            const dist = Math.hypot(ex,ey);
+            if (along>0 && perp<coneW+e.r && dist<180) {
+              const isCrit=Math.random()*100<player.critChance;
+              const dmg=coneDmg*(isCrit?2:1)*dt*12;
+              const died=e.takeDamage(dmg,{crit:isCrit});
+              if(isCrit)player.onCrit();
+              // Steam Burst on chilled enemies
+              if(player.infernoStreamSteam&&(e.slowTimer>0)){
+                const burstDmg=coneDmg*3;
+                for(const n of enemies){if(!n.alive)continue;if(Math.hypot(n.x-e.x,n.y-e.y)<40){const nd=n.takeDamage(burstDmg);spawnBurst(n.x,n.y,['#ffffff','#aaccff'],6);if(nd)handleEnemyDeath(n);}}
+                e.slowTimer=0;
+              }
+              burnTimers.set(e,{elapsed:0,rate:0.5,dmg:coneDmg*0.25,timer:1.5});
+              if(died)handleEnemyDeath(e);
+            }
+          }
+        }
+        if (player.infernoStreamTimer<=0) {
+          player.infernoStreamTimer=0;
+          if(player.infernoStreamTrail) groundEffects.push({type:'burn',x:mouseX,y:mouseY,r:50,life:4.0,maxLife:4.0,dmgPerSec:(player.infernoStreamDmg||1)*2,color:'#ff6622',hit:new Set()});
+        }
+      }
+
+      // Arcane Surge: free casts + auto arcane bolts every 0.4s
+      if (player.arcaneSurgeTimer > 0) {
+        player.arcaneSurgeTimer -= dt;
+        player.arcaneSurgeBoltTimer = (player.arcaneSurgeBoltTimer||0) - dt;
+        if (player.arcaneSurgeBoltTimer <= 0) {
+          player.arcaneSurgeBoltTimer = 0.4;
+          const t = enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y))[0];
+          if (t) {
+            const isCrit=Math.random()*100<player.critChance;
+            const bDmg=(player.arcaneSurgeBoltDmg||1)*(isCrit?2:1);
+            const dx=t.x-player.x,dy=t.y-player.y,d=Math.hypot(dx,dy)||1;
+            const proj=new Projectile(player.x,player.y,(dx/d)*player.weaponProjSpeed,(dy/d)*player.weaponProjSpeed,bDmg,0.7,isCrit);
+            proj.theme='arcane';proj.r=3;
+            if(player.arcaneSurgePierce)proj.piercing=true;
+            projectiles.push(proj);
+            if(isCrit)player.onCrit();
+          }
+        }
+        if (player.arcaneSurgeTimer<=0) {
+          player.arcaneSurgeTimer=0;
+          if(player.arcaneSurgeDetonate){
+            for(const e of enemies){if(!e.alive)continue;const died=e.takeDamage((player.arcaneSurgeBoltDmg||1)*6);spawnBurst(e.x,e.y,['#dd66ff','#ffffff'],8);if(died)handleEnemyDeath(e);}
+            spawnBurst(player.x,player.y,['#dd66ff','#aa44ff','#ffffff'],32);
+          }
+        }
+      }
+
+      // Time Freeze: 2× attack speed during freeze
+      if (player.timeFreezeTimer > 0) {
+        player.timeFreezeTimer -= dt;
+        if (player.timeFreezeTimer<=0) player.timeFreezeTimer=0;
+      }
+
+      // Meteor Shower: drop meteors periodically
+      if (player.meteorShowerTimer > 0) {
+        player.meteorShowerTimer -= dt;
+        player.meteorShowerMeteorTimer = (player.meteorShowerMeteorTimer||0) - dt;
+        if (player.meteorShowerMeteorTimer<=0) {
+          player.meteorShowerMeteorTimer = 1.0/(player.meteorShowerRate||1);
+          player.meteorShowerCount = (player.meteorShowerCount||0)+1;
+          const isMega = player.meteorShowerMegaFinal && player.meteorShowerTimer<=0;
+          const tx=rngInt(10,W-10),ty=rngInt(10,H-10);
+          const radius=(player.meteorShowerBigger?70:50)*(isMega?2:1);
+          const dmg=(player.meteorShowerDmg||1)*(isMega?5:1);
+          for(const e of enemies){
+            if(!e.alive)continue;
+            if(Math.hypot(e.x-tx,e.y-ty)<radius){
+              const isCrit=Math.random()*100<player.critChance;
+              const died=e.takeDamage(isCrit?dmg*2:dmg,{crit:isCrit});
+              if(isCrit)player.onCrit();
+              if(player.meteorShowerChain){const near=enemies.filter(n=>n.alive&&n!==e&&Math.hypot(n.x-e.x,n.y-e.y)<60).slice(0,2);for(const n of near){const nd=n.takeDamage(dmg*0.5);spawnBurst(n.x,n.y,['#ff8800','#ffdd44'],6);if(nd)handleEnemyDeath(n);}}
+              spawnDamageNumber(e.x,e.y-e.r,isCrit?dmg*2:dmg,{color:'#ff4400',crit:isCrit});
+              if(died)handleEnemyDeath(e);
+            }
+          }
+          groundEffects.push({type:'burn',x:tx,y:ty,r:radius*0.6,life:2.5,maxLife:2.5,dmgPerSec:(player.meteorShowerDmg||1)*0.6,color:'#ff4400',hit:new Set()});
+          groundEffects.push({type:'shockwave',x:tx,y:ty,r:10,maxR:radius,damage:0,life:0.4,maxLife:0.4,color:'#ff4400',hit:new Set(),target:'none'});
+          spawnBurst(tx,ty,['#ff4400','#ffaa00','#ffdd44','#ffffff'],isMega?28:14);
+          shake=Math.min(shake+(isMega?8:3),12);
+        }
+        if(player.meteorShowerTimer<=0)player.meteorShowerTimer=0;
+      }
+
+      // Singularity: pull all enemies toward the black hole
+      if (player.singularityTimer > 0) {
+        player.singularityTimer -= dt;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx=(player.singularityX||mouseX)-e.x, dy=(player.singularityY||mouseY)-e.y;
+          const d=Math.hypot(dx,dy)||1;
+          const force=(player.singularityPullForce||80)*dt*(1-Math.min(1,d/200));
+          e.x+=( dx/d)*force; e.y+=(dy/d)*force;
+          if(player.singularityShocked)e.shocked=true;
+        }
+        if (player.singularityTimer<=0) {
+          player.singularityTimer=0;
+          const detDmg=player.singularityDmg||1;
+          for(const e of enemies){
+            if(!e.alive)continue;
+            const d=Math.hypot(e.x-(player.singularityX||mouseX),e.y-(player.singularityY||mouseY));
+            if(d<120){const isCrit=Math.random()*100<player.critChance;const died=e.takeDamage(isCrit?detDmg*2:detDmg,{crit:isCrit});if(isCrit)player.onCrit();spawnBurst(e.x,e.y,['#440066','#882299'],8);if(died)handleEnemyDeath(e);}
+          }
+          spawnBurst(player.singularityX||mouseX,player.singularityY||mouseY,['#440066','#882299','#cc88ff','#ffffff'],36);
+          shake=Math.min(shake+8,14);hitPauseTimer=Math.max(hitPauseTimer,0.12);
+          if(player.singularityTimeFreeze){for(const e of enemies){if(!e.alive)continue;e.stunTimer=Math.max(e.stunTimer||0,4);e.frozen=true;}}
+        }
+      }
+    }
+
+    // ─ ASSASSIN ──────────────────────────────────────────────────────────────
+    if (cls === 'assassin') {
+      // Shadow Realm: invulnerability + 2× damage (iframeTimer handles invulnerability)
+      if (player.shadowRealmTimer > 0) {
+        player.shadowRealmTimer -= dt;
+        player.shadowRealmDmgBonus = player.shadowRealmDmgMult||2.0;
+        player.iframeTimer = Math.max(player.iframeTimer, dt+0.05);
+        if (player.shadowRealmTimer<=0) {
+          player.shadowRealmTimer=0;
+          player.shadowRealmDmgBonus=0;
+          if(player.shadowRealmCloakOnExit)player.smokeBombTimer=Math.max(player.smokeBombTimer||0,player.shadowRealmCloakOnExit);
+          if(player.shadowRealmExitBlossom){
+            const bCount=40, bDmg=player.weaponDamage*player.dmgMult*1.8*2;
+            for(let i=0;i<bCount;i++){const a=(i/bCount)*Math.PI*2;const proj=new Projectile(player.x,player.y,Math.cos(a)*player.weaponProjSpeed,Math.sin(a)*player.weaponProjSpeed,bDmg,0.6,true);proj.theme='shadow';proj.r=2;projectiles.push(proj);}
+            player.onCrit();spawnBurst(player.x,player.y,['#cc0066','#ff88aa','#ffffff'],32);
+          }
+        }
+      }
+    }
   }
+
+  // ── TEMPLAR CLASS MECHANICS ───────────────────────────────────
+  if (player.class.id === 'templar') {
+
+    // Tick judged on all enemies (shared with Crusader, handled here and below)
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if ((e.judged || 0) > 0) {
+        e.judged -= dt;
+        if (e.judged <= 0) { e.judged = 0; e.judgedMult = 1.0; }
+      }
+    }
+
+    // ── Epiphany: speed boost, free casts, enemy pull ─────────
+    if (player.epiphanyTimer > 0) {
+      player.epiphanyTimer -= dt;
+      // Pull enemies toward player if rank>=4
+      if (player.epiphanyPull) {
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          const dx = player.x - e.x, dy = player.y - e.y;
+          const d = Math.hypot(dx, dy) || 1;
+          if (d < 200) {
+            const force = 55 * dt * (1 - d / 200);
+            e.x += (dx / d) * force; e.y += (dy / d) * force;
+          }
+        }
+      }
+      if (player.epiphanyTimer <= 0) {
+        player.epiphanyTimer = 0;
+        // On-exit AoE (rank 5)
+        if (player.epiphanyExitAoE) {
+          const aoeR = 120;
+          const dmg = player.weaponDamage * player.dmgMult * 5;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x - player.x, e.y - player.y) < aoeR) {
+              const died = e.takeDamage(dmg, { crit: true });
+              player.onCrit();
+              spawnBurst(e.x, e.y, ['#ffeecc', '#ffdd44', '#ffffff'], 10);
+              if (died) handleEnemyDeath(e);
+            }
+          }
+          spawnDamageNumber(player.x, player.y - 30, 'EPIPHANY EXIT!', { color: '#ffeecc', size: 13, vy: -55, life: 1.5 });
+          shake = Math.min(shake + 5, 10);
+        }
+        player.epiphanyFreeCasts = false;
+        player.epiphanySpeedBonus = 0;
+        player.epiphanyPull = false;
+        player.epiphanyCyclone = false;
+      }
+    }
+
+    // ── Inner Fire: periodic fire aura damage ─────────────────
+    if (player.innerFireTimer > 0) {
+      player.innerFireTimer -= dt;
+      player.innerFireHitTimer = (player.innerFireHitTimer || 0) + dt;
+      if (player.innerFireHitTimer >= 0.4) {
+        player.innerFireHitTimer = 0;
+        const auraR = player.innerFireRadius || 50;
+        const dmg = player.innerFireDmg || (player.weaponDamage * player.dmgMult * 0.6);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x - player.x, e.y - player.y) < auraR) {
+            const isCrit = Math.random() * 100 < player.effectiveCritChance();
+            const fd = isCrit ? dmg * 2 : dmg;
+            const died = e.takeDamage(fd, { crit: isCrit, color: '#ff8822' });
+            if (isCrit) player.onCrit();
+            spawnBurst(e.x, e.y, ['#ff8822', '#ffcc44'], 5);
+            if (died) {
+              handleEnemyDeath(e);
+              // Rank 3: explode on kill
+              if (player.innerFireExplodeKill) {
+                for (const n of enemies) {
+                  if (!n.alive || n === e) continue;
+                  if (Math.hypot(n.x - e.x, n.y - e.y) < 50) {
+                    const nd = n.takeDamage(dmg * 2, { crit: true, color: '#ff8822' });
+                    player.onCrit(); spawnBurst(n.x, n.y, ['#ff8822', '#ffcc44', '#ffffff'], 8);
+                    if (nd) handleEnemyDeath(n);
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Fire trail (rank 4)
+        if (player.innerFireTrail) {
+          groundEffects.push({ type: 'burn', x: player.x, y: player.y, r: 28, life: 2.0, maxLife: 2.0, dmgPerSec: dmg * 0.5, color: '#ff8822', hit: new Set() });
+        }
+      }
+      if (player.innerFireTimer <= 0) {
+        player.innerFireTimer = 0;
+        // Capstone detonate: big fire burst
+        if (player.innerFireDetonate) {
+          const detR = 90, detDmg = player.weaponDamage * player.dmgMult * 6;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x - player.x, e.y - player.y) < detR) {
+              const died = e.takeDamage(detDmg, { crit: true, color: '#ff8822' });
+              player.onCrit(); spawnBurst(e.x, e.y, ['#ff8822', '#ffcc44', '#ffffff'], 14);
+              if (died) handleEnemyDeath(e);
+            }
+          }
+          spawnBurst(player.x, player.y, ['#ff8822', '#ffcc44', '#ffffff'], 28);
+          spawnDamageNumber(player.x, player.y - 30, 'INNER FIRE DETONATED!', { color: '#ff8822', size: 13, vy: -58, life: 1.6 });
+          shake = Math.min(shake + 6, 12);
+        }
+        player.innerFireDmg = 0; player.innerFireHitTimer = 0;
+      }
+    }
+
+    // ── Transcendence: path AoE + iframe + detonate on exit ───
+    if (player.transcendenceTimer > 0) {
+      player.transcendenceTimer -= dt;
+      player.iframeTimer = Math.max(player.iframeTimer, dt + 0.05); // rolling iframe
+      player.transcendenceStepTimer = (player.transcendenceStepTimer || 0) + dt;
+      if (player.transcendenceStepTimer >= 0.25) {
+        player.transcendenceStepTimer = 0;
+        const stepR = player.transcendenceRadius || 40;
+        const stepDmg = player.transcendenceDmg || (player.weaponDamage * player.dmgMult * 0.8);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x - player.x, e.y - player.y) < stepR) {
+            const isCrit = Math.random() * 100 < player.effectiveCritChance();
+            const fd = isCrit ? stepDmg * 2 : stepDmg;
+            const died = e.takeDamage(fd, { crit: isCrit, color: '#ffeecc' });
+            if (isCrit) player.onCrit();
+            spawnBurst(e.x, e.y, ['#ffeecc', '#ffdd44', '#ffaa44'], 6);
+            if (died) {
+              if (player.transcendenceHealKill)
+                player.hp = Math.min(player.maxHp, player.hp + Math.ceil(fd * 0.5));
+              handleEnemyDeath(e);
+            }
+          }
+        }
+        spawnBurst(player.x, player.y, ['#ffeecc', '#ffaa44'], 4);
+      }
+      if (player.transcendenceTimer <= 0) {
+        player.transcendenceTimer = 0;
+        // Linger iframe (rank 4)
+        if (player.transcendenceLingerIframe > 0)
+          player.iframeTimer = Math.max(player.iframeTimer, player.transcendenceLingerIframe);
+        // Detonate on exit (rank 5)
+        if (player.transcendenceDetonate) {
+          const detDmg = player.weaponDamage * player.dmgMult * 5;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            const died = e.takeDamage(detDmg, { crit: true, color: '#ffeecc' });
+            player.onCrit(); spawnBurst(e.x, e.y, ['#ffeecc', '#ffdd44', '#ffffff'], 10);
+            if (died) handleEnemyDeath(e);
+          }
+          spawnBurst(player.x, player.y, ['#ffeecc', '#ffdd44', '#ffffff'], 36);
+          spawnDamageNumber(player.x, player.y - 32, 'TRANSCEND DETONATES!', { color: '#ffeecc', size: 14, vy: -62, life: 1.8 });
+          shake = Math.min(shake + 8, 14);
+        }
+        player.transcendenceDmg = 0;
+      }
+    }
+
+  } // end Templar
+
+  // ── CRUSADER CLASS MECHANICS ──────────────────────────────────
+  if (player.class.id === 'crusader') {
+
+    // Judged tick (Crusader owns this)
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if ((e.judged || 0) > 0) {
+        e.judged -= dt;
+        if (e.judged <= 0) { e.judged = 0; e.judgedMult = 1.0; }
+      }
+    }
+
+    // ── Blessing of Might: buff timer + kill burst effect ─────
+    if (player.blessingTimer > 0) {
+      player.blessingTimer -= dt;
+      if (player.blessingTimer <= 0) {
+        player.blessingTimer = 0;
+        player.blessingDmgBonus = 0; player.blessingAspdBonus = 0;
+        player.blessingKillBurst = false;
+      }
+    }
+
+    // ── Crusader's Edge: cleave Wrath fill + auto Fury ────────
+    if (player.crusaderEdgeTimer > 0) {
+      player.crusaderEdgeTimer -= dt;
+      // Passive Wrath generation (faster than base regen)
+      const furyRate = (player.crusaderFuryFill || 1) * (player.class.baseResourceRegen || 7) * dt;
+      player.resource = Math.min(player.maxResource, player.resource + furyRate);
+      // Auto-trigger Righteous Fury at max Wrath every ~10s (rank 5)
+      if (player.crusaderEdgeAutoFury) {
+        player.crusaderAutoFuryTimer = (player.crusaderAutoFuryTimer || 0) + dt;
+        if (player.crusaderAutoFuryTimer >= 10 && player.resource >= player.maxResource * 0.8) {
+          player.crusaderAutoFuryTimer = 0;
+          // Righteous Fury: massive cleave burst
+          const furyDmg = player.weaponDamage * player.dmgMult * 3.5;
+          const furyR = 100;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x - player.x, e.y - player.y) < furyR) {
+              const died = e.takeDamage(furyDmg, { crit: true, color: '#ffe866' });
+              player.onCrit(); spawnBurst(e.x, e.y, ['#ffe866', '#ffcc44', '#ffffff'], 10);
+              if (died) {
+                if (player.crusaderEdgeHealFury)
+                  player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.20));
+                handleEnemyDeath(e);
+              }
+            }
+          }
+          player.resource = 0;
+          spawnBurst(player.x, player.y, ['#ffe866', '#ffcc44', '#ffffff'], 24);
+          spawnDamageNumber(player.x, player.y - 28, 'RIGHTEOUS FURY!', { color: '#ffe866', size: 13, vy: -55, life: 1.5 });
+          shake = Math.min(shake + 5, 10);
+        }
+      }
+      if (player.crusaderEdgeTimer <= 0) {
+        player.crusaderEdgeTimer = 0;
+        player.crusaderEdgeDmgBonus = 0;
+        player.crusaderFuryFill = 1;
+        player.crusaderEdgeAutoFury = false;
+        player.crusaderAutoFuryTimer = 0;
+      }
+    }
+
+  } // end Crusader
 
 
 
