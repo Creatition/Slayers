@@ -136,6 +136,11 @@
   let charTreeClass = 'archer'; // which class tree is shown on char screen
   let charTreeTab = 'talents'; // 'talents' or 'abilities'
   let inventoryTab = 0; // 0=GEAR  1=ABILITIES  2=SKILL TREE
+  // Skill tree pan/zoom
+  let treeViewX = 0, treeViewY = 0, treeViewZoom = 1.0;
+  let treePanActive = false, treePanStartMX = 0, treePanStartMY = 0;
+  let treePanStartVX = 0, treePanStartVY = 0;
+  let mouseIsDown = false;
   let paragonLevel = 0, paragonXp = 0, paragonPoints = 0;
   let spentParagon = {};          // nodeId -> true
   let paragonTreeCat = 'offense'; // active category tab in paragon view
@@ -321,13 +326,34 @@
     const rect = canvas.getBoundingClientRect();
     mouseX = (e.clientX - rect.left) * (W / rect.width);
     mouseY = (e.clientY - rect.top) * (H / rect.height);
+    if (treePanActive && isTreeView()) {
+      treeViewX = treePanStartVX + (mouseX - treePanStartMX);
+      treeViewY = treePanStartVY + (mouseY - treePanStartMY);
+    }
   });
   canvas.addEventListener('mousedown', (e) => {
     if (e.button === 2) { rightClicked = true; }
-    else { mouseClicked = true; }
+    else { mouseClicked = true; mouseIsDown = true; }
+    if (e.button !== 2 && isTreeView()) {
+      treePanActive = true; treePanStartMX = mouseX; treePanStartMY = mouseY;
+      treePanStartVX = treeViewX; treePanStartVY = treeViewY;
+    }
     Sfx.init(); Sfx.resume();
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  window.addEventListener('mouseup', () => { mouseIsDown = false; treePanActive = false; });
+  canvas.addEventListener('wheel', (e) => {
+    if (!isTreeView()) return;
+    const treeOX2 = 30, treeOY2 = 80;
+    const factor = e.deltaY < 0 ? 1.12 : 0.9;
+    const newZoom = Math.max(0.12, Math.min(3.0, treeViewZoom * factor));
+    // Zoom toward mouse cursor
+    const mxRel = mouseX - treeOX2, myRel = mouseY - treeOY2;
+    treeViewX = mxRel - (mxRel - treeViewX) * (newZoom / treeViewZoom);
+    treeViewY = myRel - (myRel - treeViewY) * (newZoom / treeViewZoom);
+    treeViewZoom = newZoom;
+    e.preventDefault();
+  }, { passive: false });
   window.addEventListener('gamepadconnected', (e) => { detectedGamepadType = detectGamepadType(e.gamepad.id); });
   window.addEventListener('gamepaddisconnected', () => {});
 
@@ -2790,17 +2816,22 @@
       return; // skip talent tree rendering
     }
     // ── PoE-style skill tree web ───────────────────────────────
-    const treeOX = 30, treeOY = treeStartY; // canvas offset for tree viewport
-    // Node radii by type
+    const treeOX = 30, treeOY = treeStartY; // canvas offset
     const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
-    // Build node map for quick lookup
     const nodeMap = {};
     if (tree) for (const n of tree.nodes) nodeMap[n.id] = n;
+    // Fit view on first open (zoom=1.0 is the sentinel for 'not yet fitted')
+    if (treeViewZoom === 1.0) fitTreeView();
+    const zx = (nx) => treeOX + nx * treeViewZoom + treeViewX;
+    const zy = (ny) => treeOY + ny * treeViewZoom + treeViewY;
 
     if (!tree) {
       ctx.fillStyle='#888'; ctx.textAlign='center'; ctx.font='10px monospace';
       ctx.fillText('No tree defined', W/2, 150);
     } else {
+      // Clip to tree area so lines don't bleed into header
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, treeOY, W, H - treeOY); ctx.clip();
       // 1. Draw connection lines (deduplicated)
       const drawnPairs = new Set();
       for (const node of tree.nodes) {
@@ -2810,12 +2841,12 @@
           drawnPairs.add(key);
           const target = nodeMap[connId];
           if (!target) continue;
-          const ax = treeOX + node.x, ay = treeOY + node.y;
-          const bx = treeOX + target.x, by = treeOY + target.y;
+          const ax = zx(node.x), ay = zy(node.y);
+          const bx = zx(target.x), by = zy(target.y);
           const aSpent = !!spent[node.id], bSpent = !!spent[target.id];
           const lit = aSpent && bSpent;
-          ctx.strokeStyle = lit ? cl.color : (aSpent || bSpent) ? '#556633' : '#2a2a2a';
-          ctx.lineWidth = lit ? 2 : 1;
+          ctx.strokeStyle = lit ? cl.color : (aSpent || bSpent) ? '#445533' : '#1e1e1e';
+          ctx.lineWidth = lit ? 2.5 * treeViewZoom : 1.5 * treeViewZoom;
           ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
           ctx.lineWidth = 1;
         }
@@ -2823,8 +2854,8 @@
 
       // 2. Draw nodes
       for (const node of tree.nodes) {
-        const cx = treeOX + node.x, cy = treeOY + node.y;
-        const r = NODE_R[node.type] || 7;
+        const cx = zx(node.x), cy = zy(node.y);
+        const r = (NODE_R[node.type] || 7) * treeViewZoom;
         const isSpent  = !!spent[node.id];
         const canBuy   = canSpendTalent(charTreeClass, node);
         const dx = mouseX - cx, dy = mouseY - cy;
@@ -2907,6 +2938,34 @@
       ctx.fillText(stats[i][1], 8 + i * sw + sw / 2, statsY + 18);
     }
 
+    // ── Close tree clip + minimap ──────────────────────────────
+    if (charTreeTab === 'talents' && TALENT_TREES[charTreeClass]) {
+      ctx.restore(); // end clip region
+      const tree2 = TALENT_TREES[charTreeClass];
+      const cl2   = getClassById(charTreeClass);
+      const spent2 = spentTalents[charTreeClass] || {};
+      const mm = { x: W-72, y: H-54, w: 66, h: 44 };
+      ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(mm.x,mm.y,mm.w,mm.h);
+      ctx.strokeStyle='#2a2a44'; ctx.lineWidth=1; ctx.strokeRect(mm.x,mm.y,mm.w,mm.h);
+      let mnX=Infinity,mxX=-Infinity,mnY=Infinity,mxY=-Infinity;
+      for (const n of tree2.nodes) { mnX=Math.min(mnX,n.x); mxX=Math.max(mxX,n.x); mnY=Math.min(mnY,n.y); mxY=Math.max(mxY,n.y); }
+      const tw2=mxX-mnX||1, th2=mxY-mnY||1;
+      const msc=Math.min(mm.w/tw2,mm.h/th2)*0.9;
+      const mox=mm.x+mm.w/2-(mnX+mxX)/2*msc;
+      const moy=mm.y+mm.h/2-(mnY+mxY)/2*msc;
+      for (const n of tree2.nodes) {
+        const isSpentMM=!!spent2[n.id];
+        ctx.fillStyle=isSpentMM?cl2.color:(n.type==='keystone'?'#8855ff':'#252530');
+        const rs=n.type==='keystone'?2.5:n.type==='notable'?1.8:1.2;
+        ctx.beginPath(); ctx.arc(mox+n.x*msc, moy+n.y*msc, rs, 0, Math.PI*2); ctx.fill();
+      }
+      // Viewport rect on minimap
+      const vpX=mox+(-treeViewX/treeViewZoom)*msc, vpY=moy+(-treeViewY/treeViewZoom)*msc;
+      const vpW=(W-60)/treeViewZoom*msc, vpH=(H-110)/treeViewZoom*msc;
+      ctx.strokeStyle='rgba(255,255,255,0.35)'; ctx.lineWidth=1; ctx.strokeRect(vpX,vpY,vpW,vpH);
+      ctx.fillStyle='#44445a'; ctx.font='5px monospace'; ctx.textAlign='right';
+      ctx.fillText('Scroll=zoom  Drag=pan', mm.x-2, H-4);
+    }
     // ── Back button ────────────────────────────────────────────
     drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
     ctx.textAlign = 'left';
@@ -4780,11 +4839,28 @@
     ctx.textAlign = 'left';
   }
 
+  function isTreeView() {
+    return (state === STATE.CHAR_SCREEN || (state === STATE.INVENTORY && inventoryTab === 2))
+      && charTreeTab === 'talents';
+  }
+  function fitTreeView() {
+    const tree = TALENT_TREES[charTreeClass];
+    if (!tree || !tree.nodes.length) return;
+    const treeOX2 = 30, treeOY2 = 80;
+    let mnX=Infinity, mxX=-Infinity, mnY=Infinity, mxY=-Infinity;
+    for (const n of tree.nodes) { mnX=Math.min(mnX,n.x); mxX=Math.max(mxX,n.x); mnY=Math.min(mnY,n.y); mxY=Math.max(mxY,n.y); }
+    const tw = mxX-mnX||1, th = mxY-mnY||1;
+    const vW = W - treeOX2*2, vH = H - treeOY2 - 30;
+    treeViewZoom = Math.max(0.12, Math.min(2.0, Math.min(vW/tw, vH/th) * 0.88));
+    const cx = (mnX+mxX)/2, cy = (mnY+mxY)/2;
+    treeViewX = vW/2 - cx * treeViewZoom;
+    treeViewY = (vH/2 + treeOY2) - treeOY2 - cy * treeViewZoom;
+  }
   // ── Shared char-tree click handler ───────────────────────────────────────
   function handleCharTreeClicks(backFn) {
     if (!mouseClicked) return;
     if (isHovering(8, H - 26, 80, 20)) { backFn(); return; }
-    if (isHovering(W/2 - 82, 46, 78, 14)) charTreeTab = 'talents';
+    if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'talents'; fitTreeView(); }
     if (isHovering(W/2 + 4,  46, 78, 14)) charTreeTab = 'abilities';
     const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
     const cTabW = Math.floor((W - 16) / allClasses.length);
@@ -4820,8 +4896,9 @@
         const treeOX = 30, treeOY = 80;
         const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
         for (const node of tree.nodes) {
-          const nx = treeOX + node.x, ny2 = treeOY + node.y;
-          const r = (NODE_R[node.type] || 7) + 4;
+              const nx = 30 + node.x * treeViewZoom + treeViewX;
+          const ny2 = 80 + node.y * treeViewZoom + treeViewY;
+          const r = ((NODE_R[node.type] || 7) + 4) * treeViewZoom;
           const dx = mouseX - nx, dy = mouseY - ny2;
           if (dx*dx + dy*dy <= r*r) { spendTalent(charTreeClass, node); Sfx.uiConfirm && Sfx.uiConfirm(); break; }
         }
@@ -5380,12 +5457,14 @@
         inventoryTab = (inventoryTab + 2) % 3;
         charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
         if (player) charTreeClass = player.class.id;
+        if (inventoryTab === 2) fitTreeView();
         Sfx.uiClick && Sfx.uiClick();
       }
       if (gpJustPressed.has(5)) {
         inventoryTab = (inventoryTab + 1) % 3;
         charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
         if (player) charTreeClass = player.class.id;
+        if (inventoryTab === 2) fitTreeView();
         Sfx.uiClick && Sfx.uiClick();
       }
       if (inventoryTab > 0) {
