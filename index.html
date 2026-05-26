@@ -230,16 +230,16 @@
   }
   // Primary stat definitions (for UI + scaling reference)
   const PRIMARY_STATS = [
-    { id: 'str', label: 'STR', name: 'Strength',     color: '#ff6644',
-      desc: '+3% Dmg / +5 HP', detail: '+3% weapon dmg, +5 max HP' },
-    { id: 'dex', label: 'DEX', name: 'Dexterity',    color: '#44ddff',
-      desc: '+1% Crit / +1% Aspd', detail: '+1% crit chance, +1% attack speed' },
-    { id: 'int', label: 'INT', name: 'Intelligence', color: '#aa66ff',
-      desc: '+4 Resource / -2% Cost', detail: '+4 max resource, -2% ability cost (min 50%)' },
-    { id: 'vit', label: 'VIT', name: 'Vitality',     color: '#44ff88',
-      desc: '+12 HP / +0.4 Regen / +1.5 Armor', detail: '+12 max HP, +0.4 HP regen/s, +1.5 armor' },
-    { id: 'spi', label: 'SPI', name: 'Spirit',       color: '#ffdd44',
-      desc: '+3 Resource / +0.3 Regen / +0.4% Dodge', detail: '+3 max resource, +0.3 rsc regen/s, +0.4% dodge' },
+    { id: 'str', label: 'STR', name: 'Strength',     color: '#ff6644', gemColor: '#ff3333',
+      desc: '+6 HP / +0.6 Armor', detail: '+6 max HP, +0.6 armor  |  Main: +0.8% all dmg/pt  |  Sec: +0.3% all dmg/pt' },
+    { id: 'dex', label: 'DEX', name: 'Dexterity',    color: '#44ddff', gemColor: '#ffcc00',
+      desc: '+0.5% Crit / +0.4% Aspd', detail: '+0.5% crit, +0.4% atk spd, +0.1% dodge  |  Main: +0.8% all dmg/pt  |  Sec: +0.3%' },
+    { id: 'int', label: 'INT', name: 'Intelligence', color: '#aa66ff', gemColor: '#3366ff',
+      desc: '+3 Resource / Resist All', detail: '+3 max resource, −0.8% ability cost (min 50%), +0.12% resist all/pt  |  Main: +0.8% dmg' },
+    { id: 'vit', label: 'VIT', name: 'Vitality',     color: '#44ff88', gemColor: '#44ff88',
+      desc: '+12 HP / +0.5 Regen / +0.8 Armor', detail: '+12 max HP, +0.5 HP regen/s, +0.8 armor  |  Main: +0.8% all dmg/pt (Templar)' },
+    { id: 'spi', label: 'SPI', name: 'Spirit',       color: '#ffdd44', gemColor: '#22cc55',
+      desc: '+2 Resource / +0.25 Regen / +0.15% Dodge', detail: '+2 max resource, +0.25 rsc regen/s, +0.15% dodge  |  Main: +0.8% all dmg/pt' },
   ];
 
   function getClassStats(classId) {
@@ -1089,7 +1089,7 @@
           const last = g.cooldowns.get('player') || 0;
           if (now - last > 800) {
             g.cooldowns.set('player', now);
-            const died = player.takeDamage(g.damage);
+            const died = player.takeDamage(g.damage, 'fire');
             spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#ff7700', size: 9 });
             if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
           }
@@ -1103,7 +1103,7 @@
           const last = g.cooldowns.get('player') || 0;
           if (now - last > 600) {
             g.cooldowns.set('player', now);
-            const died = player.takeDamage(g.damage);
+            const died = player.takeDamage(g.damage, 'poison');
             spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#55ff66', size: 9 });
             if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
           }
@@ -3420,7 +3420,9 @@
       ctx.textAlign = 'left';
     }
 
-    const st = player ? getClassStats(player.class.id) : { str:0, dex:0, int:0, vit:0, spi:0 };
+    const _statCid = charTreeClass;
+    const _statCl  = getClassById(_statCid);
+    const st = getClassStats(_statCid);
     const rowH = 44, startY = 52;
     const btnW = 14, btnH = 12;
     const col1 = 10, col2 = 52, col3 = W - 40;
@@ -3434,18 +3436,31 @@
       ctx.fillStyle = i % 2 === 0 ? '#0d0d1a' : '#080812';
       ctx.fillRect(0, ry, W, rowH - 2);
 
+      // Main/secondary role indicator
+      const _isMain = _statCl && _statCl.mainStat === def.id;
+      const _isSec  = _statCl && _statCl.secondaryStat === def.id;
+      // Colored glow strip on left if main or secondary
+      if (_isMain) { ctx.fillStyle = def.color; ctx.globalAlpha = 0.25; ctx.fillRect(0, ry, 4, rowH - 2); ctx.globalAlpha = 1; }
+      else if (_isSec) { ctx.fillStyle = def.color; ctx.globalAlpha = 0.10; ctx.fillRect(0, ry, 4, rowH - 2); ctx.globalAlpha = 1; }
       // Stat label badge
-      ctx.fillStyle = def.color;
+      ctx.fillStyle = _isMain ? def.color : (_isSec ? def.color : '#555');
       ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
       ctx.fillText(def.label, col1 + 14, ry + 14);
-
+      // Main/secondary badge
+      if (_isMain) {
+        ctx.fillStyle = def.color; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('★ MAIN', col1 + 14, ry + 26);
+      } else if (_isSec) {
+        ctx.fillStyle = def.color; ctx.globalAlpha = 0.8; ctx.font = '6px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('◆ SEC', col1 + 14, ry + 26); ctx.globalAlpha = 1;
+      }
       // Stat name + description
-      ctx.fillStyle = '#cccccc';
+      ctx.fillStyle = _isMain ? '#ffffff' : (_isSec ? '#dddddd' : '#aaaaaa');
       ctx.font = 'bold 8px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(def.name, col2, ry + 10);
-      ctx.fillStyle = '#666688';
+      ctx.fillStyle = '#555577';
       ctx.font = '7px monospace';
       ctx.fillText(def.detail, col2, ry + 20);
 
@@ -3497,11 +3512,45 @@
         }
       }
     }
-    // Footer hint
-    ctx.fillStyle = '#333355';
-    ctx.font = '6px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Changes apply immediately. Points refundable at any time.', W / 2, H - 4);
+    // ── Resistance panel ─────────────────────────────────────────────────────
+    const _resY = startY + PRIMARY_STATS.length * rowH + 4;
+    ctx.fillStyle = '#0d0d1a'; ctx.fillRect(0, _resY, W, H - _resY);
+    ctx.fillStyle = '#333366'; ctx.fillRect(0, _resY, W, 1); // divider
+    ctx.fillStyle = '#aaaacc'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('ELEMENTAL RESISTANCES  (cap 75%)', W / 2, _resY + 10);
+    // Get resist values — from player if available, else estimate from INT allocation
+    const _pint = st.int || 0;
+    const _raEst = Math.min(75, Math.round(_pint * 0.12));
+    const _fireR  = player ? (player.fireResist  || _raEst) : _raEst;
+    const _coldR  = player ? (player.coldResist  || _raEst) : _raEst;
+    const _lightR = player ? (player.lightResist || _raEst) : _raEst;
+    const _poisR  = player ? (player.poisonResist|| _raEst) : _raEst;
+    const _resElems = [
+      { label:'FIRE',  val:_fireR,  color:'#ff5522', gemLabel:'Ruby' },
+      { label:'COLD',  val:_coldR,  color:'#55aaff', gemLabel:'Sapphire' },
+      { label:'LTNG',  val:_lightR, color:'#ffee22', gemLabel:'Topaz' },
+      { label:'PSNN',  val:_poisR,  color:'#44dd66', gemLabel:'Emerald' },
+    ];
+    const _rw = Math.floor(W / 4) - 4, _rBarW = _rw - 28;
+    for (let ri = 0; ri < _resElems.length; ri++) {
+      const re = _resElems[ri];
+      const rx = 4 + ri * (W / 4), ry2 = _resY + 15;
+      // Bar bg
+      ctx.fillStyle = '#1a1a2e'; ctx.fillRect(rx, ry2, _rw, 16);
+      ctx.strokeStyle = re.color; ctx.lineWidth = 1; ctx.strokeRect(rx, ry2, _rw, 16);
+      // Bar fill
+      const _barFill = Math.floor(_rBarW * (re.val / 75));
+      ctx.fillStyle = re.color; ctx.globalAlpha = re.val >= 75 ? 0.9 : 0.5;
+      ctx.fillRect(rx + 1, ry2 + 1, _barFill, 14); ctx.globalAlpha = 1;
+      // Label + value
+      ctx.fillStyle = re.color; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(re.label, rx + 2, ry2 + 8);
+      ctx.fillStyle = re.val >= 75 ? '#ffd040' : '#cccccc'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(re.val + '%', rx + _rw - 2, ry2 + 11);
+    }
+    // Footer
+    ctx.fillStyle = '#333355'; ctx.font = '6px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('Points refundable anytime  •  ★=Main stat (+0.8%/pt dmg)  ◆=Secondary (+0.3%/pt)', W / 2, H - 3);
     ctx.textAlign = 'left';
   }
 
