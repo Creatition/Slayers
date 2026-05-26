@@ -135,6 +135,7 @@
   let spentTalents = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
   let charTreeTab = 'talents'; // 'talents' or 'abilities'
+  let inventoryTab = 0; // 0=GEAR  1=ABILITIES  2=SKILL TREE
   let paragonLevel = 0, paragonXp = 0, paragonPoints = 0;
   let spentParagon = {};          // nodeId -> true
   let paragonTreeCat = 'offense'; // active category tab in paragon view
@@ -1518,7 +1519,11 @@
   }
   function toggleInventory() {
     if (state === STATE.INVENTORY) state = prevState;
-    else if (state === STATE.PLAYING) { prevState = state; state = STATE.INVENTORY; }
+    else if (state === STATE.PLAYING) {
+      prevState = state; state = STATE.INVENTORY;
+      inventoryTab = 0;
+      if (player) charTreeClass = player.class.id;
+    }
   }
   function pickClass(classId) {
     selectedClassId = classId;
@@ -3002,9 +3007,11 @@
     }
   }
   function drawInventoryScreen() {
+    if (inventoryTab > 0) { drawCharScreen(); drawInventoryTabBar(); return; }
     ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
+    drawInventoryTabBar();
     ctx.fillStyle = '#eee'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
-    ctx.fillText('INVENTORY', W / 2, 20);
+    ctx.fillText('INVENTORY', W / 2, 24);
     ctx.fillStyle = '#666'; ctx.font = '8px monospace';
     ctx.fillText('Click=select  Right-click/Square=equip  Del/Triangle=salvage  E=equip selected  V/B/Y=bulk salvage  Tab/I/Esc=close', W / 2, 32);
 
@@ -4773,6 +4780,87 @@
     ctx.textAlign = 'left';
   }
 
+  // ── Shared char-tree click handler ───────────────────────────────────────
+  function handleCharTreeClicks(backFn) {
+    if (!mouseClicked) return;
+    if (isHovering(8, H - 26, 80, 20)) { backFn(); return; }
+    if (isHovering(W/2 - 82, 46, 78, 14)) charTreeTab = 'talents';
+    if (isHovering(W/2 + 4,  46, 78, 14)) charTreeTab = 'abilities';
+    const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
+    const cTabW = Math.floor((W - 16) / allClasses.length);
+    for (let i = 0; i < allClasses.length; i++) {
+      if (isHovering(8 + i * cTabW, 63, cTabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
+    }
+    if (charTreeTab === 'abilities') {
+      const viewAbl = classAbilities(charTreeClass);
+      const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
+      const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
+      const ablX0 = Math.floor((W - totalAblW) / 2), ablY0 = 82;
+      for (let ai = 0; ai < viewAbl.length; ai++) {
+        const adef = viewAbl[ai];
+        const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
+        const ax = ablX0 + col * (cardW2 + gap2), ay = ablY0 + row * (cardH2 + gap2);
+        const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
+        if (isHovering(btnX, btnY, 18, 12)) {
+          const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+          const curRank = owned2 ? (owned2.rank || 1) : 0;
+          if (owned2 && curRank < (adef.maxRank || 5) && player && (player.skillPoints || 0) >= 1) {
+            player.skillPoints--;
+            owned2.rank = curRank + 1;
+            const lbl = owned2.rank >= 5 ? '★CAPSTONE!' : owned2.rank >= 3 ? '★Notable!' : `Rank ${owned2.rank}`;
+            spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${lbl}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
+            Sfx.uiConfirm();
+          }
+          break;
+        }
+      }
+    } else {
+      const tree = TALENT_TREES[charTreeClass];
+      if (tree) {
+        const treeOX = 30, treeOY = 80;
+        const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
+        for (const node of tree.nodes) {
+          const nx = treeOX + node.x, ny2 = treeOY + node.y;
+          const r = (NODE_R[node.type] || 7) + 4;
+          const dx = mouseX - nx, dy = mouseY - ny2;
+          if (dx*dx + dy*dy <= r*r) { spendTalent(charTreeClass, node); Sfx.uiConfirm && Sfx.uiConfirm(); break; }
+        }
+      }
+    }
+  }
+
+  // ── Inventory tab bar overlay ─────────────────────────────────────────────
+  function drawInventoryTabBar() {
+    const tabs = ['⚔ GEAR', '✦ ABILITIES', '◈ SKILL TREE'];
+    const tw = Math.floor(W / tabs.length);
+    ctx.fillStyle = '#07070f';
+    ctx.fillRect(0, 0, W, 16);
+    for (let i = 0; i < tabs.length; i++) {
+      const active = inventoryTab === i;
+      const hov = !active && mouseX >= i * tw && mouseX < i * tw + tw && mouseY >= 0 && mouseY < 16;
+      ctx.fillStyle = active ? '#1e3a8a' : (hov ? '#161630' : '#0b0b1c');
+      ctx.fillRect(i * tw, 0, tw - 1, 16);
+      ctx.strokeStyle = active ? '#4477dd' : '#1a1a38';
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.strokeRect(i * tw + 0.5, 0.5, tw - 2, 15);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = active ? '#88bbff' : '#3d4f72';
+      ctx.font = (active ? 'bold ' : '') + '7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(tabs[i], i * tw + (tw - 1) / 2, 11);
+      if (mouseClicked && hov) {
+        inventoryTab = i;
+        charTreeTab = i === 1 ? 'abilities' : 'talents';
+        if (player) charTreeClass = player.class.id;
+        Sfx.uiClick && Sfx.uiClick();
+      }
+    }
+    ctx.fillStyle = '#2a2a44'; ctx.font = '6px monospace';
+    ctx.textAlign = 'left';  ctx.fillText('LB/Q ◄', 3, H - 3);
+    ctx.textAlign = 'right'; ctx.fillText('► RB', W - 3, H - 3);
+    ctx.textAlign = 'left';
+  }
+
   // ============================================================
   // PAUSE MENU
   // ============================================================
@@ -5222,67 +5310,7 @@
       if (keyJustPressed.has('escape') || keyJustPressed.has('c') || gpJustPressed.has(1)) {
         state = STATE.CLASS_SELECT;
       }
-      if (mouseClicked) {
-        // Back button
-        if (isHovering(8, H - 26, 80, 20)) { state = STATE.CLASS_SELECT; }
-        // View toggle buttons (TALENTS / ABILITIES)
-        if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'talents'; }
-        if (isHovering(W/2 + 4,  46, 78, 14)) { charTreeTab = 'abilities'; }
-        // Class tabs
-        const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
-        const tabW = Math.floor((W - 16) / allClasses.length);
-        for (let i = 0; i < allClasses.length; i++) {
-          if (isHovering(8 + i * tabW, 63, tabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
-        }
-        if (charTreeTab === 'abilities') {
-          // ── ABILITIES tab click — rank-up buttons ──────────────
-          const viewAbl = classAbilities(charTreeClass);
-          const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
-          const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
-          const ablX0 = Math.floor((W - totalAblW) / 2);
-          const ablY0 = 82;
-          for (let ai = 0; ai < viewAbl.length; ai++) {
-            const adef = viewAbl[ai];
-            const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
-            const ax = ablX0 + col * (cardW2 + gap2);
-            const ay = ablY0 + row * (cardH2 + gap2);
-            // [+] button in bottom-right corner of card
-            const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
-            if (isHovering(btnX, btnY, 18, 12)) {
-              const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
-              const curRank = owned2 ? (owned2.rank || 1) : 0;
-              if (owned2 && curRank < (adef.maxRank || 5) && player && (player.skillPoints || 0) >= 1) {
-                player.skillPoints--;
-                owned2.rank = curRank + 1;
-                const label = owned2.rank >= 5 ? '★CAPSTONE!' : owned2.rank >= 3 ? '★Notable!' : `Rank ${owned2.rank}`;
-                spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${label}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
-                Sfx.uiConfirm();
-              }
-              break;
-            }
-          }
-        } else {
-          // ── TALENTS tab click — PoE-style circle hit test ────────
-          const tree = TALENT_TREES[charTreeClass];
-          if (tree) {
-            const treeOX = 30, treeOY = 80;
-            const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
-            for (const node of tree.nodes) {
-              const cx = treeOX + node.x, cy = treeOY + node.y;
-              const r = (NODE_R[node.type] || 7) + 4; // +4 px hit margin
-              const dx = mouseX - cx, dy = mouseY - cy;
-              if (dx*dx + dy*dy <= r*r) {
-                spendTalent(charTreeClass, node);
-                if (canSpendTalent(charTreeClass, node) === false) {
-                  // If just spent, play confirmation SFX
-                  Sfx.uiConfirm && Sfx.uiConfirm();
-                }
-                break;
-              }
-            }
-          }
-        }
-      }
+      handleCharTreeClicks(() => { state = STATE.CLASS_SELECT; });
     }
     else if (state === STATE.TRIAL_LOADOUT) {
       updateVirtualCursor(dt);
@@ -5347,6 +5375,25 @@
     // ── INVENTORY input handler ──────────────────────────────────────
     if (state === STATE.INVENTORY) {
       updateVirtualCursor(dt);
+      // Tab switch: LB(GP4)/Q = prev, RB(GP5) = next
+      if (gpJustPressed.has(4) || keyJustPressed.has('q')) {
+        inventoryTab = (inventoryTab + 2) % 3;
+        charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
+        if (player) charTreeClass = player.class.id;
+        Sfx.uiClick && Sfx.uiClick();
+      }
+      if (gpJustPressed.has(5)) {
+        inventoryTab = (inventoryTab + 1) % 3;
+        charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
+        if (player) charTreeClass = player.class.id;
+        Sfx.uiClick && Sfx.uiClick();
+      }
+      if (inventoryTab > 0) {
+        // Abilities / Skill Tree tab
+        if (gpJustPressed.has(0)) mouseClicked = true;
+        handleCharTreeClicks(() => { inventoryTab = 0; });
+      } else {
+      // GEAR tab
       // Gamepad: Square(2)=equip hovered item, Triangle(3)=salvage hovered
       const gpEquip  = gpJustPressed.has(2);
       const gpSalvage = gpJustPressed.has(3);
@@ -5402,6 +5449,7 @@
           unequipSlot(eqSlot); Sfx.uiClick();
         }
       }
+      } // end GEAR tab
     }
 
     // ── SHOP input handler ────────────────────────────────────────────────
