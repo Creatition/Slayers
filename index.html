@@ -6859,10 +6859,10 @@
     else if (state === STATE.CHAR_MENU) {
       updateVirtualCursor(dt);
       if (gpJustPressed.has(0)) mouseClicked = true;
-      if (keyJustPressed.has('escape') || gpJustPressed.has(1)) { state = STATE.CLASS_SELECT; return; }
-      if (mouseClicked) {
+      if (keyJustPressed.has('escape') || gpJustPressed.has(1)) { state = STATE.CLASS_SELECT; }
+      else if (mouseClicked) {
         // Back button
-        if (isHovering(8, H - 22, 78, 16)) { state = STATE.CLASS_SELECT; Sfx.uiClick && Sfx.uiClick(); return; }
+        if (isHovering(8, H - 22, 78, 16)) { state = STATE.CLASS_SELECT; Sfx.uiClick && Sfx.uiClick(); }
         const lW = Math.floor(W * 0.56);
         const btnW = 180, btnH = 34, gap = 10;
         const bx = lW / 2 - btnW / 2, by0 = 95;
