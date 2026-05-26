@@ -132,10 +132,17 @@
 
   // ── Character Progression (persistent across runs) ─────────
   const CHAR_LEVEL_CAP = 40;
+  // Per-class progression — each class levels independently; paragon is shared
+  let classProgress = {}; // { classId: { level, xp, talentPts, statPts } }
+  function ensureCP(cid) {
+    if (!classProgress[cid]) classProgress[cid] = { level: 1, xp: 0, talentPts: 0, statPts: 0 };
+    return classProgress[cid];
+  }
+  // Run-time cached globals (synced from classProgress[selectedClassId] at run start/XP award)
   let charLevel = 1;
   let charXp    = 0;
-  let talentPoints    = 0;  // unspent skill-tree points
-  let charStatPoints  = 0;  // unspent primary-stat points (1 per charLevel)
+  let talentPoints    = 0;  // unspent skill-tree points (active class)
+  let charStatPoints  = 0;  // unspent primary-stat points (active class)
   let allocatedStats  = {}; // { [classId]: { str, dex, int, vit, spi } }
   let spentTalents = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
@@ -145,6 +152,7 @@
   let treeViewX = 0, treeViewY = 0, treeViewZoom = 1.0;
   let treePanActive = false, treePanStartMX = 0, treePanStartMY = 0;
   let treePanStartVX = 0, treePanStartVY = 0;
+  let charAbilScroll = 0; // scroll offset (px) for abilities tab
   let mouseIsDown = false;
   let paragonLevel = 0, paragonXp = 0, paragonPoints = 0;
   let spentParagon = {};          // nodeId -> true
@@ -152,16 +160,20 @@
   // XP required to reach next level (level 1→2 = 100, scales by +75 each level)
   function charXpToNext(lvl) { return 100 + (lvl - 1) * 75; }
   function awardRunXp(wavesCompleted, bossesKilled, victory) {
-    if (charLevel >= CHAR_LEVEL_CAP) return;
+    const cid = selectedClassId;
+    const cp = ensureCP(cid);
+    if (cp.level >= CHAR_LEVEL_CAP) { saveData(); return; }
     let xp = wavesCompleted * 8 + bossesKilled * 30 + (victory ? 80 : 0);
-    charXp += xp;
-    while (charXp >= charXpToNext(charLevel) && charLevel < CHAR_LEVEL_CAP) {
-      charXp -= charXpToNext(charLevel);
-      charLevel++;
-      talentPoints++;
-      charStatPoints++;
+    cp.xp += xp;
+    while (cp.xp >= charXpToNext(cp.level) && cp.level < CHAR_LEVEL_CAP) {
+      cp.xp -= charXpToNext(cp.level);
+      cp.level++;
+      cp.talentPts++;
+      cp.statPts++;
     }
-    if (charLevel >= CHAR_LEVEL_CAP) charXp = 0;
+    if (cp.level >= CHAR_LEVEL_CAP) cp.xp = 0;
+    // Sync run-time globals
+    charLevel = cp.level; charXp = cp.xp; talentPoints = cp.talentPts; charStatPoints = cp.statPts;
     saveData();
   }
   function applyTalentsToPlayer(p) {
@@ -174,7 +186,7 @@
     }
   }
   function canSpendTalent(classId, node) {
-    if (talentPoints <= 0) return false;
+    if (ensureCP(classId).talentPts <= 0) return false;
     const spent = spentTalents[classId] || {};
     if (spent[node.id]) return false; // already bought
     if (node.origin) return true;     // origin always available
@@ -192,7 +204,8 @@
     if (!canSpendTalent(classId, node)) return;
     if (!spentTalents[classId]) spentTalents[classId] = {};
     spentTalents[classId][node.id] = true;
-    talentPoints--;
+    ensureCP(classId).talentPts--;
+    if (classId === selectedClassId) talentPoints = ensureCP(classId).talentPts;
     saveData();
   }
 
@@ -377,6 +390,12 @@
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   window.addEventListener('mouseup', () => { mouseIsDown = false; treePanActive = false; });
   canvas.addEventListener('wheel', (e) => {
+    if (isAbilView()) {
+      charAbilScroll += e.deltaY > 0 ? 30 : -30;
+      charAbilScroll = Math.max(0, charAbilScroll);
+      e.preventDefault();
+      return;
+    }
     if (!isTreeView()) return;
     const treeOX2 = 30, treeOY2 = 80;
     const factor = e.deltaY < 0 ? 1.12 : 0.9;
@@ -1880,13 +1899,20 @@
       stash = (data.stash || []).map(deserializeItem);
       stashSize = data.stashSize || STASH_SIZE_INIT;
       unlockedTrialTier = data.unlockedTrialTier || 1;
-      // Character progression
-      charLevel    = Math.min(CHAR_LEVEL_CAP, data.charLevel    || 1);
-      charXp       = data.charXp       || 0;
-      talentPoints   = data.talentPoints   || 0;
+      // Character progression — per-class (migrate old global save if present)
+      if (data.classProgress) {
+        classProgress = data.classProgress;
+      } else if (data.charLevel) {
+        // Migrate v1 global save: apply to all classes
+        const _legacyCP = { level: Math.min(CHAR_LEVEL_CAP, data.charLevel || 1),
+          xp: data.charXp || 0, talentPts: data.talentPoints || 0, statPts: data.charStatPoints || 0 };
+        const _allCls = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
+        _allCls.forEach(c => { classProgress[c] = Object.assign({}, _legacyCP); });
+      }
       spentTalents   = data.spentTalents   || {};
-      charStatPoints = data.charStatPoints || 0;
       allocatedStats = data.allocatedStats || {};
+      // Sync globals to selectedClassId (will be overwritten at resetWorld anyway)
+      { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; talentPoints = _cp.talentPts; charStatPoints = _cp.statPts; }
       paragonLevel  = Math.min(PARAGON_LEVEL_CAP, data.paragonLevel  || 0);
       paragonXp     = data.paragonXp    || 0;
       paragonPoints = data.paragonPoints || 0;
@@ -1904,11 +1930,8 @@
         stash: stash.map(serializeItem),
         stashSize,
         unlockedTrialTier,
-        charLevel,
-        charXp,
-        talentPoints,
+        classProgress,
         spentTalents,
-        charStatPoints,
         allocatedStats,
         paragonLevel,
         paragonXp,
@@ -1935,6 +1958,8 @@
   }
 
   function resetWorld() {
+    // Sync run-time globals to the class being played
+    { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; talentPoints = _cp.talentPts; charStatPoints = _cp.statPts; }
     player = new Player(W / 2, H / 2, selectedClassId);
     // Restore persisted equipment + inventory from last run
     if (savedEquipped) {
@@ -2822,16 +2847,18 @@
     ctx.fillStyle = '#ffaa44'; ctx.globalAlpha = 0.3;
     ctx.fillRect(charBtnX + 2, charBtnY + 2, Math.floor(156 * lvlPct), 16);
     ctx.globalAlpha = 1;
-    if (talentPoints > 0 || charStatPoints > 0) {
-      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-      if (talentPoints > 0) {
-        ctx.fillStyle = '#ffd040';
-        ctx.fillText(`${talentPoints} SKILL PT${talentPoints > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + 30);
-      }
-      if (charStatPoints > 0) {
-        ctx.fillStyle = '#ff8844';
-        const _syOff = talentPoints > 0 ? 40 : 30;
-        ctx.fillText(`${charStatPoints} STAT PT${charStatPoints > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + _syOff);
+    { const _hcp = player ? ensureCP(player.class.id) : ensureCP(selectedClassId);
+      if (_hcp.talentPts > 0 || _hcp.statPts > 0) {
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        if (_hcp.talentPts > 0) {
+          ctx.fillStyle = '#ffd040';
+          ctx.fillText(`${_hcp.talentPts} SKILL PT${_hcp.talentPts > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + 30);
+        }
+        if (_hcp.statPts > 0) {
+          ctx.fillStyle = '#ff8844';
+          const _syOff = _hcp.talentPts > 0 ? 40 : 30;
+          ctx.fillText(`${_hcp.statPts} STAT PT${_hcp.statPts > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + _syOff);
+        }
       }
     }
     // HUB button
@@ -2937,18 +2964,20 @@
   }
   function drawCharScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.95)'; ctx.fillRect(0, 0, W, H);
-    // ── Header ─────────────────────────────────────────────────
+    // ── Header — always read from classProgress[charTreeClass] for correct per-class data ───
+    const _vcp = ensureCP(charTreeClass); // viewed class progress
+    const _vcl = _vcp.level, _vcx = _vcp.xp, _vtp = _vcp.talentPts;
     ctx.fillStyle = '#ffaa44'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('CHARACTER', W / 2, 18);
-    const xpNeeded = charLevel < CHAR_LEVEL_CAP ? charXpToNext(charLevel) : 0;
-    const xpPct    = charLevel < CHAR_LEVEL_CAP ? charXp / xpNeeded : 1;
+    const xpNeeded = _vcl < CHAR_LEVEL_CAP ? charXpToNext(_vcl) : 0;
+    const xpPct    = _vcl < CHAR_LEVEL_CAP ? _vcx / xpNeeded : 1;
     ctx.fillStyle = '#555'; ctx.fillRect(10, 24, W - 20, 8);
     ctx.fillStyle = '#ffaa44'; ctx.fillRect(10, 24, Math.floor((W - 20) * xpPct), 8);
     ctx.fillStyle = '#fff'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(charLevel < CHAR_LEVEL_CAP ? `LV ${charLevel}  —  ${charXp} / ${xpNeeded} XP` : `LV ${charLevel}  MAX`, W / 2, 30);
-    ctx.fillStyle = talentPoints > 0 ? '#ffd040' : '#666';
+    ctx.fillText(_vcl < CHAR_LEVEL_CAP ? `LV ${_vcl}  —  ${_vcx} / ${xpNeeded} XP` : `LV ${_vcl}  MAX`, W / 2, 30);
+    ctx.fillStyle = _vtp > 0 ? '#ffd040' : '#666';
     ctx.font = 'bold 8px monospace';
-    ctx.fillText(talentPoints > 0 ? `${talentPoints} TALENT POINT${talentPoints > 1 ? 'S' : ''} UNSPENT` : 'No unspent points', W / 2, 42);
+    ctx.fillText(_vtp > 0 ? `${_vtp} SKILL POINT${_vtp > 1 ? 'S' : ''} UNSPENT` : 'No unspent points', W / 2, 42);
 
     // ── View toggle: TALENTS / ABILITIES ──────────────────────
     const toggleY = 46;
@@ -2957,7 +2986,7 @@
     ctx.fillStyle = charTreeTab === 'talents' ? '#5599ff' : '#222'; ctx.fillRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
     ctx.strokeStyle = '#5599ff'; ctx.lineWidth = 1; ctx.strokeRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
     ctx.fillStyle = charTreeTab === 'talents' ? '#000' : '#5599ff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
-    ctx.fillText('TALENTS', tlnBtn.x + tlnBtn.w/2, tlnBtn.y + 10);
+    ctx.fillText('SKILLS', tlnBtn.x + tlnBtn.w/2, tlnBtn.y + 10);
     ctx.fillStyle = charTreeTab === 'abilities' ? '#ffaa44' : '#222'; ctx.fillRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
     ctx.strokeStyle = '#ffaa44'; ctx.lineWidth = 1; ctx.strokeRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
     ctx.fillStyle = charTreeTab === 'abilities' ? '#000' : '#ffaa44'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
@@ -2992,16 +3021,24 @@
       const ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
       const ablX0 = Math.floor((W - totalAblW) / 2);
-      const ablY0 = 82;
-      // Skill point display
+      const ablY0 = 92; // cards start here (below class tabs at ~77)
+      // Clamp scroll
+      const ablTotalRows = Math.ceil(allAbl.length / ablPerRow);
+      const ablMaxScroll = Math.max(0, ablTotalRows * (cardH2 + gap2) - (H - ablY0 - 10));
+      charAbilScroll = Math.max(0, Math.min(ablMaxScroll, charAbilScroll));
+      // Skill point header — fixed, above scroll area
       ctx.fillStyle = (player && player.skillPoints > 0) ? '#aaffaa' : '#666';
       ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(player ? `Skill Points: ${player.skillPoints || 0}  (spend below to rank up)` : '', W / 2, ablY0 - 4);
+      ctx.fillText(player ? `Skill Points: ${player.skillPoints || 0}  — scroll to see all abilities` : 'Scroll to browse abilities', W / 2, ablY0 - 4);
+      // Clip cards to scroll area
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, ablY0 - 1, W, H - ablY0 + 1); ctx.clip();
       for (let ai = 0; ai < allAbl.length; ai++) {
         const adef = allAbl[ai];
         const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
         const ax = ablX0 + col * (cardW2 + gap2);
-        const ay = ablY0 + row * (cardH2 + gap2);
+        const ay = ablY0 + row * (cardH2 + gap2) - charAbilScroll;
+        if (ay + cardH2 < ablY0 || ay > H) continue; // outside scroll viewport, skip draw
         // Find if player owns this ability
         const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
         const curRank = owned2 ? (owned2.rank || 1) : 0;
@@ -3067,9 +3104,12 @@
           ctx.fillText('★MAX', ax + cardW2 - 11, ay + cardH2 - 6);
         }
       }
-      // Hint
-      ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('Hover ability card and click [+] to rank up (costs 1 Skill Point)', W / 2, ablY0 + 3 * (cardH2 + gap2) + 6);
+      ctx.restore(); // end clip
+      // Scroll indicator
+      if (ablMaxScroll > 0) {
+        ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('scroll ▼  ' + Math.round(charAbilScroll / ablMaxScroll * 100) + '%', W - 30, H - 8);
+      }
       drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
       ctx.textAlign = 'left';
       return; // skip talent tree rendering
@@ -3361,10 +3401,11 @@
     ctx.textAlign = 'center';
     ctx.fillText('★ PRIMARY STATS', W / 2, 30);
     // Unspent counter
-    if (charStatPoints > 0) {
+    const _scsp = ensureCP(charTreeClass).statPts;
+    if (_scsp > 0) {
       ctx.fillStyle = '#ff8844';
       ctx.font = 'bold 7px monospace';
-      ctx.fillText(charStatPoints + ' point' + (charStatPoints > 1 ? 's' : '') + ' unspent', W / 2, 42);
+      ctx.fillText(_scsp + ' point' + (_scsp > 1 ? 's' : '') + ' unspent', W / 2, 42);
     } else {
       ctx.fillStyle = '#444';
       ctx.font = '7px monospace';
@@ -3416,7 +3457,7 @@
 
       // [+] button
       const addX = col3, addY = ry + 4;
-      const canAdd = charStatPoints > 0;
+      const canAdd = ensureCP(charTreeClass).statPts > 0;
       const hovAdd = mouseX >= addX && mouseX < addX + btnW && mouseY >= addY && mouseY < addY + btnH;
       ctx.fillStyle = canAdd ? (hovAdd ? '#44aa44' : '#226622') : '#1a1a1a';
       ctx.fillRect(addX, addY, btnW, btnH);
@@ -3440,14 +3481,16 @@
       if (mouseClicked) {
         if (hovAdd && canAdd) {
           st[def.id] = (st[def.id] || 0) + 1;
-          charStatPoints--;
+          ensureCP(charTreeClass).statPts--;
+          charStatPoints = ensureCP(charTreeClass).statPts;
           if (player) { applyPrimaryStatsToPlayer(player); player.recomputeStats(); }
           saveData();
           Sfx.uiClick && Sfx.uiClick();
         }
         if (hovSub && canSub) {
           st[def.id]--;
-          charStatPoints++;
+          ensureCP(charTreeClass).statPts++;
+          charStatPoints = ensureCP(charTreeClass).statPts;
           if (player) { applyPrimaryStatsToPlayer(player); player.recomputeStats(); }
           saveData();
           Sfx.uiClick && Sfx.uiClick();
@@ -5249,6 +5292,10 @@
     return (state === STATE.CHAR_SCREEN || (state === STATE.INVENTORY && inventoryTab === 2))
       && charTreeTab === 'talents';
   }
+  function isAbilView() {
+    return (state === STATE.CHAR_SCREEN || (state === STATE.INVENTORY && inventoryTab === 1))
+      && charTreeTab === 'abilities';
+  }
   function fitTreeView() {
     const tree = TALENT_TREES[charTreeClass];
     if (!tree || !tree.nodes.length) return;
@@ -5277,11 +5324,12 @@
       const viewAbl = classAbilities(charTreeClass);
       const cardW2 = 116, cardH2 = 110, gap2 = 8, ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
-      const ablX0 = Math.floor((W - totalAblW) / 2), ablY0 = 82;
+      const ablX0 = Math.floor((W - totalAblW) / 2), ablY0 = 92;
       for (let ai = 0; ai < viewAbl.length; ai++) {
         const adef = viewAbl[ai];
         const col = ai % ablPerRow, row = Math.floor(ai / ablPerRow);
-        const ax = ablX0 + col * (cardW2 + gap2), ay = ablY0 + row * (cardH2 + gap2);
+        const ax = ablX0 + col * (cardW2 + gap2), ay = ablY0 + row * (cardH2 + gap2) - charAbilScroll;
+        if (ay + cardH2 < ablY0 || ay > H) continue;
         const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
         if (isHovering(btnX, btnY, 18, 12)) {
           const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;

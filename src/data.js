@@ -9,7 +9,7 @@
 // ============================================================
 const STASH_SIZE_INIT = 10;
 const SAVE_KEY = 'slayers-save';
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 2;
 const TRIAL_MAX_TIER = 5;
 const TRIAL_MULT = { 1: 1.5, 2: 2.0, 3: 2.7, 4: 3.6, 5: 5.0 };
 
