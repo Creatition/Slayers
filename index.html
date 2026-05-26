@@ -81,7 +81,7 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15, PAUSED: 16 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15, PAUSED: 16, CHAR_MENU: 17 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
@@ -166,16 +166,13 @@
   function awardRunXp(wavesCompleted, bossesKilled, victory) {
     const cid = selectedClassId;
     const cp = ensureCP(cid);
-    if (cp.level >= CHAR_LEVEL_CAP) { saveData(); return; }
     let xp = wavesCompleted * 8 + bossesKilled * 30 + (victory ? 80 : 0);
-    cp.xp += xp;
-    while (cp.xp >= charXpToNext(cp.level) && cp.level < CHAR_LEVEL_CAP) {
-      cp.xp -= charXpToNext(cp.level);
-      cp.level++;
-      cp.treePts++;
-      cp.statPts++;
+    // Levels come from in-run pickLevelUp; XP is stored for display only
+    if (cp.level < CHAR_LEVEL_CAP) {
+      cp.xp += xp;
+      const xpCap = charXpToNext(cp.level);
+      if (cp.xp >= xpCap) cp.xp = xpCap - 1; // bar fills to just-under-cap until next in-run level
     }
-    if (cp.level >= CHAR_LEVEL_CAP) cp.xp = 0;
     // Sync run-time globals
     charLevel = cp.level; charXp = cp.xp; treePoints = cp.treePts; charStatPoints = cp.statPts;
     startXpVacuum(xp);  // vacuum ground gems
@@ -1495,13 +1492,15 @@
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
     if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Ability Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
-    // Award persistent skill-tree + stat points every level-up
+    // Award persistent character level + skill-tree + stat points every in-run level-up
     { const _lcp = ensureCP(selectedClassId);
       if (_lcp.level < CHAR_LEVEL_CAP) {
+        _lcp.level++;
         _lcp.treePts++; _lcp.statPts++;
-        treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
-        spawnDamageNumber(player.x, player.y - 36, '+1 Skill Tree Pt', { color: '#ffd040', size: 9, vy: -42, life: 1.6 });
-        spawnDamageNumber(player.x, player.y - 46, '+1 Stat Pt',       { color: '#ff8844', size: 9, vy: -34, life: 1.6 });
+        charLevel = _lcp.level; treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
+        spawnDamageNumber(player.x, player.y - 28, `▲ LV ${_lcp.level}`, { color: '#ffdd44', size: 12, vy: -60, life: 2.0 });
+        spawnDamageNumber(player.x, player.y - 42, '+1 Skill Tree Pt',   { color: '#ffd040', size: 9,  vy: -42, life: 1.6 });
+        spawnDamageNumber(player.x, player.y - 52, '+1 Stat Pt',         { color: '#ff8844', size: 9,  vy: -34, life: 1.6 });
         saveData();
       }
     }
@@ -1856,19 +1855,15 @@
   }
   function pickClass(classId) {
     selectedClassId = classId;
+    // Sync globals from this class's persistent progress
+    { const _cp = ensureCP(classId); charLevel = _cp.level; charXp = _cp.xp; treePoints = _cp.treePts; charStatPoints = _cp.statPts; }
+    state = STATE.CHAR_MENU;
+  }
+  function startRunFromMenu() {
     if (runMode === 'trial') {
-      // Go to loadout screen first
-      resetWorld();          // sets up empty player
-      if (charLevel < CHAR_LEVEL_CAP) {
-        // Trials locked until max char level
-      } else {
-        if (charLevel >= CHAR_LEVEL_CAP) {
-        state = STATE.TRIAL_LOADOUT;
-      } else {
-        // Show a message — trials unlock at max level
-      }
-      }
+      resetWorld();
       loadout = {};
+      state = STATE.TRIAL_LOADOUT;
     } else {
       resetWorld();
       state = STATE.PLAYING;
@@ -3400,6 +3395,73 @@
       ctx.fillText('↺ RESET ALL', W - 58, H - 13);
     }
     drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
+    ctx.textAlign = 'left';
+  }
+
+  // ── CHAR MENU — post-class-select hub ───────────────────────────────────────
+  function drawCharMenuScreen() {
+    ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+    const cl = getClassById(selectedClassId);
+    const cp = ensureCP(selectedClassId);
+
+    // Background accent — vertical class-color stripe
+    ctx.fillStyle = cl.color + '18';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Class name + level ─────────────────────────────────────
+    ctx.textAlign = 'center';
+    ctx.fillStyle = cl.color; ctx.font = 'bold 28px monospace';
+    ctx.fillText(cl.name.toUpperCase(), W / 2, 52);
+    ctx.fillStyle = '#888'; ctx.font = '10px monospace';
+    ctx.fillText(`LEVEL ${cp.level}  ·  ${cp.xp} XP`, W / 2, 68);
+
+    // XP bar
+    const xpPct = cp.level < CHAR_LEVEL_CAP ? cp.xp / charXpToNext(cp.level) : 1;
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(W/2 - 140, 74, 280, 8);
+    ctx.fillStyle = cl.color;  ctx.fillRect(W/2 - 140, 74, Math.floor(280 * xpPct), 8);
+    ctx.strokeStyle = '#333';  ctx.lineWidth = 1; ctx.strokeRect(W/2 - 140, 74, 280, 8); ctx.lineWidth = 1;
+
+    // Unspent points hint
+    const utp = cp.treePts, usp = player ? (player.skillPoints || 0) : 0;
+    const hints = [];
+    if (utp > 0) hints.push(`${utp} Skill Pt${utp > 1 ? 's' : ''}`);
+    if (usp > 0) hints.push(`${usp} Ability Pt${usp > 1 ? 's' : ''}`);
+    if (hints.length > 0) {
+      ctx.fillStyle = '#ffd040'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(`✦ ${hints.join('  ·  ')} unspent`, W / 2, 92);
+    }
+
+    // ── Menu buttons ───────────────────────────────────────────
+    const btnW = 200, btnH = 36, gap = 12;
+    const totalH = 4 * btnH + 3 * gap;
+    const btnX = W / 2 - btnW / 2;
+    const btnY0 = H / 2 - totalH / 2 + 10;
+
+    const buttons = [
+      { label: '▶  START RUN',   color: cl.color,  desc: `Begin a ${runMode === 'trial' ? 'Trial' : 'Standard'} run` },
+      { label: '⚙  MODE',        color: '#6688cc', desc: runMode === 'trial' ? `Trial Mode (Tier ${trialTier})` : 'Standard Mode' },
+      { label: '◈  UPGRADES',    color: '#aa88ff', desc: 'Skill tree · Abilities · Stats' },
+      { label: '⌂  HUB',         color: '#44cc88', desc: 'Blacksmith · Stash · Gems' },
+    ];
+
+    for (let i = 0; i < buttons.length; i++) {
+      const bx = btnX, by = btnY0 + i * (btnH + gap);
+      const hov = isHovering(bx, by, btnW, btnH);
+      ctx.fillStyle = hov ? buttons[i].color + '44' : '#0e0e1a';
+      ctx.fillRect(bx, by, btnW, btnH);
+      ctx.strokeStyle = hov ? buttons[i].color : buttons[i].color + '66';
+      ctx.lineWidth = hov ? 2 : 1;
+      ctx.strokeRect(bx, by, btnW, btnH); ctx.lineWidth = 1;
+      ctx.fillStyle = hov ? buttons[i].color : buttons[i].color + 'bb';
+      ctx.font = `bold 11px monospace`; ctx.textAlign = 'center';
+      ctx.fillText(buttons[i].label, bx + btnW / 2, by + 15);
+      ctx.fillStyle = '#555'; ctx.font = '7px monospace';
+      ctx.fillText(buttons[i].desc, bx + btnW / 2, by + 28);
+    }
+
+    // ← Back to class select
+    ctx.fillStyle = '#333'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('◄ ESC  back to class select', 10, H - 10);
     ctx.textAlign = 'left';
   }
 
@@ -6130,6 +6192,43 @@
         }
       }
     }
+    else if (state === STATE.CHAR_MENU) {
+      updateVirtualCursor(dt);
+      if (gpJustPressed.has(0)) mouseClicked = true;
+      // ESC / B → back to class select
+      if (keyJustPressed.has('escape') || gpJustPressed.has(1)) {
+        state = STATE.CLASS_SELECT; return;
+      }
+      if (mouseClicked) {
+        const btnW = 200, btnH = 36, gap = 12;
+        const totalH = 4 * btnH + 3 * gap;
+        const btnX = W / 2 - btnW / 2;
+        const btnY0 = H / 2 - totalH / 2 + 10;
+        if (isHovering(btnX, btnY0,               btnW, btnH)) { startRunFromMenu(); Sfx.uiConfirm && Sfx.uiConfirm(); }
+        else if (isHovering(btnX, btnY0 + (btnH + gap),     btnW, btnH)) { cycleMode(); Sfx.uiClick && Sfx.uiClick(); }
+        else if (isHovering(btnX, btnY0 + (btnH + gap) * 2, btnW, btnH)) {
+          charTreeClass = selectedClassId; charTreeTab = 'tree'; charScreenTab = 0;
+          prevState = STATE.CHAR_MENU; state = STATE.CHAR_SCREEN; Sfx.uiClick && Sfx.uiClick();
+        }
+        else if (isHovering(btnX, btnY0 + (btnH + gap) * 3, btnW, btnH)) {
+          // Need a player shell for HUB — create one if not already present
+          if (!player) { resetWorld(); state = STATE.HUB; }
+          else state = STATE.HUB;
+          Sfx.uiClick && Sfx.uiClick();
+        }
+      }
+      // Keyboard shortcuts
+      if (keyJustPressed.has('enter') || keyJustPressed.has(' ')) startRunFromMenu();
+      if (keyJustPressed.has('m')) { cycleMode(); Sfx.uiClick && Sfx.uiClick(); }
+      if (keyJustPressed.has('u') || keyJustPressed.has('c')) {
+        charTreeClass = selectedClassId; charTreeTab = 'tree'; charScreenTab = 0;
+        state = STATE.CHAR_SCREEN;
+      }
+      if (keyJustPressed.has('h')) {
+        if (!player) { resetWorld(); }
+        state = STATE.HUB;
+      }
+    }
     else if (state === STATE.CLASS_SELECT) {
       // Tab or T key cycles mode
       if (keyJustPressed.has('t') || gpJustPressed.has(3)) cycleMode();
@@ -6182,7 +6281,9 @@
       updateVirtualCursor(dt);
       if (gpJustPressed.has(0)) mouseClicked = true;
       if (keyJustPressed.has('escape') || keyJustPressed.has('c') || gpJustPressed.has(1)) {
-        charScreenTab = 0; state = STATE.CLASS_SELECT;
+        charScreenTab = 0;
+        // Return to char menu if we came from there (not in a run)
+        state = (prevState === STATE.CHAR_MENU || prevState === STATE.CLASS_SELECT) ? STATE.CHAR_MENU : STATE.CLASS_SELECT;
       }
       // LB/RB cycle between skill tree and stat sheet
       if (gpJustPressed.has(4) || keyJustPressed.has('q')) {
@@ -6193,7 +6294,7 @@
         charScreenTab = (charScreenTab + 1) % 2;
         Sfx.uiClick && Sfx.uiClick();
       }
-      if (charScreenTab === 0) handleCharTreeClicks(() => { charScreenTab = 0; state = STATE.CLASS_SELECT; });
+      if (charScreenTab === 0) handleCharTreeClicks(() => { charScreenTab = 0; state = (prevState === STATE.CHAR_MENU || prevState === STATE.CLASS_SELECT) ? STATE.CHAR_MENU : STATE.CLASS_SELECT; });
     }
     else if (state === STATE.TRIAL_LOADOUT) {
       updateVirtualCursor(dt);
@@ -6603,6 +6704,7 @@
     else if (state === STATE.INVENTORY) drawInventoryScreen();
     else if (state === STATE.SHOP) drawShopScreen();
     else if (state === STATE.CLASS_SELECT) drawClassSelectScreen();
+    else if (state === STATE.CHAR_MENU) drawCharMenuScreen();
     else if (state === STATE.STASH_BANKING) drawStashBankingScreen();
     else if (state === STATE.TRIAL_LOADOUT) drawTrialLoadoutScreen();
     else if (state === STATE.ACT_TRANSITION) drawActTransitionScreen();
@@ -6614,7 +6716,8 @@
     if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP ||
         state === STATE.ABILITYDRAFT || state === STATE.TIERDRAFT || state === STATE.CLASS_SELECT ||
         state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT ||
-        state === STATE.CHAR_SCREEN || state === STATE.HUB || state === STATE.PAUSED) {
+        state === STATE.CHAR_SCREEN || state === STATE.HUB || state === STATE.PAUSED ||
+        state === STATE.CHAR_MENU) {
       drawVirtualCursor();
     }
 
