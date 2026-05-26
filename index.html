@@ -81,9 +81,12 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15, PAUSED: 16 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
+  let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
+  let pauseInSettings = false;
+  const gameSettings = { soundMuted: false, screenShake: true };
   let levelUpChoices = [];
   let abilityDraftChoices = [];
   let tierDraftChoices = []; // T1-T4 ability picks on boss kills
@@ -4770,6 +4773,138 @@
     ctx.textAlign = 'left';
   }
 
+  // ============================================================
+  // PAUSE MENU
+  // ============================================================
+  function drawPauseScreen() {
+    // World is still visible underneath — just dim it
+    ctx.fillStyle = 'rgba(0,0,0,0.60)';
+    ctx.fillRect(0, 0, W, H);
+
+    const cx = W / 2, cy = H / 2;
+    const pw = 200, ph = pauseInSettings ? 128 : 116;
+    const px = cx - pw / 2, py = cy - ph / 2;
+
+    // Panel bg + border
+    ctx.fillStyle = '#0e0e18';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = '#8855ff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, pw - 2, ph - 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#4433aa';
+    ctx.strokeRect(px + 3, py + 3, pw - 6, ph - 6);
+
+    ctx.textAlign = 'center';
+
+    if (!pauseInSettings) {
+      // ── Main pause panel ──────────────────────────────────────
+      ctx.fillStyle = '#ccaaff';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText('PAUSED', cx, py + 22);
+
+      // Divider
+      ctx.strokeStyle = '#2a2a44'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px + 12, py + 30); ctx.lineTo(px + pw - 12, py + 30); ctx.stroke();
+
+      const opts = ['CONTINUE', 'SETTINGS', 'QUIT TO MENU'];
+      const optColors = ['#66ffaa', '#aaaaff', '#ff8866'];
+      const optY = [py + 52, py + 72, py + 92];
+
+      // Mouse hover detect
+      for (let i = 0; i < opts.length; i++) {
+        const hov = mouseX >= px && mouseX <= px + pw && mouseY >= optY[i] - 11 && mouseY <= optY[i] + 5;
+        if (hov) pauseMenuSel = i;
+        if (mouseClicked && hov) activatePauseOption(i);
+        const sel = pauseMenuSel === i;
+        ctx.fillStyle = sel ? optColors[i] : '#666688';
+        ctx.font = (sel ? 'bold ' : '') + '11px monospace';
+        ctx.fillText((sel ? '▶ ' : '  ') + opts[i], cx, optY[i]);
+      }
+
+      // Keyboard / gamepad nav
+      if (keyJustPressed.has('arrowup') || gpJustPressed.has(12))
+        pauseMenuSel = (pauseMenuSel + 2) % 3;
+      if (keyJustPressed.has('arrowdown') || gpJustPressed.has(13))
+        pauseMenuSel = (pauseMenuSel + 1) % 3;
+      if (keyJustPressed.has('enter') || keyJustPressed.has(' ') || gpJustPressed.has(0))
+        activatePauseOption(pauseMenuSel);
+
+      // Footer hint
+      ctx.fillStyle = '#44445a'; ctx.font = '7px monospace';
+      ctx.fillText('ESC / Start  →  continue', cx, py + ph - 8);
+
+    } else {
+      // ── Settings sub-panel ───────────────────────────────────
+      ctx.fillStyle = '#ccaaff';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText('SETTINGS', cx, py + 22);
+
+      ctx.strokeStyle = '#2a2a44'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px + 12, py + 30); ctx.lineTo(px + pw - 12, py + 30); ctx.stroke();
+
+      const rows = [
+        { label: 'Sound',        val: Sfx.muted ? 'MUTED' : 'ON',  col: Sfx.muted ? '#ff6666' : '#66ff88' },
+        { label: 'Screen Shake', val: gameSettings.screenShake ? 'ON' : 'OFF', col: gameSettings.screenShake ? '#66ff88' : '#ff6666' },
+      ];
+      const rowY = [py + 52, py + 72, py + 96];
+
+      for (let i = 0; i < 2; i++) {
+        const hov = mouseX >= px && mouseX <= px + pw && mouseY >= rowY[i] - 11 && mouseY <= rowY[i] + 5;
+        if (hov) pauseMenuSel = i;
+        if (mouseClicked && hov) activateSettingsOption(i);
+        const sel = pauseMenuSel === i;
+        ctx.fillStyle = sel ? '#ffdd66' : '#888899';
+        ctx.font = (sel ? 'bold ' : '') + '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText((sel ? '▶ ' : '  ') + rows[i].label, px + 18, rowY[i]);
+        ctx.fillStyle = rows[i].col;
+        ctx.textAlign = 'right';
+        ctx.fillText(rows[i].val, px + pw - 14, rowY[i]);
+        ctx.textAlign = 'center';
+      }
+
+      // BACK button
+      {
+        const i = 2;
+        const hov = mouseX >= px && mouseX <= px + pw && mouseY >= rowY[i] - 11 && mouseY <= rowY[i] + 5;
+        if (hov) pauseMenuSel = i;
+        if (mouseClicked && hov) activateSettingsOption(i);
+        const sel = pauseMenuSel === i;
+        ctx.fillStyle = sel ? '#ffdd66' : '#666688';
+        ctx.font = (sel ? 'bold ' : '') + '10px monospace';
+        ctx.fillText((sel ? '◀ ' : '  ') + 'BACK', cx, rowY[i]);
+      }
+
+      if (keyJustPressed.has('arrowup') || gpJustPressed.has(12))
+        pauseMenuSel = (pauseMenuSel + 2) % 3;
+      if (keyJustPressed.has('arrowdown') || gpJustPressed.has(13))
+        pauseMenuSel = (pauseMenuSel + 1) % 3;
+      if (keyJustPressed.has('enter') || keyJustPressed.has(' ') || gpJustPressed.has(0))
+        activateSettingsOption(pauseMenuSel);
+      // ESC / B button goes back
+      if ((keyJustPressed.has('escape') || gpJustPressed.has(1)) && pauseInSettings) {
+        pauseInSettings = false; pauseMenuSel = 1;
+      }
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  function activatePauseOption(i) {
+    Sfx.uiClick && Sfx.uiClick();
+    if (i === 0) { state = STATE.PLAYING; }
+    else if (i === 1) { pauseInSettings = true; pauseMenuSel = 0; }
+    else if (i === 2) { state = STATE.CLASS_SELECT; }
+  }
+
+  function activateSettingsOption(i) {
+    Sfx.uiClick && Sfx.uiClick();
+    if (i === 0) { Sfx.toggleMute(); }
+    else if (i === 1) { gameSettings.screenShake = !gameSettings.screenShake; }
+    else if (i === 2) { pauseInSettings = false; pauseMenuSel = 1; }
+  }
+
   function drawParagonScreen() {
     const W = 640, H = 360;
     ctx.fillStyle = '#0d0d14'; ctx.fillRect(0, 0, W, H);
@@ -4860,8 +4995,12 @@
     // Global audio mute toggle (M key) — works in any state.
     if (keyJustPressed.has('m')) Sfx.toggleMute();
 
-    if ((keyJustPressed.has('tab') || keyJustPressed.has('i') ||
-         gpJustPressed.has(8) || gpJustPressed.has(9)) &&
+    // Pause toggle: ESC or gamepad Start (9) while playing/paused
+    if ((keyJustPressed.has('escape') || gpJustPressed.has(9)) && state === STATE.PLAYING) {
+      state = STATE.PAUSED; pauseMenuSel = 0; pauseInSettings = false;
+    } else if ((keyJustPressed.has('escape') || gpJustPressed.has(9)) && state === STATE.PAUSED && !pauseInSettings) {
+      state = STATE.PLAYING;
+    } else if ((keyJustPressed.has('tab') || keyJustPressed.has('i') || gpJustPressed.has(8)) &&
         (state === STATE.PLAYING || state === STATE.INVENTORY)) {
       toggleInventory();
     } else if (keyJustPressed.has('escape') && state === STATE.INVENTORY) {
@@ -5482,7 +5621,7 @@
     shake *= 0.85; if (shake < 0.05) shake = 0;
 
     ctx.save();
-    if (shake > 0 && state !== STATE.INVENTORY && state !== STATE.SHOP) {
+    if (shake > 0 && gameSettings.screenShake && state !== STATE.INVENTORY && state !== STATE.SHOP) {
       const sx = (Math.random() - 0.5) * shake * 2;
       const sy = (Math.random() - 0.5) * shake * 2;
       ctx.translate(sx, sy);
@@ -5520,6 +5659,7 @@
 
     drawHud();
     if (state === STATE.PLAYING) drawAbilityBar();
+    else if (state === STATE.PAUSED) drawPauseScreen();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
     else if (state === STATE.TIERDRAFT) drawTierDraftScreen();
@@ -5539,7 +5679,7 @@
     if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP ||
         state === STATE.ABILITYDRAFT || state === STATE.TIERDRAFT || state === STATE.CLASS_SELECT ||
         state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT ||
-        state === STATE.CHAR_SCREEN || state === STATE.HUB) {
+        state === STATE.CHAR_SCREEN || state === STATE.HUB || state === STATE.PAUSED) {
       drawVirtualCursor();
     }
 
