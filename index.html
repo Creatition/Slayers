@@ -935,8 +935,9 @@
         const _uIds = ['deathwhisper','soulreaper','razorwind','eclipse','bonecage','heartseeker','shadowcloak','stormrider'];
         const _uid = _uIds[Math.floor(Math.random() * _uIds.length)];
         itemDrops.push(new ItemDrop(e.x - 14, e.y, generateUniqueItem(_uid)));
-        itemDrops.push(new ItemDrop(e.x,      e.y, generateItemMinRarity('orange')));
-        itemDrops.push(new ItemDrop(e.x + 14, e.y, generateItemMinRarity('yellow')));
+        const _uniILvl = waveItemLevel(currentWave, charLevel);
+        itemDrops.push(new ItemDrop(e.x,      e.y, generateItemMinRarity('orange', _uniILvl)));
+        itemDrops.push(new ItemDrop(e.x + 14, e.y, generateItemMinRarity('yellow', _uniILvl)));
         const g = rngInt(50, 90); player.gold += g; goldFlashTimer = 0.8;
         // Guaranteed gem drop
         if (typeof rollGemDrop === 'function') {
@@ -951,8 +952,9 @@
       } else if (eliteTier === 'legendary') {
         // Legendary: orange + yellow drop, gem guaranteed, huge XP + gold
         for (let i = 0; i < 10; i++) xpGems.push(new XPGem(e.x + rngInt(-14,14), e.y + rngInt(-14,14), 3));
-        itemDrops.push(new ItemDrop(e.x - 10, e.y, generateItemMinRarity('orange')));
-        itemDrops.push(new ItemDrop(e.x + 10, e.y, generateItemMinRarity('yellow')));
+        const _legILvl = waveItemLevel(currentWave, charLevel);
+        itemDrops.push(new ItemDrop(e.x - 10, e.y, generateItemMinRarity('orange', _legILvl)));
+        itemDrops.push(new ItemDrop(e.x + 10, e.y, generateItemMinRarity('yellow', _legILvl)));
         const g = rngInt(22, 45); player.gold += g; goldFlashTimer = 0.8;
         if (typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
@@ -966,7 +968,7 @@
       } else if (eliteTier === 'rare') {
         // Rare: yellow drop guaranteed, 35% gem, XP ×5, gold
         for (let i = 0; i < 5; i++) xpGems.push(new XPGem(e.x + rngInt(-8,8), e.y + rngInt(-8,8), 2));
-        itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('yellow')));
+        itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('yellow', waveItemLevel(currentWave, charLevel))));
         const g = rngInt(8, 18); player.gold += g; goldFlashTimer = 0.8;
         shake = Math.min(shake + 2, 6);
         if (Math.random() < 0.35 && typeof rollGemDrop === 'function') {
@@ -979,9 +981,9 @@
       } else {
         // Magic: guaranteed green+ drop, XP ×3, small gold
         for (let i = 0; i < 3; i++) xpGems.push(new XPGem(e.x + rngInt(-6,6), e.y + rngInt(-6,6), 2));
-        let magicDrop = generateItem();
-        for (let _t = 0; _t < 7 && magicDrop.rarity.id === 'white'; _t++) magicDrop = generateItem();
-        itemDrops.push(new ItemDrop(e.x, e.y, magicDrop));
+        // Magic elite: wave-scaled drop (early waves may still give blue, late waves give yellow+)
+        const _magicILvl = Math.max(8, waveItemLevel(currentWave, charLevel));
+        itemDrops.push(new ItemDrop(e.x, e.y, generateItem(_magicILvl)));
         const g = rngInt(4, 10); player.gold += g; goldFlashTimer = 0.8;
         if (Math.random() < 0.12 && typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
@@ -994,7 +996,7 @@
     } else {
       // Normal: 1 XP gem, 18% item chance, small gold
       xpGems.push(new XPGem(e.x, e.y, 1));
-      if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem()));
+      if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem(waveItemLevel(currentWave, charLevel))));
       const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
       // 5% chance to drop a gem from normal enemy
       if (Math.random() < 0.05 && typeof rollGemDrop === 'function') {
@@ -1012,7 +1014,7 @@
       const uid = UNIQUE_ITEMS[rngInt(0, UNIQUE_ITEMS.length - 1)].id;
       itemDrops.push(new ItemDrop(e.x - 12, e.y, generateUniqueItem(uid)));
     }
-    itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('orange')));
+    itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('orange', waveItemLevel(currentWave, charLevel))));
     // Boss always drops a gem (40%)
     if (Math.random() < 0.40 && typeof rollGemDrop === 'function') {
       const gd = rollGemDrop(charLevel);
@@ -1829,7 +1831,7 @@
     state = STATE.SHOP;
     shopRefreshCost = 5;
     shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'ranger'));
+    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'ranger', waveItemLevel(currentWave, charLevel)));
     selectedInvIdx = -1;
   }
   // Returns act info for the act the given wave belongs to.
@@ -2284,7 +2286,7 @@
     player.gold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
     for (let i = 0; i < 4; i++) {
-      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'ranger');
+      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'ranger', waveItemLevel(currentWave, charLevel));
     }
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();
@@ -3820,9 +3822,10 @@
       ctx.fillText('Requires server.js running', rx+rW/2, jBtnY + oBtnH + 10);
     }
 
-    // ESC hint
+    // Back button + ESC hint
+    drawButton(8, H - 22, 78, 16, '◄ BACK', true, '#556688');
     ctx.fillStyle = '#333'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('◄ ESC  class select', 8, H - 8);
+    ctx.fillText('ESC / click', 8, H - 6);
     ctx.textAlign = 'left';
   }
 
@@ -5899,6 +5902,51 @@
       }
     }
 
+    // ── FORGE PANEL (right column, below socket detail) ──────────────────────
+    const fgX = 225, fgY = 190, fgW = 205;
+    ctx.fillStyle = '#1a1410'; ctx.fillRect(fgX, fgY, fgW, 148);
+    ctx.strokeStyle = '#ff8844'; ctx.lineWidth = 1; ctx.strokeRect(fgX, fgY, fgW, 148); ctx.lineWidth = 1;
+    ctx.fillStyle = '#ff8844'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('⚒  FORGE', fgX + fgW / 2, fgY + 12);
+    ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+    ctx.fillText('Consume materials to forge random gear', fgX + fgW / 2, fgY + 22);
+
+    const FORGE_RECIPES = [
+      { label: 'COMMON',    matId: 'bone',     cost: 5, minRarity: 'white',  color: '#cccccc' },
+      { label: 'MAGIC',     matId: 'arcane',   cost: 3, minRarity: 'blue',   color: '#5599ff' },
+      { label: 'RARE',      matId: 'essence',  cost: 2, minRarity: 'yellow', color: '#ffcc33' },
+      { label: 'LEGENDARY', matId: 'fragment', cost: 1, minRarity: 'orange', color: '#ff8000' },
+    ];
+    const frBtnH = 24, frBtnGap = 5;
+    for (let ri = 0; ri < FORGE_RECIPES.length; ri++) {
+      const rec = FORGE_RECIPES[ri];
+      const fy = fgY + 30 + ri * (frBtnH + frBtnGap);
+      const have = player.mats[rec.matId] || 0;
+      const canForge = have >= rec.cost;
+      const fHov = canForge && isHovering(fgX + 6, fy, fgW - 12, frBtnH);
+      ctx.fillStyle = fHov ? rec.color + '28' : (canForge ? '#12100e' : '#0d0c0b');
+      ctx.fillRect(fgX + 6, fy, fgW - 12, frBtnH);
+      ctx.strokeStyle = canForge ? rec.color + (fHov ? 'dd' : '66') : '#2a2a2a';
+      ctx.lineWidth = fHov ? 2 : 1; ctx.strokeRect(fgX + 6, fy, fgW - 12, frBtnH); ctx.lineWidth = 1;
+      // Label
+      ctx.fillStyle = canForge ? rec.color : '#3a3a3a';
+      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(rec.label, fgX + 12, fy + 10);
+      // Cost
+      ctx.fillStyle = canForge ? '#aaa' : '#444';
+      ctx.font = '7px monospace';
+      ctx.fillText(`${rec.cost} ${MAT_LABELS[rec.matId]}`, fgX + 12, fy + 20);
+      // Have count
+      ctx.fillStyle = canForge ? '#ffd040' : '#555';
+      ctx.textAlign = 'right';
+      ctx.fillText(`Have: ${have}`, fgX + fgW - 12, fy + 15);
+      // Store hitbox on recipe object for click detection
+      rec._fy = fy; rec._fCanForge = canForge;
+    }
+    // Store recipes on screen for click handler
+    ctx._forgeRecipes = FORGE_RECIPES;
+    ctx.textAlign = 'left';
+
     drawButton(8, 8, 70, 16, '← BACK', true, '#888');
     ctx.textAlign = 'left';
   }
@@ -6813,6 +6861,8 @@
       if (gpJustPressed.has(0)) mouseClicked = true;
       if (keyJustPressed.has('escape') || gpJustPressed.has(1)) { state = STATE.CLASS_SELECT; return; }
       if (mouseClicked) {
+        // Back button
+        if (isHovering(8, H - 22, 78, 16)) { state = STATE.CLASS_SELECT; Sfx.uiClick && Sfx.uiClick(); return; }
         const lW = Math.floor(W * 0.56);
         const btnW = 180, btnH = 34, gap = 10;
         const bx = lW / 2 - btnW / 2, by0 = 95;
@@ -7239,6 +7289,35 @@
                 player.gold -= 50;
                 saveData();
                 spawnDamageNumber(W/2, H/2, 'SOCKET ADDED', { color: '#ff8844', size: 12, vy: -50, life: 1.5 });
+              }
+            }
+          }
+          // Forge click handler
+          if (ctx._forgeRecipes) {
+            const fgX = 225, fgW = 205, frBtnH = 24, frBtnGap = 5;
+            for (let ri = 0; ri < ctx._forgeRecipes.length; ri++) {
+              const rec = ctx._forgeRecipes[ri];
+              if (rec._fCanForge && rec._fy !== undefined && isHovering(fgX + 6, rec._fy, fgW - 12, frBtnH)) {
+                // Consume materials and forge item
+                player.mats[rec.matId] -= rec.cost;
+                const forged = generateItemForClass(player.class.id, waveItemLevel(currentWave, charLevel));
+                // If result is below the minimum rarity, upgrade it
+                const _order = { white: 0, blue: 1, yellow: 2, orange: 3, green: 4 };
+                let _item = forged;
+                if (_order[_item.rarity.id] < _order[rec.minRarity]) {
+                  _item = generateItemMinRarity(rec.minRarity, waveItemLevel(currentWave, charLevel));
+                }
+                if (player.inventory.length < player.INVENTORY_CAP) {
+                  player.inventory.push(_item);
+                  spawnDamageNumber(W/2, H/2 - 20, `⚒ FORGED ${rec.label}!`, { color: rec.color || '#ff8844', size: 13, vy: -55, life: 2.0 });
+                } else {
+                  // Inventory full — drop at player feet
+                  if (typeof ItemDrop !== 'undefined') itemDrops.push(new ItemDrop(player.x, player.y, _item));
+                  spawnDamageNumber(W/2, H/2 - 20, '⚒ FORGED (inv full!)', { color: '#ff4444', size: 11, vy: -50, life: 1.8 });
+                }
+                Sfx.uiConfirm && Sfx.uiConfirm();
+                saveData();
+                break;
               }
             }
           }

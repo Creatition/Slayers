@@ -124,6 +124,16 @@ function _tagItem(item, iLvl) {
     item.legendaryEffectId = rngPick(LEGENDARY_EFFECTS).id;
   return item;
 }
+// Compute effective item level from wave (1-20) + charLevel (1-40).
+// Wave drives 70% of iLvl, charLevel the other 30%.
+// Wave 1, charLvl 1  → iLvl ~1   (almost always white/blue)
+// Wave 10, charLvl 10 → iLvl ~15  (blue/yellow common, orange rare)
+// Wave 20, charLvl 40 → iLvl 40   (full drop table)
+function waveItemLevel(wave, charLvl) {
+  const wPct = Math.max(0, Math.min(1, (wave - 1) / 19));
+  const lPct = Math.max(0, Math.min(1, ((charLvl || 1) - 1) / 39));
+  return Math.max(1, Math.round((wPct * 0.7 + lPct * 0.3) * 40));
+}
 function generateItem(iLvl) {
   if (iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
   iLvl = Math.max(1, Math.min(40, iLvl));
@@ -158,7 +168,7 @@ const CLASS_PREFERRED_BASES = {
   druid:       ['staff','orb','ring','amulet','boots'],
   amazonian:   ['bow','quiver','ring','amulet','gloves'],
 };
-function generateItemForClass(classId) {
+function generateItemForClass(classId, iLvl) {
   const preferred = CLASS_PREFERRED_BASES[classId] || [];
   // 55% chance to pick from preferred bases (if any)
   let base;
@@ -168,7 +178,7 @@ function generateItemForClass(classId) {
   } else {
     base = rngPick(ITEM_BASES);
   }
-  if (typeof iLvl === 'undefined' || iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
+  if (iLvl === undefined) iLvl = typeof charLevel !== 'undefined' ? charLevel : 1;
   iLvl = Math.max(1, Math.min(40, iLvl));
   const rarity = pickWeightedRarity(iLvl);
   const count = rngInt(rarity.affixMin, rarity.affixMax);
