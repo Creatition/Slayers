@@ -653,6 +653,19 @@ class Player {
         }
       }
     }
+    // ── Primary stat contributions ───────────────────────────
+    // Set by applyPrimaryStatsToPlayer() at run start / on allocation change
+    const _pStr = this.primaryStr || 0;
+    const _pDex = this.primaryDex || 0;
+    const _pInt = this.primaryInt || 0;
+    const _pVit = this.primaryVit || 0;
+    const _pSpi = this.primarySpi || 0;
+    if (_pStr) { this.bonusDmgPct += _pStr * 3;  this.bonusMaxHp += _pStr * 5; }
+    if (_pDex) { this.bonusCritChance += _pDex * 1; this.bonusFireRatePct += _pDex * 1; }
+    if (_pInt) { this.bonusMaxResource += _pInt * 4; this.abilityCostMult *= Math.max(0.5, 1 - _pInt * 0.02); }
+    if (_pVit) { this.bonusMaxHp += _pVit * 12; this.bonusRegen += _pVit * 0.4; this.bonusArmor += _pVit * 1.5; }
+    if (_pSpi) { this.bonusMaxResource += _pSpi * 3; this.bonusResourceRegen += _pSpi * 0.3; this.bonusDodge += _pSpi * 0.4; }
+    // ─────────────────────────────────────────────────────────
     const oldMax = this.maxHp;
     const ratio = oldMax > 0 ? this.hp / oldMax : 1;
     const oldMaxR = this.maxResource;

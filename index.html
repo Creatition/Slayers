@@ -134,7 +134,9 @@
   const CHAR_LEVEL_CAP = 40;
   let charLevel = 1;
   let charXp    = 0;
-  let talentPoints = 0;      // unspent points available to spend
+  let talentPoints    = 0;  // unspent skill-tree points
+  let charStatPoints  = 0;  // unspent primary-stat points (1 per charLevel)
+  let allocatedStats  = {}; // { [classId]: { str, dex, int, vit, spi } }
   let spentTalents = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
   let charTreeTab = 'talents'; // 'talents' or 'abilities'
@@ -157,6 +159,7 @@
       charXp -= charXpToNext(charLevel);
       charLevel++;
       talentPoints++;
+      charStatPoints++;
     }
     if (charLevel >= CHAR_LEVEL_CAP) charXp = 0;
     saveData();
@@ -212,6 +215,34 @@
     if (paragonLevel >= PARAGON_LEVEL_CAP) paragonXp = 0;
     saveData();
   }
+  // Primary stat definitions (for UI + scaling reference)
+  const PRIMARY_STATS = [
+    { id: 'str', label: 'STR', name: 'Strength',     color: '#ff6644',
+      desc: '+3% Dmg / +5 HP', detail: '+3% weapon dmg, +5 max HP' },
+    { id: 'dex', label: 'DEX', name: 'Dexterity',    color: '#44ddff',
+      desc: '+1% Crit / +1% Aspd', detail: '+1% crit chance, +1% attack speed' },
+    { id: 'int', label: 'INT', name: 'Intelligence', color: '#aa66ff',
+      desc: '+4 Resource / -2% Cost', detail: '+4 max resource, -2% ability cost (min 50%)' },
+    { id: 'vit', label: 'VIT', name: 'Vitality',     color: '#44ff88',
+      desc: '+12 HP / +0.4 Regen / +1.5 Armor', detail: '+12 max HP, +0.4 HP regen/s, +1.5 armor' },
+    { id: 'spi', label: 'SPI', name: 'Spirit',       color: '#ffdd44',
+      desc: '+3 Resource / +0.3 Regen / +0.4% Dodge', detail: '+3 max resource, +0.3 rsc regen/s, +0.4% dodge' },
+  ];
+
+  function getClassStats(classId) {
+    if (!allocatedStats[classId]) allocatedStats[classId] = { str:0, dex:0, int:0, vit:0, spi:0 };
+    return allocatedStats[classId];
+  }
+
+  function applyPrimaryStatsToPlayer(p) {
+    const st = getClassStats(p.class.id);
+    p.primaryStr = st.str;
+    p.primaryDex = st.dex;
+    p.primaryInt = st.int;
+    p.primaryVit = st.vit;
+    p.primarySpi = st.spi;
+  }
+
   function applyParagonToPlayer(p) {
     const CATS = ['offense','defense','utility','mastery'];
     const hasTrans = spentParagon['p_mst10'];
@@ -804,7 +835,8 @@
     lastBossName = e.name || 'Boss';
     bossDefeatedBannerTimer = 2.0;
     bossRef = null;
-    // Sweep the arena so nothing lingers behind the post-boss UI
+    // Vacuum all ground XP and loot (Brotato-style) — boss drops included
+    vacuumGroundLoot();
     enemies = enemies.filter(en => en.alive && en !== e);
     enemyProjectiles = [];
     groundEffects = [];
@@ -1301,11 +1333,12 @@
   // ============================================================
   // STATE TRANSITIONS
   // ============================================================
-  function endWave() {
-    // Vacuum: instantly collect all remaining XP gems and item drops on the field.
-    // XP gems grant their value; items auto-fill inventory or salvage to gold if full.
+  // Brotato-style vacuum: sweep all ground XP gems and items to player instantly.
+  // Call this at every wave/boss end before the state transition.
+  function vacuumGroundLoot() {
+    let xpTotal = 0;
     for (const gem of xpGems) {
-      if (!gem.dead) player.addXp(gem.value);
+      if (!gem.dead) { xpTotal += gem.value; player.addXp(gem.value); }
     }
     for (const drop of itemDrops) {
       if (!drop.dead) {
@@ -1314,13 +1347,22 @@
           lastLootName = drop.item.base ? (drop.item.base.name || 'Item') : 'Item';
           lootFlashTimer = 1.5;
         } else {
-          // Inventory full — salvage to gold
           player.gold += salvageGold(drop.item);
           goldFlashTimer = 0.8;
         }
       }
     }
     xpGems = []; itemDrops = [];
+    // Show a collected-XP floater if there was anything to pick up
+    if (xpTotal > 0) {
+      spawnDamageNumber(player.x, player.y - 28, '+' + xpTotal + ' XP', {
+        color: '#aaffaa', size: 10, vy: -48, life: 1.4
+      });
+    }
+  }
+
+  function endWave() {
+    vacuumGroundLoot();
     enemies = []; enemyProjectiles = []; projectiles = []; bossRef = null; groundEffects = [];
     runWavesCompleted++;
     Sfx.waveComplete();
@@ -1789,8 +1831,10 @@
       // Character progression
       charLevel    = Math.min(CHAR_LEVEL_CAP, data.charLevel    || 1);
       charXp       = data.charXp       || 0;
-      talentPoints = data.talentPoints || 0;
-      spentTalents = data.spentTalents || {};
+      talentPoints   = data.talentPoints   || 0;
+      spentTalents   = data.spentTalents   || {};
+      charStatPoints = data.charStatPoints || 0;
+      allocatedStats = data.allocatedStats || {};
       paragonLevel  = Math.min(PARAGON_LEVEL_CAP, data.paragonLevel  || 0);
       paragonXp     = data.paragonXp    || 0;
       paragonPoints = data.paragonPoints || 0;
@@ -1812,6 +1856,8 @@
         charXp,
         talentPoints,
         spentTalents,
+        charStatPoints,
+        allocatedStats,
         paragonLevel,
         paragonXp,
         paragonPoints,
@@ -1852,6 +1898,7 @@
       player.gems = savedGems.slice(0, player.GEM_CAP);
     }
     applyTalentsToPlayer(player); // apply persistent talent tree bonuses + abilities
+    applyPrimaryStatsToPlayer(player); // apply persistent primary stat allocations
     if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
@@ -2707,9 +2754,17 @@
     ctx.fillStyle = '#ffaa44'; ctx.globalAlpha = 0.3;
     ctx.fillRect(charBtnX + 2, charBtnY + 2, Math.floor(156 * lvlPct), 16);
     ctx.globalAlpha = 1;
-    if (talentPoints > 0) {
-      ctx.fillStyle = '#ffd040'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(`${talentPoints} POINT${talentPoints > 1 ? 'S' : ''} AVAILABLE`, charBtnX + 80, charBtnY + 30);
+    if (talentPoints > 0 || charStatPoints > 0) {
+      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+      if (talentPoints > 0) {
+        ctx.fillStyle = '#ffd040';
+        ctx.fillText(`${talentPoints} SKILL PT${talentPoints > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + 30);
+      }
+      if (charStatPoints > 0) {
+        ctx.fillStyle = '#ff8844';
+        const _syOff = talentPoints > 0 ? 40 : 30;
+        ctx.fillText(`${charStatPoints} STAT PT${charStatPoints > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + _syOff);
+      }
     }
     // HUB button
     drawButton(W - 170, 34, 75, 18, '⚒ HUB', true, '#aaaaff');
@@ -3226,7 +3281,121 @@
       ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
     }
   }
+  function drawStatsScreen() {
+    // Background
+    ctx.fillStyle = '#06060e';
+    ctx.fillRect(0, 0, W, H);
+    // Header
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 16, W, 30);
+    ctx.fillStyle = '#ffdd44';
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('★ PRIMARY STATS', W / 2, 30);
+    // Unspent counter
+    if (charStatPoints > 0) {
+      ctx.fillStyle = '#ff8844';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText(charStatPoints + ' point' + (charStatPoints > 1 ? 's' : '') + ' unspent', W / 2, 42);
+    } else {
+      ctx.fillStyle = '#444';
+      ctx.font = '7px monospace';
+      ctx.fillText('No unspent points — earn more by leveling your character', W / 2, 42);
+    }
+    // Class tag
+    if (player) {
+      ctx.fillStyle = player.class.color || '#aaa';
+      ctx.font = '7px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(player.class.name.toUpperCase(), W - 6, 30);
+      ctx.textAlign = 'left';
+    }
+
+    const st = player ? getClassStats(player.class.id) : { str:0, dex:0, int:0, vit:0, spi:0 };
+    const rowH = 44, startY = 52;
+    const btnW = 14, btnH = 12;
+    const col1 = 10, col2 = 52, col3 = W - 40;
+
+    for (let i = 0; i < PRIMARY_STATS.length; i++) {
+      const def = PRIMARY_STATS[i];
+      const val = st[def.id] || 0;
+      const ry  = startY + i * rowH;
+
+      // Row bg
+      ctx.fillStyle = i % 2 === 0 ? '#0d0d1a' : '#080812';
+      ctx.fillRect(0, ry, W, rowH - 2);
+
+      // Stat label badge
+      ctx.fillStyle = def.color;
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(def.label, col1 + 14, ry + 14);
+
+      // Stat name + description
+      ctx.fillStyle = '#cccccc';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(def.name, col2, ry + 10);
+      ctx.fillStyle = '#666688';
+      ctx.font = '7px monospace';
+      ctx.fillText(def.detail, col2, ry + 20);
+
+      // Current value (large)
+      ctx.fillStyle = val > 0 ? def.color : '#333';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(val, col3 - 18, ry + 18);
+
+      // [+] button
+      const addX = col3, addY = ry + 4;
+      const canAdd = charStatPoints > 0;
+      const hovAdd = mouseX >= addX && mouseX < addX + btnW && mouseY >= addY && mouseY < addY + btnH;
+      ctx.fillStyle = canAdd ? (hovAdd ? '#44aa44' : '#226622') : '#1a1a1a';
+      ctx.fillRect(addX, addY, btnW, btnH);
+      ctx.fillStyle = canAdd ? '#aaffaa' : '#333';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('+', addX + btnW / 2, addY + 9);
+
+      // [-] button
+      const subX = col3, subY = ry + 20;
+      const canSub = val > 0;
+      const hovSub = mouseX >= subX && mouseX < subX + btnW && mouseY >= subY && mouseY < subY + btnH;
+      ctx.fillStyle = canSub ? (hovSub ? '#aa4444' : '#662222') : '#1a1a1a';
+      ctx.fillRect(subX, subY, btnW, btnH);
+      ctx.fillStyle = canSub ? '#ffaaaa' : '#333';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('-', subX + btnW / 2, subY + 9);
+
+      // Click handlers
+      if (mouseClicked) {
+        if (hovAdd && canAdd) {
+          st[def.id] = (st[def.id] || 0) + 1;
+          charStatPoints--;
+          if (player) { applyPrimaryStatsToPlayer(player); player.recomputeStats(); }
+          saveData();
+          Sfx.uiClick && Sfx.uiClick();
+        }
+        if (hovSub && canSub) {
+          st[def.id]--;
+          charStatPoints++;
+          if (player) { applyPrimaryStatsToPlayer(player); player.recomputeStats(); }
+          saveData();
+          Sfx.uiClick && Sfx.uiClick();
+        }
+      }
+    }
+    // Footer hint
+    ctx.fillStyle = '#333355';
+    ctx.font = '6px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Changes apply immediately. Points refundable at any time.', W / 2, H - 4);
+    ctx.textAlign = 'left';
+  }
+
   function drawInventoryScreen() {
+    if (inventoryTab === 3) { drawStatsScreen(); drawInventoryTabBar(); return; }
     if (inventoryTab > 0) { drawCharScreen(); drawInventoryTabBar(); return; }
     ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
     drawInventoryTabBar();
@@ -5069,7 +5238,7 @@
 
   // ── Inventory tab bar overlay ─────────────────────────────────────────────
   function drawInventoryTabBar() {
-    const tabs = ['⚔ GEAR', '✦ ABILITIES', '◈ SKILL TREE'];
+    const tabs = ['⚔ GEAR', '✦ ABILITIES', '◈ SKILL TREE', '★ STATS'];
     const tw = Math.floor(W / tabs.length);
     ctx.fillStyle = '#07070f';
     ctx.fillRect(0, 0, W, 16);
@@ -5090,6 +5259,7 @@
         inventoryTab = i;
         charTreeTab = i === 1 ? 'abilities' : 'talents';
         if (player) charTreeClass = player.class.id;
+        charAbilScroll = 0;
         Sfx.uiClick && Sfx.uiClick();
       }
     }
