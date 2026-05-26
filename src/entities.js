@@ -502,6 +502,10 @@ class Player {
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
     this.bonusDodge = 0; this.bonusCritDmg = 0;
     this.bonusOverpowerChance = 0; this.bonusOverpowerMult = 0;
+    // Elemental resistances
+    this.bonusFireResist = 0; this.bonusColdResist = 0; this.bonusLightResist = 0; this.bonusPoisonResist = 0;
+    this.fireResist = 0; this.coldResist = 0; this.lightResist = 0; this.poisonResist = 0;
+    this.primaryStatDmgMult = 1.0;
     this.maxHp = this.baseMaxHp; this.hp = this.maxHp;
     this.dmgMult = 1.0; this.fireRateMult = 1.0;
     this.pickupRange = this.basePickupRange; this.speed = this.baseSpeed;
@@ -592,7 +596,7 @@ class Player {
     return s;
   }
   effectiveDmgMult() {
-    let d = this.dmgMult;
+    let d = this.dmgMult * (this.primaryStatDmgMult || 1.0);
     if (this.bigBadVoodooTimer > 0) d *= 1.35;
     if (this.rageTimer > 0 && this.rageDmgBonus) d *= (1 + this.rageDmgBonus);
     if (this.bloodTideTimer > 0 && this.bloodTideDmgBonus) d *= (1 + this.bloodTideDmgBonus);
@@ -612,6 +616,7 @@ class Player {
     this.bonusDodge = 0; this.bonusCritDmg = 0;
     this.bonusOverpowerChance = 0; this.bonusOverpowerMult = 0;
     this.abilityCostMult = 1.0; this.goldFindBonus = 1.0; this.bonusDmgReduction = 0;
+    this.bonusFireResist = 0; this.bonusColdResist = 0; this.bonusLightResist = 0; this.bonusPoisonResist = 0;
     this.activeSetEffects = []; this.legendaryEffects = []; this.uniqueEffects = [];
     for (const k in this.equipped) {
       const it = this.equipped[k];
@@ -653,18 +658,33 @@ class Player {
         }
       }
     }
-    // ── Primary stat contributions ───────────────────────────
-    // Set by applyPrimaryStatsToPlayer() at run start / on allocation change
+    // ── Primary stat contributions (PoE/D3-style, tuned for 100+ points) ─────
     const _pStr = this.primaryStr || 0;
     const _pDex = this.primaryDex || 0;
     const _pInt = this.primaryInt || 0;
     const _pVit = this.primaryVit || 0;
     const _pSpi = this.primarySpi || 0;
-    if (_pStr) { this.bonusDmgPct += _pStr * 3;  this.bonusMaxHp += _pStr * 5; }
-    if (_pDex) { this.bonusCritChance += _pDex * 1; this.bonusFireRatePct += _pDex * 1; }
-    if (_pInt) { this.bonusMaxResource += _pInt * 4; this.abilityCostMult *= Math.max(0.5, 1 - _pInt * 0.02); }
-    if (_pVit) { this.bonusMaxHp += _pVit * 12; this.bonusRegen += _pVit * 0.4; this.bonusArmor += _pVit * 1.5; }
-    if (_pSpi) { this.bonusMaxResource += _pSpi * 3; this.bonusResourceRegen += _pSpi * 0.3; this.bonusDodge += _pSpi * 0.4; }
+    // Universal effects — all classes benefit from any stat, but values are small per-point
+    if (_pStr) { this.bonusMaxHp += _pStr * 6; this.bonusArmor += _pStr * 0.6; }
+    if (_pDex) { this.bonusCritChance += _pDex * 0.5; this.bonusFireRatePct += _pDex * 0.4; this.bonusDodge += _pDex * 0.1; }
+    if (_pInt) {
+      this.bonusMaxResource += _pInt * 3;
+      this.abilityCostMult *= Math.max(0.5, 1 - _pInt * 0.008);
+      // INT: resist all (+0.12% per point)
+      const _raInt = Math.round(_pInt * 0.12);
+      this.bonusFireResist += _raInt; this.bonusColdResist += _raInt;
+      this.bonusLightResist += _raInt; this.bonusPoisonResist += _raInt;
+    }
+    if (_pVit) { this.bonusMaxHp += _pVit * 12; this.bonusRegen += _pVit * 0.5; this.bonusArmor += _pVit * 0.8; }
+    if (_pSpi) { this.bonusMaxResource += _pSpi * 2; this.bonusResourceRegen += _pSpi * 0.25; this.bonusDodge += _pSpi * 0.15; }
+    // Main stat damage multiplier (+0.8%/pt) + secondary stat bonus (+0.3%/pt)
+    // getClassById is available from data.js (loaded first)
+    { const _cl = this.class;
+      const _sm = { str: _pStr, dex: _pDex, int: _pInt, vit: _pVit, spi: _pSpi };
+      const _mp = (_sm[_cl.mainStat || 'str'] || 0);
+      const _sp = (_sm[_cl.secondaryStat || 'vit'] || 0);
+      this.primaryStatDmgMult = 1.0 + _mp * 0.008 + _sp * 0.003;
+    }
     // ─────────────────────────────────────────────────────────
     // Spirit Bond: Panther — +10 crit chance
     if (this.bondPanther) this.bonusCritChance += 10;
@@ -681,8 +701,13 @@ class Player {
     this.regen = this.baseRegen + this.bonusRegen;
     this.armor = this.baseArmor + this.bonusArmor;
     this.critChance = this.baseCritChance + this.bonusCritChance;
-    this.dodge = Math.min(75, this.baseDodge + this.bonusDodge);
+    this.dodge = Math.min(50, this.baseDodge + this.bonusDodge);
     this.critDmg = this.baseCritDmg + this.bonusCritDmg;
+    // Elemental resistance finals (cap 75%)
+    this.fireResist  = Math.min(75, this.bonusFireResist  || 0);
+    this.coldResist  = Math.min(75, this.bonusColdResist  || 0);
+    this.lightResist = Math.min(75, this.bonusLightResist || 0);
+    this.poisonResist= Math.min(75, this.bonusPoisonResist|| 0);
     this.overpowerChance = this.baseOverpowerChance + this.bonusOverpowerChance;
     this.overpowerMult = this.baseOverpowerMult + this.bonusOverpowerMult;
     this.maxResource = this.baseMaxResource + this.bonusMaxResource;
@@ -770,8 +795,13 @@ class Player {
     if (w && w.base && w.base.id) return w.base.id;
     return this.class.defaultWeapon || 'sword';
   }
-  takeDamage(amount) {
+  takeDamage(amount, element) {
     if (this.iframeTimer > 0) return false;
+    // Elemental resistance (fire/cold/lightning/poison) — applied to raw amount
+    if (element) {
+      const _res = { fire: this.fireResist||0, cold: this.coldResist||0, lightning: this.lightResist||0, poison: this.poisonResist||0 }[element] || 0;
+      if (_res > 0) amount = amount * (1 - _res / 100);
+    }
     // Unique: bonecage — 25% damage reduction below 40% HP
     if ((this.uniqueEffects || []).includes('bonecage_low_hp_shield') && this.hp < this.maxHp * 0.4)
       amount = Math.ceil(amount * 0.75);
