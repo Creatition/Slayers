@@ -167,6 +167,7 @@
   let lootFlashTimer = 0;
   let lastLootName = '';
   let bossBannerTimer = 0;
+  let playerDeathFlashTimer = 0;
   let bossDefeatedBannerTimer = 0;
   let lastBossName = '';
   let goldFlashTimer = 0;
@@ -2226,6 +2227,7 @@
     levelUpChoices = []; abilityDraftChoices = [];
     levelUpFlashTimer = 0; lootFlashTimer = 0; lastLootName = '';
     bossBannerTimer = 0; bossDefeatedBannerTimer = 0; lastBossName = '';
+    playerDeathFlashTimer = 0;
     goldFlashTimer = 0; biomeBannerTimer = 2.5;
     shopItems = []; shopLocked = [false,false,false,false]; shopRefreshCost = 5; selectedInvIdx = -1; levelUpRerollCost = 1;
     currentBiomeId = currentBiome().id;
@@ -7212,6 +7214,7 @@
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
     if (bossBannerTimer > 0) bossBannerTimer -= dt;
     if (bossDefeatedBannerTimer > 0) bossDefeatedBannerTimer -= dt;
+    if (playerDeathFlashTimer > 0) playerDeathFlashTimer -= dt;
     if (goldFlashTimer > 0) goldFlashTimer -= dt;
     if (biomeBannerTimer > 0) biomeBannerTimer -= dt;
     shake *= 0.85; if (shake < 0.05) shake = 0;
