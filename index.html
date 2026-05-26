@@ -100,6 +100,7 @@
   let netClientInputTimer  = 0;   // client: 20-Hz input-send timer
   let netClientInputs    = {};    // host only: { playerId: {x,y} }
   let netKilledIds       = new Set(); // client: locally-killed ghost IDs, not re-created until host confirms
+  let netClientCharInfo  = {};        // host: { playerId: {classId,level,maxHp,attack,speed,critChance} }
   let netPlayerIdToSlot  = {};    // host only: { playerId: extraPlayers index }
   // Per-player input state (P2 arrow keys, P3/P4 gamepad)
   const EXTRA_INPUT_SCHEMES = [
@@ -122,6 +123,21 @@
   }
   function netIsOnlineClient() { return multiMode === 'online' && !!netSocket && !netIsHost; }
   function netIsOnlineHost()   { return multiMode === 'online' && !!netSocket &&  netIsHost; }
+
+  // Average persistent level across all party members (host + clients)
+  function partyAvgLevel() {
+    const levels = [ensureCP(selectedClassId).level];
+    for (const _inf of Object.values(netClientCharInfo)) { if (_inf.level) levels.push(_inf.level); }
+    return levels.reduce((a, b) => a + b, 0) / levels.length;
+  }
+  // Enemy scaling: higher-level clients make enemies tougher for everyone (Diablo-style)
+  function partyEnemyScaling() {
+    if (!netIsOnlineHost() || Object.keys(netClientCharInfo).length === 0) return { hp: 1, dmg: 1 };
+    const hostLvl = ensureCP(selectedClassId).level;
+    const avgLvl  = partyAvgLevel();
+    const excess  = Math.max(0, avgLvl - hostLvl); // how many levels above host the avg is
+    return { hp: 1 + excess * 0.05, dmg: 1 + excess * 0.03 };
+  }
 
   let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
   let pauseInSettings = false;
@@ -1070,7 +1086,11 @@
     else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
     else { x = -pad; y = Math.random() * H; }
-    const e = new Enemy(x, y, pickEnemyType(currentWave), cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    const _psc = partyEnemyScaling();
+    const e = new Enemy(x, y, pickEnemyType(currentWave),
+      cfg.enemyHpMult  * _psc.hp,
+      cfg.enemySpeedMult,
+      cfg.enemyDmgMult * _psc.dmg);
     // Elite tier roll — scales with wave
     if (Math.random() < eliteChance(currentWave)) {
       let tierKey;
@@ -1113,12 +1133,16 @@
     enemies.push(e);
   }
   function spawnBoss(cfg) {
+    const _bsc = partyEnemyScaling();
+    const _bhp = cfg.enemyHpMult  * _bsc.hp;
+    const _bsp = cfg.enemySpeedMult;
+    const _bdm = cfg.enemyDmgMult * _bsc.dmg;
     let boss;
-    if (currentWave === 5)       boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
-    else if (currentWave === 10) boss = new IceGiant(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
-    else if (currentWave === 15) boss = new Pyromancer(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
-    else if (currentWave === 20) boss = new SlayerKiller(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
-    else                         boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    if (currentWave === 5)       boss = new BoneLord(W / 2, 70, _bhp, _bsp, _bdm);
+    else if (currentWave === 10) boss = new IceGiant(W / 2, 70, _bhp, _bsp, _bdm);
+    else if (currentWave === 15) boss = new Pyromancer(W / 2, 70, _bhp, _bsp, _bdm);
+    else if (currentWave === 20) boss = new SlayerKiller(W / 2, 70, _bhp, _bsp, _bdm);
+    else                         boss = new BoneLord(W / 2, 70, _bhp, _bsp, _bdm);
     bossRef = boss;
     enemies.push(boss);
     bossBannerTimer = 2.5;
@@ -2140,12 +2164,19 @@
       applyPrimaryStatsToPlayer(_ep); applySkillTreeToPlayer(_ep);
       extraPlayers.push(_ep);
     }
-    // Online host: create a slot for each connected client
+    // Online host: create a slot for each connected client using their charInfo
     if (netIsOnlineHost()) {
       for (const [_pid, _slot] of Object.entries(netPlayerIdToSlot)) {
-        const _si = extraPlayerCfg.length + _slot;
-        const _ep = new Player(W / 2 + (_si + 1) * 28, H / 2, selectedClassId);
-        applyPrimaryStatsToPlayer(_ep); applySkillTreeToPlayer(_ep);
+        const _si  = extraPlayerCfg.length + _slot;
+        const _inf = netClientCharInfo[_pid] || {};
+        // Use client's class if we know it, otherwise fall back to host's class
+        const _ep  = new Player(W / 2 + (_si + 1) * 28, H / 2, _inf.classId || selectedClassId);
+        // Apply client's actual stats if available (overrides default class stats)
+        if (_inf.maxHp)     { _ep.maxHp = _inf.maxHp; _ep.hp = _ep.maxHp; }
+        if (_inf.attack)     _ep.attack     = _inf.attack;
+        if (_inf.speed)      _ep.speed      = _inf.speed;
+        if (_inf.critChance) _ep.critChance = _inf.critChance;
+        _ep.recomputeStats();
         extraPlayers.push(_ep);
         netClientInputs[_pid] = { x: 0, y: 0 };
       }
@@ -5884,6 +5915,14 @@
       Sfx.uiConfirm && Sfx.uiConfirm();
     } else if (msg.type === 'joined') {
       netPlayerId = msg.playerId;
+      // Send initial class preference immediately on join
+      if (netSocket && netSocket.readyState === 1) {
+        const _jcp = ensureCP(selectedClassId);
+        netSocket.send(JSON.stringify({
+          type: 'netEvent', event: 'charInfo',
+          classId: selectedClassId, level: _jcp.level,
+        }));
+      }
       Sfx.uiConfirm && Sfx.uiConfirm();
     } else if (msg.type === 'playerJoined') {
       // Host: reserve a slot for this new client (extraPlayer created at run start)
@@ -5906,11 +5945,48 @@
         const e = enemies.find(en => en._netId === msg.enemyId && en.alive);
         if (e) { e.hp = 0; handleEnemyDeath(e); }
       } else if (msg.event === 'startRun') {
-        if (!netIsHost) { resetWorld(); }
+        if (!netIsHost) {
+          resetWorld();
+          // Send full stats now that player object exists
+          if (netSocket && netSocket.readyState === 1) {
+            netSocket.send(JSON.stringify({
+              type: 'netEvent', event: 'charInfo',
+              classId: selectedClassId,
+              level:  ensureCP(selectedClassId).level,
+              maxHp:  player.maxHp,
+              attack: player.attack,
+              speed:  player.speed,
+              critChance: player.critChance || 0.05,
+            }));
+          }
+        }
       } else if (msg.event === 'clientInput') {
         // Host receives movement input from a client
         if (netIsHost && msg.fromPlayerId) {
           netClientInputs[msg.fromPlayerId] = { x: msg.x || 0, y: msg.y || 0 };
+        }
+      } else if (msg.event === 'charInfo') {
+        // Host receives client character info — store and apply to their extraPlayer slot
+        if (netIsHost && msg.fromPlayerId) {
+          netClientCharInfo[msg.fromPlayerId] = {
+            classId: msg.classId || selectedClassId,
+            level:   msg.level   || 1,
+            maxHp:   msg.maxHp,
+            attack:  msg.attack,
+            speed:   msg.speed,
+            critChance: msg.critChance,
+          };
+          // If extraPlayer already exists for this slot (late-join or post-run update), refresh stats
+          const _slot = netPlayerIdToSlot[msg.fromPlayerId];
+          if (_slot != null) {
+            const _ep = extraPlayers[_slot];
+            if (_ep) {
+              if (msg.maxHp)     { _ep.maxHp = msg.maxHp; _ep.hp = Math.min(_ep.hp, _ep.maxHp); }
+              if (msg.attack)     _ep.attack     = msg.attack;
+              if (msg.speed)      _ep.speed      = msg.speed;
+              if (msg.critChance) _ep.critChance = msg.critChance;
+            }
+          }
         }
       } else if (msg.event === 'gameSnapshot') {
         // Client receives authoritative world state from host
@@ -5968,6 +6044,7 @@
         }
         delete netPlayerIdToSlot[msg.playerId];
         delete netClientInputs[msg.playerId];
+        delete netClientCharInfo[msg.playerId];
       }
       delete netPlayerStates[msg.playerId];
     }
@@ -5993,7 +6070,9 @@
     for (let _i = 0; _i < clientPids.length; _i++) {
       const _pid = clientPids[_i];
       const _ep  = extraPlayers[netPlayerIdToSlot[_pid]];
-      if (_ep) psnap[_pid] = { x: _ep.x, y: _ep.y, hp: _ep.hp, maxHp: _ep.maxHp, facing: _ep.facing || 1, classId: selectedClassId };
+      const _cinf = netClientCharInfo[_pid] || {};
+      if (_ep) psnap[_pid] = { x: _ep.x, y: _ep.y, hp: _ep.hp, maxHp: _ep.maxHp,
+        facing: _ep.facing || 1, classId: _cinf.classId || selectedClassId };
     }
     netSocket.send(JSON.stringify({
       type: 'netEvent', event: 'gameSnapshot',
