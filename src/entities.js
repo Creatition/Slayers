@@ -980,15 +980,23 @@ class Enemy {
 
   hasMod(id) { return this.eliteMods.some(m => m.id === id); }
 
-  makeElite(mods) {
+  makeElite(mods, tierCfg) {
     this.elite = true;
     this.eliteMods = mods;
-    this.eliteScale = 1.5;
-    this.maxHp = Math.round(this.maxHp * 3);
+    this.eliteTier = tierCfg ? tierCfg.tier : 'rare';
+    this.eliteName = tierCfg && tierCfg.eliteName ? tierCfg.eliteName : null;
+    const hpMult    = tierCfg ? tierCfg.hpMult    : 3.0;
+    const spdMult   = tierCfg ? tierCfg.spdMult   : 1.25;
+    const dmgMult   = tierCfg ? tierCfg.dmgMult   : 1.30;
+    const scaleMult = tierCfg ? tierCfg.scaleMult : 1.50;
+    this.eliteScale = scaleMult;
+    this.maxHp = Math.round(this.maxHp * hpMult);
     this.hp = this.maxHp;
-    this.speed *= 1.25;
-    this.contactDmg = Math.round(this.contactDmg * 1.3);
-    this.r = Math.round(this.r * 1.3);
+    this.speed *= spdMult;
+    this.contactDmg = Math.round(this.contactDmg * dmgMult);
+    this.r = Math.round(this.r * Math.min(scaleMult, 1.5));
+    // Fast: extra speed on top of tier speed
+    if (this.hasMod('fast')) this.speed *= 1.6;
     if (this.hasMod('shielded')) {
       this.shieldMax = Math.round(this.maxHp * 0.5);
       this.shield = this.shieldMax;
@@ -1188,9 +1196,16 @@ class Enemy {
       // Name label
       ctx.save();
       ctx.textAlign = 'center';
-      ctx.font = 'bold 7px monospace';
-      ctx.fillStyle = '#ffdd88';
-      ctx.fillText(ENEMY_TYPES[this.type].name, px, by - 5);
+      // Tier-coloured name
+      const _tierColor = this.eliteTier === 'legendary' ? '#ff8800'
+                       : this.eliteTier === 'rare'      ? '#ffdd00'
+                       :                                  '#88ccff';
+      const _displayName = this.eliteName
+        ? this.eliteName
+        : (ENEMY_TYPES[this.type] ? ENEMY_TYPES[this.type].name : this.type);
+      ctx.font = this.eliteTier === 'legendary' ? 'bold 7px monospace' : '7px monospace';
+      ctx.fillStyle = _tierColor;
+      ctx.fillText(_displayName, px, by - 5);
       // Mod names (smaller, coloured)
       if (this.eliteMods.length > 0) {
         ctx.font = '6px monospace';
