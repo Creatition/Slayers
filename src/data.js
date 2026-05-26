@@ -4130,7 +4130,7 @@ function castAbility(slotIdx) {
 }
 
 // ============================================================
-// TALENT SYSTEM
+// SKILL TREE SYSTEM
 // ============================================================
 function addAbilityToPlayer(p, abilityId) {
   if (!ABILITIES[abilityId]) return;
@@ -4158,7 +4158,7 @@ function getParagonNode(id) {
 // ============================================================
 // 4 gem types × 5 quality tiers. Socketed into item socket slots by the Jeweler.
 // Quality 0=Chipped, 1=Flawed, 2=Normal, 3=Flawless, 4=Perfect
-const TALENT_TREES = {
+const SKILL_TREES = {
   // -- RANGER --
   ranger: { nodes: [
     {id:'r0', x:80, y:700, type:'minor', origin:true,   connections:['r_ta','r_ma','r_ba'], name:'Fletcher\'s Stance', desc:'+5% Dmg, +2 Pickup', apply:(p)=>{p.baseDmgMult*=1.050; p.recomputeStats(); p.basePickupRange+=2; p.recomputeStats();}},

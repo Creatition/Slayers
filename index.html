@@ -133,20 +133,20 @@
   // ── Character Progression (persistent across runs) ─────────
   const CHAR_LEVEL_CAP = 40;
   // Per-class progression — each class levels independently; paragon is shared
-  let classProgress = {}; // { classId: { level, xp, talentPts, statPts } }
+  let classProgress = {}; // { classId: { level, xp, treePts, statPts } }
   function ensureCP(cid) {
-    if (!classProgress[cid]) classProgress[cid] = { level: 1, xp: 0, talentPts: 0, statPts: 0 };
+    if (!classProgress[cid]) classProgress[cid] = { level: 1, xp: 0, treePts: 0, statPts: 0 };
     return classProgress[cid];
   }
   // Run-time cached globals (synced from classProgress[selectedClassId] at run start/XP award)
   let charLevel = 1;
   let charXp    = 0;
-  let talentPoints    = 0;  // unspent skill-tree points (active class)
+  let treePoints    = 0;  // unspent skill-tree points (active class)
   let charStatPoints  = 0;  // unspent primary-stat points (active class)
   let allocatedStats  = {}; // { [classId]: { str, dex, int, vit, spi } }
-  let spentTalents = {};     // { classId: { nodeId: true } }
+  let spentSkillNodes = {};     // { classId: { nodeId: true } }
   let charTreeClass = 'archer'; // which class tree is shown on char screen
-  let charTreeTab = 'talents'; // 'talents' or 'abilities'
+  let charTreeTab = 'tree'; // 'tree' or 'abilities'
   let inventoryTab = 0; // 0=GEAR  1=ABILITIES  2=SKILL TREE
   let charScreenTab = 0; // 0=normal  1=sheet
   // Skill tree pan/zoom
@@ -169,29 +169,29 @@
     while (cp.xp >= charXpToNext(cp.level) && cp.level < CHAR_LEVEL_CAP) {
       cp.xp -= charXpToNext(cp.level);
       cp.level++;
-      cp.talentPts++;
+      cp.treePts++;
       cp.statPts++;
     }
     if (cp.level >= CHAR_LEVEL_CAP) cp.xp = 0;
     // Sync run-time globals
-    charLevel = cp.level; charXp = cp.xp; talentPoints = cp.talentPts; charStatPoints = cp.statPts;
+    charLevel = cp.level; charXp = cp.xp; treePoints = cp.treePts; charStatPoints = cp.statPts;
     saveData();
   }
-  function applyTalentsToPlayer(p) {
+  function applySkillTreeToPlayer(p) {
     const classId = p.class.id;
-    const tree = TALENT_TREES[classId];
+    const tree = SKILL_TREES[classId];
     if (!tree) return;
-    const spent = spentTalents[classId] || {};
+    const spent = spentSkillNodes[classId] || {};
     for (const node of tree.nodes) {
       if (spent[node.id]) node.apply(p);
     }
   }
-  function canSpendTalent(classId, node) {
-    if (ensureCP(classId).talentPts <= 0) return false;
-    const spent = spentTalents[classId] || {};
+  function canSpendSkillNode(classId, node) {
+    if (ensureCP(classId).treePts <= 0) return false;
+    const spent = spentSkillNodes[classId] || {};
     if (spent[node.id]) return false; // already bought
     if (node.origin) return true;     // origin always available
-    const tree = TALENT_TREES[classId];
+    const tree = SKILL_TREES[classId];
     if (!tree) return false;
     // Unlockable if adjacent (in either direction) to any spent node
     for (const n of tree.nodes) {
@@ -201,12 +201,12 @@
     }
     return false;
   }
-  function spendTalent(classId, node) {
-    if (!canSpendTalent(classId, node)) return;
-    if (!spentTalents[classId]) spentTalents[classId] = {};
-    spentTalents[classId][node.id] = true;
-    ensureCP(classId).talentPts--;
-    if (classId === selectedClassId) talentPoints = ensureCP(classId).talentPts;
+  function spendSkillNode(classId, node) {
+    if (!canSpendSkillNode(classId, node)) return;
+    if (!spentSkillNodes[classId]) spentSkillNodes[classId] = {};
+    spentSkillNodes[classId][node.id] = true;
+    ensureCP(classId).treePts--;
+    if (classId === selectedClassId) treePoints = ensureCP(classId).treePts;
     saveData();
   }
 
@@ -1906,14 +1906,14 @@
       } else if (data.charLevel) {
         // Migrate v1 global save: apply to all classes
         const _legacyCP = { level: Math.min(CHAR_LEVEL_CAP, data.charLevel || 1),
-          xp: data.charXp || 0, talentPts: data.talentPoints || 0, statPts: data.charStatPoints || 0 };
+          xp: data.charXp || 0, treePts: data.treePoints || 0, statPts: data.charStatPoints || 0 };
         const _allCls = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
         _allCls.forEach(c => { classProgress[c] = Object.assign({}, _legacyCP); });
       }
-      spentTalents   = data.spentTalents   || {};
+      spentSkillNodes   = data.spentSkillNodes   || {};
       allocatedStats = data.allocatedStats || {};
       // Sync globals to selectedClassId (will be overwritten at resetWorld anyway)
-      { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; talentPoints = _cp.talentPts; charStatPoints = _cp.statPts; }
+      { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; treePoints = _cp.treePts; charStatPoints = _cp.statPts; }
       paragonLevel  = Math.min(PARAGON_LEVEL_CAP, data.paragonLevel  || 0);
       paragonXp     = data.paragonXp    || 0;
       paragonPoints = data.paragonPoints || 0;
@@ -1932,7 +1932,7 @@
         stashSize,
         unlockedTrialTier,
         classProgress,
-        spentTalents,
+        spentSkillNodes,
         allocatedStats,
         paragonLevel,
         paragonXp,
@@ -1960,7 +1960,7 @@
 
   function resetWorld() {
     // Sync run-time globals to the class being played
-    { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; talentPoints = _cp.talentPts; charStatPoints = _cp.statPts; }
+    { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; treePoints = _cp.treePts; charStatPoints = _cp.statPts; }
     player = new Player(W / 2, H / 2, selectedClassId);
     // Restore persisted equipment + inventory from last run
     if (savedEquipped) {
@@ -1976,7 +1976,7 @@
       player.gems = savedGems.slice(0, player.GEM_CAP);
     }
     applyPrimaryStatsToPlayer(player); // set base primary stats from allocated points
-    applyTalentsToPlayer(player); // apply talent tree bonuses (may += more primary stats)
+    applySkillTreeToPlayer(player); // apply skill tree bonuses (may += more primary stats)
     if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
@@ -2849,15 +2849,15 @@
     ctx.fillRect(charBtnX + 2, charBtnY + 2, Math.floor(156 * lvlPct), 16);
     ctx.globalAlpha = 1;
     { const _hcp = player ? ensureCP(player.class.id) : ensureCP(selectedClassId);
-      if (_hcp.talentPts > 0 || _hcp.statPts > 0) {
+      if (_hcp.treePts > 0 || _hcp.statPts > 0) {
         ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-        if (_hcp.talentPts > 0) {
+        if (_hcp.treePts > 0) {
           ctx.fillStyle = '#ffd040';
-          ctx.fillText(`${_hcp.talentPts} SKILL PT${_hcp.talentPts > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + 30);
+          ctx.fillText(`${_hcp.treePts} SKILL PT${_hcp.treePts > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + 30);
         }
         if (_hcp.statPts > 0) {
           ctx.fillStyle = '#ff8844';
-          const _syOff = _hcp.talentPts > 0 ? 40 : 30;
+          const _syOff = _hcp.treePts > 0 ? 40 : 30;
           ctx.fillText(`${_hcp.statPts} STAT PT${_hcp.statPts > 1 ? 'S' : ''}`, charBtnX + 80, charBtnY + _syOff);
         }
       }
@@ -2968,7 +2968,7 @@
     ctx.fillStyle = 'rgba(0,0,0,0.95)'; ctx.fillRect(0, 0, W, H);
     // ── Header — always read from classProgress[charTreeClass] for correct per-class data ───
     const _vcp = ensureCP(charTreeClass); // viewed class progress
-    const _vcl = _vcp.level, _vcx = _vcp.xp, _vtp = _vcp.talentPts;
+    const _vcl = _vcp.level, _vcx = _vcp.xp, _vtp = _vcp.treePts;
     ctx.fillStyle = '#ffaa44'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
     ctx.fillText('CHARACTER', W / 2, 18);
     const xpNeeded = _vcl < CHAR_LEVEL_CAP ? charXpToNext(_vcl) : 0;
@@ -2981,13 +2981,13 @@
     ctx.font = 'bold 8px monospace';
     ctx.fillText(_vtp > 0 ? `${_vtp} SKILL POINT${_vtp > 1 ? 'S' : ''} UNSPENT` : 'No unspent points', W / 2, 42);
 
-    // ── View toggle: TALENTS / ABILITIES ──────────────────────
+    // ── View toggle: SKILL TREE / ABILITIES ──────────────────────
     const toggleY = 46;
     const tlnBtn = { x: W/2 - 82, y: toggleY, w: 78, h: 14 };
     const ablBtn = { x: W/2 + 4,  y: toggleY, w: 78, h: 14 };
-    ctx.fillStyle = charTreeTab === 'talents' ? '#5599ff' : '#222'; ctx.fillRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
+    ctx.fillStyle = charTreeTab === 'tree' ? '#5599ff' : '#222'; ctx.fillRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
     ctx.strokeStyle = '#5599ff'; ctx.lineWidth = 1; ctx.strokeRect(tlnBtn.x, tlnBtn.y, tlnBtn.w, tlnBtn.h);
-    ctx.fillStyle = charTreeTab === 'talents' ? '#000' : '#5599ff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = charTreeTab === 'tree' ? '#000' : '#5599ff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
     ctx.fillText('SKILLS', tlnBtn.x + tlnBtn.w/2, tlnBtn.y + 10);
     ctx.fillStyle = charTreeTab === 'abilities' ? '#ffaa44' : '#222'; ctx.fillRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
     ctx.strokeStyle = '#ffaa44'; ctx.lineWidth = 1; ctx.strokeRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
@@ -3010,10 +3010,10 @@
       ctx.fillText(cl.name.substring(0, 6).toUpperCase(), tx + (tabW - 2) / 2, tabY + 10);
     }
 
-    // ── Talent tree or Abilities view ────────────────────────
-    const tree = TALENT_TREES[charTreeClass];
+    // ── Skill tree or Abilities view ────────────────────────
+    const tree = SKILL_TREES[charTreeClass];
     const cl   = getClassById(charTreeClass);
-    const spent = spentTalents[charTreeClass] || {};
+    const spent = spentSkillNodes[charTreeClass] || {};
     const treeStartY = 80; // shifted down for toggle row
     if (charTreeTab === 'abilities') {
       // ── ABILITIES VIEW ─────────────────────────────────────
@@ -3114,7 +3114,7 @@
       }
       drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
       ctx.textAlign = 'left';
-      return; // skip talent tree rendering
+      return; // skip skill tree rendering
     }
     // ── PoE-style skill tree web ───────────────────────────────
     const treeOX = 30, treeOY = treeStartY; // canvas offset
@@ -3158,7 +3158,7 @@
         const cx = zx(node.x), cy = zy(node.y);
         const r = (NODE_R[node.type] || 7) * treeViewZoom;
         const isSpent  = !!spent[node.id];
-        const canBuy   = canSpendTalent(charTreeClass, node);
+        const canBuy   = canSpendSkillNode(charTreeClass, node);
         const dx = mouseX - cx, dy = mouseY - cy;
         const hovered  = dx*dx + dy*dy <= (r+4)*(r+4);
         // Glow ring for keystone
@@ -3265,11 +3265,11 @@
     }
 
     // ── Close tree clip + minimap ──────────────────────────────
-    if (charTreeTab === 'talents' && TALENT_TREES[charTreeClass]) {
+    if (charTreeTab === 'tree' && SKILL_TREES[charTreeClass]) {
       ctx.restore(); // end clip region
-      const tree2 = TALENT_TREES[charTreeClass];
+      const tree2 = SKILL_TREES[charTreeClass];
       const cl2   = getClassById(charTreeClass);
-      const spent2 = spentTalents[charTreeClass] || {};
+      const spent2 = spentSkillNodes[charTreeClass] || {};
       const mm = { x: W-72, y: H-54, w: 66, h: 44 };
       ctx.fillStyle='rgba(0,0,0,0.75)'; ctx.fillRect(mm.x,mm.y,mm.w,mm.h);
       ctx.strokeStyle='#2a2a44'; ctx.lineWidth=1; ctx.strokeRect(mm.x,mm.y,mm.w,mm.h);
@@ -5461,14 +5461,14 @@
 
   function isTreeView() {
     return (state === STATE.CHAR_SCREEN || (state === STATE.INVENTORY && inventoryTab === 2))
-      && charTreeTab === 'talents';
+      && charTreeTab === 'tree';
   }
   function isAbilView() {
     return (state === STATE.CHAR_SCREEN || (state === STATE.INVENTORY && inventoryTab === 1))
       && charTreeTab === 'abilities';
   }
   function fitTreeView() {
-    const tree = TALENT_TREES[charTreeClass];
+    const tree = SKILL_TREES[charTreeClass];
     if (!tree || !tree.nodes.length) return;
     const treeOX2 = 30, treeOY2 = 80;
     let mnX=Infinity, mxX=-Infinity, mnY=Infinity, mxY=-Infinity;
@@ -5484,7 +5484,7 @@
   function handleCharTreeClicks(backFn) {
     if (!mouseClicked) return;
     if (isHovering(8, H - 26, 80, 20)) { backFn(); return; }
-    if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'talents'; fitTreeView(); }
+    if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'tree'; fitTreeView(); }
     if (isHovering(W/2 + 4,  46, 78, 14)) charTreeTab = 'abilities';
     const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
     const cTabW = Math.floor((W - 16) / allClasses.length);
@@ -5516,7 +5516,7 @@
         }
       }
     } else {
-      const tree = TALENT_TREES[charTreeClass];
+      const tree = SKILL_TREES[charTreeClass];
       if (tree) {
         const treeOX = 30, treeOY = 80;
         const NODE_R = { minor:5, notable:8, ability:10, keystone:13 };
@@ -5525,7 +5525,7 @@
           const ny2 = 80 + node.y * treeViewZoom + treeViewY;
           const r = ((NODE_R[node.type] || 7) + 4) * treeViewZoom;
           const dx = mouseX - nx, dy = mouseY - ny2;
-          if (dx*dx + dy*dy <= r*r) { spendTalent(charTreeClass, node); Sfx.uiConfirm && Sfx.uiConfirm(); break; }
+          if (dx*dx + dy*dy <= r*r) { spendSkillNode(charTreeClass, node); Sfx.uiConfirm && Sfx.uiConfirm(); break; }
         }
       }
     }
@@ -5552,7 +5552,7 @@
       ctx.fillText(tabs[i], i * tw + (tw - 1) / 2, 11);
       if (mouseClicked && hov) {
         inventoryTab = i;
-        charTreeTab = i === 1 ? 'abilities' : 'talents';
+        charTreeTab = i === 1 ? 'abilities' : 'tree';
         if (player) charTreeClass = player.class.id;
         charAbilScroll = 0;
         Sfx.uiClick && Sfx.uiClick();
@@ -6091,7 +6091,7 @@
       // Tab switch: LB(GP4)/Q = prev, RB(GP5) = next
       if (gpJustPressed.has(4) || keyJustPressed.has('q')) {
         inventoryTab = (inventoryTab + 4) % 5;
-        charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
+        charTreeTab = inventoryTab === 1 ? 'abilities' : 'tree';
         if (player) charTreeClass = player.class.id;
         if (inventoryTab === 2) fitTreeView();
         charAbilScroll = 0;
@@ -6099,7 +6099,7 @@
       }
       if (gpJustPressed.has(5)) {
         inventoryTab = (inventoryTab + 1) % 5;
-        charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
+        charTreeTab = inventoryTab === 1 ? 'abilities' : 'tree';
         if (player) charTreeClass = player.class.id;
         if (inventoryTab === 2) fitTreeView();
         charAbilScroll = 0;
