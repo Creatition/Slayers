@@ -911,7 +911,9 @@ class Player {
     const drewPng = this.animator ? this.animator.draw(ctx, px, py, flash) : false;
     if (!drewPng) {
       if (sprite && typeof drawSprite === 'function') {
-        drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
+        // Scale 3 for Berserker so the ASCII fallback matches the PNG size; 2 for all others
+        const sprScale = this.class.id === 'berserker' ? 3 : 2;
+        drawSprite(ctx, sprite, px, py, this.facing === -1, flash, sprScale);
       } else {
         // Fallback: primitive draw if sprites failed to load
         ctx.fillStyle = flash ? '#ff4444' : this.class.color;
