@@ -1143,6 +1143,11 @@ class Enemy {
   }
 
   takeDamage(amount, opts) {
+    // Multiplayer shared-HP normalization: high-level clients do % damage appropriate to their level
+    // netDamageNorm is set by the host before each extraPlayer's checkCollisions context-swap.
+    if (typeof netDamageNorm !== 'undefined' && netDamageNorm !== 1.0) {
+      amount = Math.max(1, Math.round(amount * netDamageNorm));
+    }
     // Shielded elites absorb damage to shield first
     if (this.elite && this.shield > 0) {
       const absorbed = Math.min(this.shield, amount);

@@ -130,14 +130,16 @@
     for (const _inf of Object.values(netClientCharInfo)) { if (_inf.level) levels.push(_inf.level); }
     return levels.reduce((a, b) => a + b, 0) / levels.length;
   }
-  // Enemy scaling: higher-level clients make enemies tougher for everyone (Diablo-style)
-  function partyEnemyScaling() {
-    if (!netIsOnlineHost() || Object.keys(netClientCharInfo).length === 0) return { hp: 1, dmg: 1 };
-    const hostLvl = ensureCP(selectedClassId).level;
-    const avgLvl  = partyAvgLevel();
-    const excess  = Math.max(0, avgLvl - hostLvl); // how many levels above host the avg is
-    return { hp: 1 + excess * 0.05, dmg: 1 + excess * 0.03 };
-  }
+  // HP scale factor per level: each level = 10% more effective enemy HP
+  function levelScale(lvl) { return 1 + Math.max(0, (lvl || 1) - 1) * 0.10; }
+
+  // Global damage normalizer — set before each extraPlayer checkCollisions, reset after.
+  // Converts attacker's raw damage to a % of the enemy's shared HP pool.
+  let netDamageNorm = 1.0;  // = levelScale(hostLevel) / levelScale(attackerLevel)
+
+  // partyEnemyScaling kept as reference but no longer applied to spawn — 
+  // per-attack normalization handles balance instead.
+  function partyEnemyScaling() { return { hp: 1, dmg: 1 }; }
 
   let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
   let pauseInSettings = false;
@@ -1086,11 +1088,8 @@
     else if (edge === 1) { x = W + pad; y = Math.random() * H; }
     else if (edge === 2) { x = Math.random() * W; y = H + pad; }
     else { x = -pad; y = Math.random() * H; }
-    const _psc = partyEnemyScaling();
     const e = new Enemy(x, y, pickEnemyType(currentWave),
-      cfg.enemyHpMult  * _psc.hp,
-      cfg.enemySpeedMult,
-      cfg.enemyDmgMult * _psc.dmg);
+      cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
     // Elite tier roll — scales with wave
     if (Math.random() < eliteChance(currentWave)) {
       let tierKey;
@@ -1133,16 +1132,12 @@
     enemies.push(e);
   }
   function spawnBoss(cfg) {
-    const _bsc = partyEnemyScaling();
-    const _bhp = cfg.enemyHpMult  * _bsc.hp;
-    const _bsp = cfg.enemySpeedMult;
-    const _bdm = cfg.enemyDmgMult * _bsc.dmg;
     let boss;
-    if (currentWave === 5)       boss = new BoneLord(W / 2, 70, _bhp, _bsp, _bdm);
-    else if (currentWave === 10) boss = new IceGiant(W / 2, 70, _bhp, _bsp, _bdm);
-    else if (currentWave === 15) boss = new Pyromancer(W / 2, 70, _bhp, _bsp, _bdm);
-    else if (currentWave === 20) boss = new SlayerKiller(W / 2, 70, _bhp, _bsp, _bdm);
-    else                         boss = new BoneLord(W / 2, 70, _bhp, _bsp, _bdm);
+    if (currentWave === 5)       boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 10) boss = new IceGiant(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 15) boss = new Pyromancer(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else if (currentWave === 20) boss = new SlayerKiller(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
+    else                         boss = new BoneLord(W / 2, 70, cfg.enemyHpMult, cfg.enemySpeedMult, cfg.enemyDmgMult);
     bossRef = boss;
     enemies.push(boss);
     bossBannerTimer = 2.5;
@@ -2176,6 +2171,7 @@
         if (_inf.attack)     _ep.attack     = _inf.attack;
         if (_inf.speed)      _ep.speed      = _inf.speed;
         if (_inf.critChance) _ep.critChance = _inf.critChance;
+        _ep._netLevel = _inf.level || 1;  // used for per-attack damage normalization
         _ep.recomputeStats();
         extraPlayers.push(_ep);
         netClientInputs[_pid] = { x: 0, y: 0 };
@@ -5985,6 +5981,7 @@
               if (msg.attack)     _ep.attack     = msg.attack;
               if (msg.speed)      _ep.speed      = msg.speed;
               if (msg.critChance) _ep.critChance = msg.critChance;
+              if (msg.level)      _ep._netLevel  = msg.level;
             }
           }
         }
@@ -6533,13 +6530,22 @@
       for (const sw of meleeSwings) if (!sw.dead) sw.update(wdt);
       updateGroundEffects(wdt);
       if (!frozen) {
+        netDamageNorm = 1.0; // P1 always gets 1:1 damage (host level)
         checkCollisions(); // P1 (player is already set)
-        // Extra local players — context-swap
+        // Extra players — context-swap, normalize damage by attacker level
         for (let _ei = 0; _ei < extraPlayers.length; _ei++) {
           const _ep = extraPlayers[_ei];
           if (_ep.hp <= 0) continue;
           const _saved = player; player = _ep;
+          // Shared-HP normalization: high-level clients do proportionally correct % damage
+          if (_ep._netLevel && netIsOnlineHost()) {
+            const hostLvl = ensureCP(selectedClassId).level;
+            netDamageNorm = levelScale(hostLvl) / levelScale(_ep._netLevel);
+          } else {
+            netDamageNorm = 1.0;
+          }
           checkCollisions();
+          netDamageNorm = 1.0; // always reset after
           player = _saved;
         }
       }
