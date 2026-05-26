@@ -97,6 +97,9 @@
   let runWavesCompleted = 0;
   let runBossesKilled = 0;
   let runXpAwarded = false;
+  let xpVacuumTimer = 0;       // end-of-run XP ground-gem vacuum
+  let xpVacuumDone  = false;
+  let xpVacuumAmount = 0;      // XP shown as '+N XP' pop
   let legendaryEliteSpawned = false; // reset each run
   let uniqueEliteSpawned    = false; // reset each run
   let uniqueEliteAvailable  = false; // rolled per run (~20% chance)
@@ -175,8 +178,49 @@
     if (cp.level >= CHAR_LEVEL_CAP) cp.xp = 0;
     // Sync run-time globals
     charLevel = cp.level; charXp = cp.xp; treePoints = cp.treePts; charStatPoints = cp.statPts;
+    startXpVacuum(xp);  // vacuum ground gems
     saveData();
   }
+  // ── XP Vacuum — sucks ground gems to player at end of run ────────────────
+  function startXpVacuum(xpAmt) {
+    xpVacuumTimer  = 0;
+    xpVacuumDone   = false;
+    xpVacuumAmount = xpAmt;
+    // Immediately done if no gems on ground
+    if (xpGems.filter(g => !g.dead).length === 0) xpVacuumDone = true;
+    else for (const g of xpGems) g.magnetized = true; // force attract
+  }
+  function updateXpVacuum(dt) {
+    if (xpVacuumDone) return;
+    xpVacuumTimer += dt;
+    // Move gems toward player without triggering addXp
+    for (const g of xpGems) {
+      if (g.dead) continue;
+      g.magnetized = true;
+      const dx = player.x - g.x, dy = player.y - g.y;
+      const d  = Math.hypot(dx, dy);
+      const sp = 180 + xpVacuumTimer * 280;
+      if (d > 0.5) { g.x += (dx/d)*sp*dt; g.y += (dy/d)*sp*dt; }
+      if (d < 14)  { g.dead = true; if (typeof Sfx !== 'undefined' && Sfx.pickupXp) Sfx.pickupXp(); }
+    }
+    xpGems = xpGems.filter(g => !g.dead);
+    if (xpGems.length === 0 || xpVacuumTimer > 2.6) xpVacuumDone = true;
+  }
+  function drawXpVacuumPop() {
+    // "+N XP" badge after gems collected
+    if (!xpVacuumDone || xpVacuumAmount <= 0) return;
+    const age = xpVacuumTimer;                    // timer keeps running after done
+    const alpha = Math.max(0, 1 - (age - 0.1) * 0.6);
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#cc88ff';
+    ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('+' + xpVacuumAmount + ' XP', W/2, H/2 - 50);
+    ctx.restore();
+  }
+
+
   function applySkillTreeToPlayer(p) {
     const classId = p.class.id;
     const tree = SKILL_TREES[classId];
@@ -1450,7 +1494,17 @@
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
-    if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Skill Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
+    if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Ability Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
+    // Award persistent skill-tree + stat points every level-up
+    { const _lcp = ensureCP(selectedClassId);
+      if (_lcp.level < CHAR_LEVEL_CAP) {
+        _lcp.treePts++; _lcp.statPts++;
+        treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
+        spawnDamageNumber(player.x, player.y - 36, '+1 Skill Tree Pt', { color: '#ffd040', size: 9, vy: -42, life: 1.6 });
+        spawnDamageNumber(player.x, player.y - 46, '+1 Stat Pt',       { color: '#ff8844', size: 9, vy: -34, life: 1.6 });
+        saveData();
+      }
+    }
     Sfx.uiConfirm();
     if (player.pendingLevelUps > 0) enterLevelUp();
     else enterShop();
@@ -1983,6 +2037,7 @@
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
     runWavesCompleted = 0; runBossesKilled = 0; runXpAwarded = false;
+    xpVacuumTimer = 0; xpVacuumDone = false; xpVacuumAmount = 0;
     legendaryEliteSpawned = false; uniqueEliteSpawned = false;
     uniqueEliteAvailable  = Math.random() < 0.20; // ~1 in 5 runs gets a unique elite
     player.attackCount = 0;           // razorwind_4th_crit tracker
@@ -2591,6 +2646,8 @@
 
   function drawDeathScreen() {
     ctx.fillStyle = 'rgba(0,0,0,0.75)'; ctx.fillRect(0, 0, W, H);
+    drawXpVacuumPop();
+    if (!xpVacuumDone) return;
     ctx.fillStyle = '#ff4040'; ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
@@ -2907,9 +2964,14 @@
       }
       ctx.lineWidth = 1;
 
-      // Key hint
+      // Key hint + persistent class level badge
       ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
       ctx.fillText(`[${i < 9 ? i+1 : 0}]`, cx + 5, cy + 12);
+      { const _clvl = ensureCP(c.id).level;
+        ctx.fillStyle = _clvl >= CHAR_LEVEL_CAP ? '#ffd040' : '#88aaff';
+        ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(`LV ${_clvl}`, cx + cardW - 5, cy + 12);
+      }
 
       // Name (with shadow for emphasis)
       ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
@@ -3300,6 +3362,9 @@
   function drawVictoryScreen() {
     const t = performance.now() * 0.001;
     ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0, 0, W, H);
+    drawXpVacuumPop();
+    if (!xpVacuumDone) return;
+
     // Confetti
     if (Math.random() < 0.4) {
       const cols = ['#ff4040', '#ffd040', '#7ad96b', '#5599ff', '#aa66ff', '#ffffff'];
@@ -5913,8 +5978,9 @@
     }
     else if (state === STATE.DEAD || state === STATE.VICTORY) {
       if (!runXpAwarded) { awardRunXp(runWavesCompleted, runBossesKilled, state === STATE.VICTORY); runXpAwarded = true; }
+      updateXpVacuum(dt);
       const anyGp = gpJustPressed.has(0) || gpJustPressed.has(1) || gpJustPressed.has(2) || gpJustPressed.has(3);
-      if (keyJustPressed.has('r') || mouseClicked || anyGp) {
+      if (xpVacuumDone && (keyJustPressed.has('r') || mouseClicked || anyGp)) {
         if (runMode === 'trial') {
           endTrial(state === STATE.VICTORY);
         } else {
