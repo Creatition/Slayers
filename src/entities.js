@@ -501,6 +501,7 @@ class Player {
     this.bonusArmor = 0; this.bonusCritChance = 0;
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
     this.bonusDodge = 0; this.bonusCritDmg = 0;
+    this.bonusFireDmgPct = 0; this.bonusColdDmgPct = 0; this.bonusLightDmgPct = 0; this.bonusPoisonDmgPct = 0;
     this.bonusOverpowerChance = 0; this.bonusOverpowerMult = 0;
     // Elemental resistances
     this.bonusFireResist = 0; this.bonusColdResist = 0; this.bonusLightResist = 0; this.bonusPoisonResist = 0;
@@ -614,6 +615,7 @@ class Player {
     this.bonusArmor = 0; this.bonusCritChance = 0;
     this.bonusMaxResource = 0; this.bonusResourceRegen = 0;
     this.bonusDodge = 0; this.bonusCritDmg = 0;
+    this.bonusFireDmgPct = 0; this.bonusColdDmgPct = 0; this.bonusLightDmgPct = 0; this.bonusPoisonDmgPct = 0;
     this.bonusOverpowerChance = 0; this.bonusOverpowerMult = 0;
     this.abilityCostMult = 1.0; this.goldFindBonus = 1.0; this.bonusDmgReduction = 0;
     this.bonusFireResist = 0; this.bonusColdResist = 0; this.bonusLightResist = 0; this.bonusPoisonResist = 0;
@@ -695,6 +697,13 @@ class Player {
     const ratioR = oldMaxR > 0 ? this.resource / oldMaxR : 1;
     this.maxHp = this.baseMaxHp + this.bonusMaxHp;
     this.dmgMult = this.baseDmgMult * (1 + this.bonusDmgPct / 100);
+    // Elemental damage bonuses from skill tree — use highest stacked element as general bonus
+    // (will become per-element routing once attacks have element tags)
+    const _elemMax = Math.max(
+      this.bonusFireDmgPct || 0, this.bonusColdDmgPct || 0,
+      this.bonusLightDmgPct || 0, this.bonusPoisonDmgPct || 0
+    );
+    if (_elemMax > 0) this.dmgMult *= (1 + _elemMax / 100);
     this.fireRateMult = this.baseFireRateMult * (1 + this.bonusFireRatePct / 100);
     this.pickupRange = this.basePickupRange + this.bonusPickupRange;
     this.speed = this.baseSpeed + this.bonusMoveSpeed;

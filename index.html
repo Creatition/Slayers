@@ -148,6 +148,7 @@
   let charTreeClass = 'archer'; // which class tree is shown on char screen
   let charTreeTab = 'talents'; // 'talents' or 'abilities'
   let inventoryTab = 0; // 0=GEAR  1=ABILITIES  2=SKILL TREE
+  let charScreenTab = 0; // 0=normal  1=sheet
   // Skill tree pan/zoom
   let treeViewX = 0, treeViewY = 0, treeViewZoom = 1.0;
   let treePanActive = false, treePanStartMX = 0, treePanStartMY = 0;
@@ -1974,8 +1975,8 @@
     if (savedGems && savedGems.length > 0) {
       player.gems = savedGems.slice(0, player.GEM_CAP);
     }
-    applyTalentsToPlayer(player); // apply persistent talent tree bonuses + abilities
-    applyPrimaryStatsToPlayer(player); // apply persistent primary stat allocations
+    applyPrimaryStatsToPlayer(player); // set base primary stats from allocated points
+    applyTalentsToPlayer(player); // apply talent tree bonuses (may += more primary stats)
     if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
@@ -2963,6 +2964,7 @@
     ctx.textAlign = 'left';
   }
   function drawCharScreen() {
+    if (charScreenTab === 1) { drawSheetScreen(); drawCharScreenTabBar(); return; }
     ctx.fillStyle = 'rgba(0,0,0,0.95)'; ctx.fillRect(0, 0, W, H);
     // ── Header — always read from classProgress[charTreeClass] for correct per-class data ───
     const _vcp = ensureCP(charTreeClass); // viewed class progress
@@ -3554,7 +3556,127 @@
     ctx.textAlign = 'left';
   }
 
+  function drawSheetScreen() {
+    // Full computed stat sheet — read-only, no spending here
+    if (!player) {
+      ctx.fillStyle = '#06060e'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#666'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('Start a run to see your stat sheet', W/2, H/2);
+      return;
+    }
+    ctx.fillStyle = '#06060e'; ctx.fillRect(0,0,W,H);
+    // Header bar
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,16,W,22);
+    ctx.fillStyle = '#88ffcc'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('📊 STAT SHEET — ' + player.class.name.toUpperCase() + '  LV ' + (player.level||1), W/2, 30);
+
+    // ── helper: draw a labeled stat row ──────────────────────────────
+    function sheetRow(label, value, color, y, icon) {
+      const lx = 10, vx = W - 10;
+      ctx.fillStyle = '#111122'; ctx.fillRect(0, y, W, 13);
+      ctx.fillStyle = color || '#aaaacc';
+      ctx.font = '7px monospace'; ctx.textAlign = 'left';
+      ctx.fillText((icon||'') + label, lx, y + 9);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(value, vx, y + 9);
+    }
+    function sectionHeader(label, color, y) {
+      ctx.fillStyle = color || '#334'; ctx.fillRect(0, y, W, 12);
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(label, W/2, y + 9);
+    }
+
+    const edm = player.effectiveDmgMult();
+    const critC = Math.min(100, player.critChance || 0);
+    const critD = ((player.baseCritDmg || 2.0) + (player.bonusCritDmg || 0));
+    const aspd  = Math.round((player.fireRateMult || 1.0) * 100);
+    const dodge = Math.min(50, player.dodge || 0);
+    const armr  = Math.round(player.armor || 0);
+    const dmgRed = Math.round(armr / (armr + 200) * 100); // approx armor → dmg reduction
+    const hp    = Math.round(player.maxHp || 0);
+    const regen = (player.regen || 0).toFixed(1);
+    const res   = Math.round(player.maxResource || 0);
+    const rreg  = (player.resourceRegen || 0).toFixed(1);
+    const wdmg  = Math.round((player.weaponDamage || 1) * edm);
+
+    let y = 42;
+    const rowH = 14;
+
+    // ── OFFENSE ──────────────────────────────────────────────────────
+    sectionHeader('⚔  OFFENSE', '#1a2a0a', y); y += 13;
+    sheetRow('Weapon Damage  (base × all mults)', wdmg + ' dmg',  '#ffdd44', y); y += rowH;
+    sheetRow('Damage Multiplier',  (edm * 100).toFixed(1) + '%', '#ffaa22', y); y += rowH;
+    sheetRow('Crit Chance',        critC.toFixed(1) + '%',       '#ff8844', y); y += rowH;
+    sheetRow('Crit Damage',        (critD * 100).toFixed(0) + '%', '#ff6622', y); y += rowH;
+    sheetRow('Attack Speed',       aspd + '%',                   '#ffcc88', y); y += rowH;
+
+    // ── DEFENSE ──────────────────────────────────────────────────────
+    sectionHeader('🛡  DEFENSE', '#0a1a2a', y); y += 13;
+    sheetRow('Max HP',             hp,                           '#ff5555', y); y += rowH;
+    sheetRow('HP Regen / sec',     regen,                        '#ff7777', y); y += rowH;
+    sheetRow('Armor',              armr + '  (~' + dmgRed + '% reduction)', '#aaaacc', y); y += rowH;
+    sheetRow('Dodge Chance',       dodge.toFixed(1) + '%',       '#44ddff', y); y += rowH;
+
+    // ── RESOURCES ────────────────────────────────────────────────────
+    sectionHeader('✦  RESOURCES', '#1a0a2a', y); y += 13;
+    sheetRow('Max Resource',       res,                          '#aa88ff', y); y += rowH;
+    sheetRow('Resource Regen / sec', rreg,                       '#cc99ff', y); y += rowH;
+
+    // ── RESISTANCES ──────────────────────────────────────────────────
+    sectionHeader('◈  RESISTANCES  (cap 75%)', '#1a1a0a', y); y += 13;
+    const resData = [
+      { label:'Fire',      val: player.fireResist   || 0, color: '#ff5522' },
+      { label:'Cold',      val: player.coldResist   || 0, color: '#55aaff' },
+      { label:'Lightning', val: player.lightResist  || 0, color: '#ffee22' },
+      { label:'Poison',    val: player.poisonResist || 0, color: '#44dd66' },
+    ];
+    for (const r of resData) {
+      const barW = W - 90, barX = 68, barY = y + 2;
+      ctx.fillStyle = '#0d0d1a'; ctx.fillRect(0, y, W, rowH);
+      ctx.fillStyle = r.color; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(r.label, 10, y + 9);
+      // bar bg
+      ctx.fillStyle = '#1a1a2e'; ctx.fillRect(barX, barY, barW, 9);
+      ctx.strokeStyle = r.color; ctx.lineWidth = 0.5; ctx.strokeRect(barX, barY, barW, 9);
+      // bar fill
+      const fill = Math.floor(barW * (Math.min(75, r.val) / 75));
+      ctx.fillStyle = r.color; ctx.globalAlpha = r.val >= 75 ? 0.85 : 0.45;
+      ctx.fillRect(barX + 1, barY + 1, fill, 7); ctx.globalAlpha = 1;
+      // value
+      ctx.fillStyle = r.val >= 75 ? '#ffd040' : '#cccccc';
+      ctx.font = 'bold 7px monospace'; ctx.textAlign = 'right';
+      ctx.fillText(r.val + '%', W - 4, y + 9);
+      y += rowH;
+    }
+    ctx.textAlign = 'left';
+  }
+
+  function drawCharScreenTabBar() {
+    // small overlay at bottom: tab indicator + LB/RB hint
+    ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, H - 13, W, 13);
+    ctx.font = '6px monospace'; ctx.textAlign = 'left';
+    ctx.fillStyle = '#2a2a44'; ctx.fillText('LB/Q ◄', 3, H - 3);
+    ctx.textAlign = 'right'; ctx.fillText('► RB', W - 3, H - 3);
+    const tabs2 = ['SKILLS', '📊 SHEET'];
+    const tw2 = 60;
+    const startX2 = W/2 - (tabs2.length * tw2) / 2;
+    for (let i = 0; i < tabs2.length; i++) {
+      const active2 = charScreenTab === i;
+      const tx2 = startX2 + i * tw2;
+      ctx.fillStyle = active2 ? '#1e3a8a' : '#0b0b1c';
+      ctx.fillRect(tx2, H - 13, tw2 - 2, 12);
+      ctx.strokeStyle = active2 ? '#4477dd' : '#1a1a38';
+      ctx.lineWidth = active2 ? 1.5 : 0.5; ctx.strokeRect(tx2 + 0.5, H - 12.5, tw2 - 3, 11);
+      ctx.lineWidth = 1;
+      ctx.fillStyle = active2 ? '#88bbff' : '#3d4f72';
+      ctx.font = (active2 ? 'bold ' : '') + '6px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(tabs2[i], tx2 + (tw2 - 2) / 2, H - 4);
+    }
+    ctx.textAlign = 'left';
+  }
+
   function drawInventoryScreen() {
+    if (inventoryTab === 4) { drawSheetScreen(); drawInventoryTabBar(); return; }
     if (inventoryTab === 3) { drawStatsScreen(); drawInventoryTabBar(); return; }
     if (inventoryTab > 0) { drawCharScreen(); drawInventoryTabBar(); return; }
     ctx.fillStyle = 'rgba(0,0,0,0.82)'; ctx.fillRect(0, 0, W, H);
@@ -5411,7 +5533,7 @@
 
   // ── Inventory tab bar overlay ─────────────────────────────────────────────
   function drawInventoryTabBar() {
-    const tabs = ['⚔ GEAR', '✦ ABILITIES', '◈ SKILL TREE', '★ STATS'];
+    const tabs = ['⚔ GEAR', '✦ ABILITIES', '◈ SKILL TREE', '★ STATS', '📊 SHEET'];
     const tw = Math.floor(W / tabs.length);
     ctx.fillStyle = '#07070f';
     ctx.fillRect(0, 0, W, 16);
@@ -5890,9 +6012,18 @@
       updateVirtualCursor(dt);
       if (gpJustPressed.has(0)) mouseClicked = true;
       if (keyJustPressed.has('escape') || keyJustPressed.has('c') || gpJustPressed.has(1)) {
-        state = STATE.CLASS_SELECT;
+        charScreenTab = 0; state = STATE.CLASS_SELECT;
       }
-      handleCharTreeClicks(() => { state = STATE.CLASS_SELECT; });
+      // LB/RB cycle between skill tree and stat sheet
+      if (gpJustPressed.has(4) || keyJustPressed.has('q')) {
+        charScreenTab = (charScreenTab + 1) % 2;
+        Sfx.uiClick && Sfx.uiClick();
+      }
+      if (gpJustPressed.has(5)) {
+        charScreenTab = (charScreenTab + 1) % 2;
+        Sfx.uiClick && Sfx.uiClick();
+      }
+      if (charScreenTab === 0) handleCharTreeClicks(() => { charScreenTab = 0; state = STATE.CLASS_SELECT; });
     }
     else if (state === STATE.TRIAL_LOADOUT) {
       updateVirtualCursor(dt);
@@ -5959,17 +6090,19 @@
       updateVirtualCursor(dt);
       // Tab switch: LB(GP4)/Q = prev, RB(GP5) = next
       if (gpJustPressed.has(4) || keyJustPressed.has('q')) {
-        inventoryTab = (inventoryTab + 2) % 3;
+        inventoryTab = (inventoryTab + 4) % 5;
         charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
         if (player) charTreeClass = player.class.id;
         if (inventoryTab === 2) fitTreeView();
+        charAbilScroll = 0;
         Sfx.uiClick && Sfx.uiClick();
       }
       if (gpJustPressed.has(5)) {
-        inventoryTab = (inventoryTab + 1) % 3;
+        inventoryTab = (inventoryTab + 1) % 5;
         charTreeTab = inventoryTab === 1 ? 'abilities' : 'talents';
         if (player) charTreeClass = player.class.id;
         if (inventoryTab === 2) fitTreeView();
+        charAbilScroll = 0;
         Sfx.uiClick && Sfx.uiClick();
       }
       if (inventoryTab > 0) {
