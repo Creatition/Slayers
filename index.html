@@ -906,10 +906,21 @@
     const isElite = e.elite === true;
     const eliteTier = e.eliteTier || 'rare';
     const auraCol = (isElite && e.eliteMods && e.eliteMods[0]) ? e.eliteMods[0].auraColor : '#ffd040';
+    const _typePalette = {
+      skeleton:   ['#d8d0b0', '#b0a888', '#ffffff'],
+      zombie:     ['#88aa44', '#446622', '#ccdd88'],
+      rat:        ['#a07848', '#786040', '#c89860'],
+      yeti:       ['#aaccff', '#6699dd', '#ffffff'],
+      frostWolf:  ['#88bbff', '#4477cc', '#ccddff'],
+      imp:        ['#ff6644', '#cc3322', '#ffaa44'],
+      hellhound:  ['#ff4400', '#cc2200', '#ff8844'],
+      shadow:     ['#8855cc', '#553388', '#cc99ff'],
+      voidCaster: ['#5533aa', '#9966ff', '#ccaaff'],
+    };
     const burstColors = isElite
       ? [auraCol, '#ffffff', '#ffd040']
-      : ['#f0f0e0', '#e8e8d8', '#b0b0a0'];
-    const burstCount = isElite ? (eliteTier === 'legendary' ? 30 : eliteTier === 'rare' ? 20 : 12) : 8;
+      : (_typePalette[e.type] || ['#d8d0b0', '#b8b0a0', '#ffffff']);
+    const burstCount = isElite ? (eliteTier === 'legendary' ? 30 : eliteTier === 'rare' ? 20 : 12) : 10;
     spawnBurst(e.x, e.y, burstColors, burstCount);
     // Molten: explode on death
     if (isElite && e.hasMod && e.hasMod('molten')) {
@@ -1141,8 +1152,11 @@
     bossRef = boss;
     enemies.push(boss);
     bossBannerTimer = 2.5;
-    shake = Math.min(shake + 4, 8);
-    spawnBurst(W / 2, 70, ['#7755aa', '#aa88cc', '#ffd040'], 18);
+    shake = Math.min(shake + 8, 14);
+    // Boss spawn: triple burst rings for dramatic entrance
+    spawnBurst(W / 2, 70, ['#aa66dd', '#cc99ff', '#ffd040', '#ffffff'], 32);
+    spawnBurst(W / 2 - 22, 70, ['#7755aa', '#dd99ff'], 10);
+    spawnBurst(W / 2 + 22, 70, ['#7755aa', '#dd99ff'], 10);
     Sfx.bossSpawn();
   }
   function findNearestEnemy(x, y, maxRange) {
@@ -1202,7 +1216,7 @@
             const dmg = Math.max(1, g.damage - player.armor);
             spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
             hitPauseTimer = Math.max(hitPauseTimer, 0.06);
-            if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } }
             else Sfx.playerHit();
             g.hit.add(player);
           }
@@ -1227,7 +1241,7 @@
               const dmg = Math.max(1, g.damage - player.armor);
               spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
               hitPauseTimer = Math.max(hitPauseTimer, 0.07);
-              if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+              if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } }
               else Sfx.playerHit();
             }
           }
@@ -1245,7 +1259,7 @@
             g.cooldowns.set('player', now);
             const died = player.takeDamage(g.damage, 'fire');
             spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#ff7700', size: 9 });
-            if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } } else Sfx.playerHit();
           }
         }
       } else if (g.type === 'poison_cloud') {
@@ -1259,7 +1273,7 @@
             g.cooldowns.set('player', now);
             const died = player.takeDamage(g.damage, 'poison');
             spawnDamageNumber(player.x, player.y - player.r, Math.max(1, g.damage - player.armor), { color: '#55ff66', size: 9 });
-            if (died) { Sfx.playerDie(); state = STATE.DEAD; } else Sfx.playerHit();
+            if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } } else Sfx.playerHit();
           }
         }
       } else if (g.type === 'holy_zone') {
@@ -1305,14 +1319,36 @@
         ctx.lineWidth = 1; ctx.globalAlpha = 1;
       } else if (g.type === 'fire_patch') {
         const lifeRatio = Math.max(0, g.life / g.maxLife);
-        const flicker = 0.45 + 0.2 * Math.sin(performance.now() * 0.018 + g.x);
-        ctx.globalAlpha = lifeRatio * flicker;
-        ctx.fillStyle = '#ff6600';
-        ctx.fillRect(g.x - g.r, g.y - g.r, g.r * 2, g.r * 2);
+        const flicker = 0.5 + 0.25 * Math.sin(performance.now() * 0.022 + g.x * 0.07);
         ctx.globalAlpha = lifeRatio * flicker * 0.7;
-        ctx.fillStyle = '#ffcc00';
-        ctx.fillRect(g.x - g.r + 4, g.y - g.r + 4, g.r * 2 - 8, g.r * 2 - 8);
+        ctx.fillStyle = '#ff4400';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * flicker * 0.65;
+        ctx.fillStyle = '#ff8800';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.7, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * flicker * 0.8;
+        ctx.fillStyle = '#ffdd44';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.38, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
+      } else if (g.type === 'burn') {
+        const lifeRatio = Math.max(0, g.life / g.maxLife);
+        const t = performance.now() * 0.001;
+        const flick1 = 0.5 + 0.3 * Math.sin(t * 7.3 + g.x * 0.1);
+        const flick2 = 0.5 + 0.3 * Math.sin(t * 5.1 + g.y * 0.13);
+        const col = g.color || '#ff6622';
+        ctx.globalAlpha = lifeRatio * flick1 * 0.55;
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * flick2 * 0.55;
+        ctx.fillStyle = '#ffaa33';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.65, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * flick1 * 0.7;
+        ctx.fillStyle = '#ffee88';
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r * 0.35, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = lifeRatio * 0.4;
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1; ctx.globalAlpha = 1;
       } else if (g.type === 'poison_cloud') {
         const lifeRatio = Math.max(0, g.life / g.maxLife);
         const pulse = 0.35 + 0.15 * Math.sin(performance.now() * 0.006 + g.y);
@@ -1532,7 +1568,7 @@
           const dmg = Math.max(1, ep.damage - player.armor);
           spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
           hitPauseTimer = Math.max(hitPauseTimer, 0.06);
-          if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+          if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } }
           else Sfx.playerHit();
           break;
         }
@@ -1548,7 +1584,7 @@
           const dmg = Math.max(1, enemy.contactDmg - player.armor);
           spawnDamageNumber(player.x, player.y - player.r, dmg, { color: '#ff5555', size: 10 });
           hitPauseTimer = Math.max(hitPauseTimer, 0.06);
-          if (died) { Sfx.playerDie(); state = STATE.DEAD; }
+          if (died) { Sfx.playerDie(); state = STATE.DEAD; if (playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222','#ff8844','#ffffff'], 24); } }
           else Sfx.playerHit();
           break;
         }
@@ -1599,6 +1635,7 @@
     state = STATE.LEVELUP;
     levelUpChoices = rollLevelUpChoices();
     levelUpRerollCost = 1;
+    levelUpFlashTimer = 1.5;
   }
   function pickLevelUp(idx) {
     if (idx < 0 || idx >= levelUpChoices.length) return;
@@ -7195,14 +7232,27 @@
       f.life -= 1/60;
       if (f.life <= 0) { abilityFlashes.splice(i, 1); continue; }
       const alpha = f.life / f.maxLife;
+      const progress = 1 - alpha;
       ctx.save();
-      ctx.globalAlpha = alpha * 0.75;
+      // Outer expanding ring
+      ctx.globalAlpha = alpha * 0.85;
       ctx.strokeStyle = f.color;
       ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.stroke();
-      ctx.globalAlpha = alpha * 0.12;
+      // Second (lagging) ripple ring
+      ctx.globalAlpha = alpha * 0.45;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.6, 0, Math.PI * 2); ctx.stroke();
+      // Inner fill glow
+      ctx.globalAlpha = alpha * (1 - progress) * 0.2;
       ctx.fillStyle = f.color;
-      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 0.5, 0, Math.PI * 2); ctx.fill();
+      // Bright center spark on fresh cast
+      if (progress < 0.3) {
+        ctx.globalAlpha = (1 - progress / 0.3) * 0.6;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.restore();
     }
     for (const g of xpGems) g.draw(ctx);
@@ -7228,24 +7278,52 @@
     for (const [_pid, _rp] of Object.entries(netPlayerStates)) {
       if (_pid === netPlayerId) continue; // skip self
       const _rcl = getClassById(_rp.classId || 'ranger');
+      const _rpx = Math.floor(_rp.x || 0), _rpy = Math.floor(_rp.y || 0);
       ctx.save();
-      ctx.globalAlpha = _rp.dead ? 0.3 : 0.85;
-      // Body
-      ctx.fillStyle = _rcl.color;
-      ctx.beginPath(); ctx.arc(Math.floor(_rp.x||0), Math.floor(_rp.y||0), 8, 0, Math.PI*2); ctx.fill();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(Math.floor(_rp.x||0), Math.floor(_rp.y||0), 8, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = _rp.dead ? 0.3 : 1.0;
+      // Draw actual player sprite scaled ×2 (same as local player)
+      const _rpSprite = (typeof PLAYER_SPRITES !== 'undefined') ? PLAYER_SPRITES[_rp.classId || 'ranger'] : null;
+      if (_rpSprite) {
+        drawSprite(ctx, _rpSprite, _rpx, _rpy, _rp.facing === -1, false, 2);
+      } else {
+        ctx.fillStyle = _rcl.color;
+        ctx.beginPath(); ctx.arc(_rpx, _rpy, 8, 0, Math.PI*2); ctx.fill();
+      }
       // HP bar
       const _rhpPct = Math.max(0, (_rp.hp||0) / (_rp.maxHp||100));
-      ctx.fillStyle = '#300'; ctx.fillRect(_rp.x - 12, _rp.y - 14, 24, 3);
+      ctx.globalAlpha = _rp.dead ? 0.3 : 0.9;
+      ctx.fillStyle = '#200'; ctx.fillRect(_rpx - 14, _rpy - 20, 28, 3);
       ctx.fillStyle = _rhpPct > 0.5 ? '#4f4' : _rhpPct > 0.25 ? '#fa4' : '#f44';
-      ctx.fillRect(_rp.x - 12, _rp.y - 14, Math.floor(24 * _rhpPct), 3);
+      ctx.fillRect(_rpx - 14, _rpy - 20, Math.floor(28 * _rhpPct), 3);
       // Name tag
-      ctx.fillStyle = _rcl.color; ctx.font = '5px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(_pid.toUpperCase(), _rp.x, _rp.y - 16);
+      ctx.globalAlpha = _rp.dead ? 0.3 : 0.85;
+      ctx.fillStyle = _rcl.color; ctx.font = 'bold 5px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(_pid.slice(0,8).toUpperCase(), _rpx, _rpy - 23);
       ctx.restore();
     }
     drawDamageNumbers(ctx);
+    // ── Screen-edge glow overlays ──────────────────────────────────────────
+    // Level-up: golden radial pulse from edges
+    if (levelUpFlashTimer > 0) {
+      const _lfa = Math.min(1, levelUpFlashTimer / 1.5) * 0.45;
+      const _lfg = ctx.createRadialGradient(W/2, H/2, H*0.25, W/2, H/2, H*0.85);
+      _lfg.addColorStop(0, 'rgba(0,0,0,0)');
+      _lfg.addColorStop(1, `rgba(255,208,64,${_lfa})`);
+      ctx.fillStyle = _lfg; ctx.fillRect(0, 0, W, H);
+    }
+    // Player death: red flash
+    if (playerDeathFlashTimer > 0) {
+      const _pdfa = Math.min(1, playerDeathFlashTimer / 0.6) * 0.55;
+      ctx.fillStyle = `rgba(180,20,20,${_pdfa})`; ctx.fillRect(0, 0, W, H);
+    }
+    // Boss spawn: red vignette pulse
+    if (bossBannerTimer > 0) {
+      const _bfa = Math.min(1, bossBannerTimer / 2.5) * 0.5;
+      const _bfg = ctx.createRadialGradient(W/2, H/2, H*0.2, W/2, H/2, H*0.9);
+      _bfg.addColorStop(0, 'rgba(0,0,0,0)');
+      _bfg.addColorStop(1, `rgba(200,30,30,${_bfa})`);
+      ctx.fillStyle = _bfg; ctx.fillRect(0, 0, W, H);
+    }
     ctx.restore();
 
     drawHud();

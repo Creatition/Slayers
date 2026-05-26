@@ -282,6 +282,68 @@ const SPRITE_NECROMANCER = {
   ],
 };
 
+// ============================================================
+// DRUID — antler crown, bark/leaf armor, nature-glow staff, bare feet
+// 0=outline 1=skin-shadow 2=skin 3=antler 4=bark-dark 5=bark-light
+// 6=leaf-trim 7=staff-glow(green) 8=staff-wood 9=eye-glow(green)
+// ============================================================
+const SPRITE_DRUID = {
+  w: 10, h: 14,
+  palette: [
+    '#0e1508', '#a87850', '#e8c898', '#7a5220',
+    '#2a5a18', '#447a28', '#66aa30', '#77ff88',
+    '#5a3c18', '#00cc44',
+  ],
+  rows: [
+    '..03.30...',  //  0  antler tines (two prongs)
+    '.0333330..',  //  1  antler base / crown
+    '.0322230..',  //  2  forehead
+    '.0392290..',  //  3  eyes (9=glowing green)
+    '.0322220..',  //  4  cheeks
+    '..00220...',  //  5  chin
+    '.04444487.',  //  6  bark-shoulders + staff glow tip
+    '0455554487',  //  7  bark-chest + staff
+    '0455554488',  //  8  bark-body + shaft
+    '0466554488',  //  9  leaf-trim belt + shaft
+    '.04555488.',  // 10  hips + shaft
+    '.04..4488.',  // 11  legs + shaft
+    '.04..4488.',  // 12  legs + shaft
+    '.04..40.8.',  // 13  bare feet + staff end
+  ],
+};
+
+// ============================================================
+// AMAZONIAN — red feather headdress, tanned skin, tribal leather,
+//             bone-tipped spear. Distinct from Ranger (darker + spear).
+// 0=outline 1=skin-shadow(tanned) 2=skin(tanned) 3=feather(red-orange)
+// 4=leather-dark 5=leather-light 6=gold-bone-trim 7=spear-tip(bone)
+// 8=spear-shaft 9=eye
+// ============================================================
+const SPRITE_AMAZONIAN = {
+  w: 10, h: 14,
+  palette: [
+    '#1a0808', '#8a5c30', '#c88840', '#cc4400',
+    '#5a3818', '#8a5828', '#d8a838', '#f0e8c0',
+    '#7a4818', '#1a0808',
+  ],
+  rows: [
+    '..03330...',  //  0  feather crest top
+    '.0333330..',  //  1  feathers spread
+    '.0322230..',  //  2  forehead (tanned)
+    '.0392290..',  //  3  eyes
+    '.0322220..',  //  4  cheeks (tanned)
+    '..00220...',  //  5  chin
+    '.04444487.',  //  6  leather-shoulders + spear tip (bone 7)
+    '0455554487',  //  7  chest + spear shaft-top
+    '0455554488',  //  8  body + shaft
+    '0466664488',  //  9  gold-trim belt + shaft
+    '.04555488.',  // 10  hips + shaft
+    '.04..4488.',  // 11  legs + shaft
+    '.04..4488.',  // 12  legs + shaft
+    '.06..60.8.',  // 13  boots + shaft base
+  ],
+};
+
 const PLAYER_SPRITES = {
   ranger:      SPRITE_ARCHER,       // Archer sprite repurposed for Ranger
   sorcerer:    SPRITE_WIZARD,       // Wizard sprite repurposed for Sorcerer
@@ -291,8 +353,8 @@ const PLAYER_SPRITES = {
   crusader:    SPRITE_PALADIN,      // Paladin sprite repurposed for Crusader
   shaman:      SPRITE_WITCH_DOCTOR, // Witch Doctor sprite repurposed for Shaman
   necromancer: SPRITE_NECROMANCER,
-  druid:       SPRITE_MONK,         // TODO: unique Druid sprite (placeholder: Monk)
-  amazonian:   SPRITE_ARCHER,       // TODO: unique Amazonian sprite (placeholder: Archer)
+  druid:       SPRITE_DRUID,        // unique Druid sprite
+  amazonian:   SPRITE_AMAZONIAN,    // unique Amazonian sprite
 };
 
 
