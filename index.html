@@ -5278,7 +5278,7 @@
       if (keyJustPressed.has('r')) doRefreshShop();
       // Space/Enter/A = advance wave (same as READY button)
       if (keyJustPressed.has(' ') || keyJustPressed.has('enter') || gpJustPressed.has(0)) {
-        state = STATE.PLAYING; selectedInvIdx = -1;
+        selectedInvIdx = -1; startNextWave();
       }
 
       const shopIdx = getShopIdxAtMouse();
@@ -5344,7 +5344,7 @@
           else if (isHovering(refX, SHOP_Y, 90, SHOP_ITEM_H)) { doRefreshShop(); }
           // READY button
           else if (isHovering(W - 130, H - 30, 120, 24)) {
-            state = STATE.PLAYING; selectedInvIdx = -1;
+            selectedInvIdx = -1; startNextWave();
           }
           else { selectedInvIdx = -1; }
         }
