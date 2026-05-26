@@ -561,6 +561,9 @@ class Player {
     this.gems = []; this.GEM_CAP = 50; // gem stash
     this.gold = 0;
     this.mats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
+    this.isMoving = false;
+    this.animator = (this.class.id === 'berserker' && typeof BerserkerAnimator !== 'undefined')
+      ? new BerserkerAnimator() : null;
   }
   onCrit() {
     if (this.class.critResourceGain) {
@@ -731,6 +734,7 @@ class Player {
     this.y += Actions.moveY * this.effectiveSpeed() * dt;
     this.x = Math.max(ARENA_PAD + this.r, Math.min(W - ARENA_PAD - this.r, this.x));
     this.y = Math.max(ARENA_PAD + this.r, Math.min(H - ARENA_PAD - this.r, this.y));
+    this.isMoving = Math.abs(Actions.moveX) > 0.1 || Math.abs(Actions.moveY) > 0.1;
     if (Actions.moveX >  0.1) this.facing =  1;
     else if (Actions.moveX < -0.1) this.facing = -1;
     if (this.iframeTimer > 0) this.iframeTimer -= dt;
@@ -791,6 +795,8 @@ class Player {
     }
     // Decay weapon-overlay animation timer
     if (this.swingTimer > 0) this.swingTimer -= dt;
+    // Tick PixelLab animator (berserker only)
+    if (this.animator) this.animator.update(dt, this.isMoving, this.swingTimer > 0);
   }
   // Returns 'melee' or 'ranged' based on currently equipped weapon, falling back to class default.
   weaponKind() {
@@ -898,15 +904,19 @@ class Player {
       ctx.fillText(this.boneArmorCharges, px + 5, py - 8);
     }
     // Pick the right class sprite. facing===-1 mirrors horizontally.
+    // For the Berserker, try the PixelLab PNG animator first; fall back to ASCII sprite.
     const sprite = (typeof PLAYER_SPRITES !== 'undefined')
       ? PLAYER_SPRITES[this.class.id]
       : null;
-    if (sprite && typeof drawSprite === 'function') {
-      drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
-    } else {
-      // Fallback: primitive draw if sprites failed to load
-      ctx.fillStyle = flash ? '#ff4444' : this.class.color;
-      ctx.fillRect(px - 4, py - 2, 8, 7);
+    const drewPng = this.animator ? this.animator.draw(ctx, px, py, this.facing === -1, flash) : false;
+    if (!drewPng) {
+      if (sprite && typeof drawSprite === 'function') {
+        drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
+      } else {
+        // Fallback: primitive draw if sprites failed to load
+        ctx.fillStyle = flash ? '#ff4444' : this.class.color;
+        ctx.fillRect(px - 4, py - 2, 8, 7);
+      }
     }
     // Equipped weapon overlay — drawn over the sprite so you can SEE the gear you have on.
     // We only render the overlay when an item is equipped in the weapon slot (the class's

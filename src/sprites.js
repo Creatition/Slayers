@@ -1197,3 +1197,120 @@ const BOSS_SPRITES = {
   Pyromancer:   SPRITE_PYROMANCER,
   SlayerKiller: SPRITE_SLAYERKILLER,
 };
+
+// ============================================================
+// BERSERKER ANIMATED SPRITE — PixelLab PNG frames
+// 248×248px source, drawn at BERSERKER_DRAW_SIZE logical px.
+// Only east direction loaded — flipped for west (facing left).
+// ============================================================
+const BERSERKER_DRAW_SIZE = 40; // tune this to taste
+
+const _BERK_CDN = 'https://backblaze.pixellab.ai/file/pixellab-characters/' +
+  'e24e58b2-a3f5-431f-9a72-1decbe56c99c/' +
+  '077c2ac9-77c2-4aac-9595-269166c29ba2/animations/';
+
+const BERSERKER_ANIM_CFG = {
+  idle:   { id: '30439036-5547-4980-8405-718a58fe2e6b', count: 4, fps: 2,  loop: true  },
+  run:    { id: '64784ee9-fce5-4468-b640-9a014474e96f', count: 4, fps: 8,  loop: true  },
+  attack: { id: '6d7da304-028c-45bd-8737-ec8d6708760c', count: 5, fps: 12, loop: false },
+};
+
+// Shared preloaded frames — loaded once, reused by all Berserker Player instances.
+const _berkFrames = { idle: [], run: [], attack: [] };
+let _berkReady = false;
+
+function _loadBerserkerFrames() {
+  let total = 0, done = 0;
+  for (const [state, cfg] of Object.entries(BERSERKER_ANIM_CFG)) {
+    for (let i = 0; i < cfg.count; i++) {
+      total++;
+      const img = new Image();
+      img.src = `${_BERK_CDN}${cfg.id}/east/${i}.png`;
+      img.onload  = () => { if (++done >= total) _berkReady = true; };
+      img.onerror = () => { ++done; };  // individual frame failure is non-fatal
+      _berkFrames[state].push(img);
+    }
+  }
+}
+_loadBerserkerFrames();
+
+class BerserkerAnimator {
+  constructor() {
+    this.state  = 'idle';
+    this.frame  = 0;
+    this.timer  = 0;
+    this._attackLocked = false; // true while non-looping attack plays out
+  }
+
+  update(dt, isMoving, isAttacking) {
+    // Trigger attack anim on swing start
+    if (isAttacking && !this._attackLocked) {
+      this.state = 'attack';
+      this.frame = 0;
+      this.timer = 0;
+      this._attackLocked = true;
+    }
+
+    // Advance frame
+    const cfg = BERSERKER_ANIM_CFG[this.state];
+    this.timer += dt;
+    const frameDur = 1 / cfg.fps;
+    while (this.timer >= frameDur) {
+      this.timer -= frameDur;
+      this.frame++;
+      if (this.frame >= cfg.count) {
+        if (cfg.loop) {
+          this.frame = 0;
+        } else {
+          this.frame = cfg.count - 1; // hold last frame
+          this._attackLocked = false; // unlock so next swing can retrigger
+        }
+      }
+    }
+
+    // Return from completed attack to movement state
+    if (!this._attackLocked && this.state === 'attack' && this.frame === cfg.count - 1) {
+      const next = isMoving ? 'run' : 'idle';
+      this.state = next;
+      this.frame = 0;
+      this.timer = 0;
+    }
+
+    // Switch between idle / run when not attacking
+    if (this.state !== 'attack') {
+      const want = isMoving ? 'run' : 'idle';
+      if (want !== this.state) {
+        this.state = want;
+        this.frame = 0;
+        this.timer = 0;
+      }
+    }
+  }
+
+  // Returns true if it drew, false to signal fallback to ASCII sprite.
+  draw(ctx, cx, cy, flip, flash) {
+    if (!_berkReady) return false;
+    const imgs = _berkFrames[this.state];
+    const img  = imgs[Math.min(this.frame, imgs.length - 1)];
+    if (!img || !img.complete || img.naturalWidth === 0) return false;
+
+    const s  = BERSERKER_DRAW_SIZE;
+    const dx = flip ? cx + s / 2 : cx - s / 2; // negative dw handles mirror
+    const dw = flip ? -s : s;
+
+    ctx.save();
+    if (flash) {
+      // White-flash: draw normal then overlay
+      ctx.drawImage(img, dx, cy - s / 2, dw, s);
+      ctx.filter = 'brightness(10) saturate(0)';
+      ctx.globalAlpha = 0.75;
+      ctx.drawImage(img, dx, cy - s / 2, dw, s);
+      ctx.filter = 'none';
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.drawImage(img, dx, cy - s / 2, dw, s);
+    }
+    ctx.restore();
+    return true;
+  }
+}
