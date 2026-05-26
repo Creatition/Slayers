@@ -283,14 +283,16 @@ const SPRITE_NECROMANCER = {
 };
 
 const PLAYER_SPRITES = {
-  archer:      SPRITE_ARCHER,
-  wizard:      SPRITE_WIZARD,
-  warrior:     SPRITE_WARRIOR,
-  rogue:       SPRITE_ROGUE,
-  monk:        SPRITE_MONK,
-  paladin:     SPRITE_PALADIN,
-  witchdoctor: SPRITE_WITCH_DOCTOR,
+  ranger:      SPRITE_ARCHER,       // Archer sprite repurposed for Ranger
+  sorcerer:    SPRITE_WIZARD,       // Wizard sprite repurposed for Sorcerer
+  berserker:   SPRITE_WARRIOR,      // Warrior sprite repurposed for Berserker
+  assassin:    SPRITE_ROGUE,        // Rogue sprite repurposed for Assassin
+  templar:     SPRITE_MONK,         // Monk sprite repurposed for Templar
+  crusader:    SPRITE_PALADIN,      // Paladin sprite repurposed for Crusader
+  shaman:      SPRITE_WITCH_DOCTOR, // Witch Doctor sprite repurposed for Shaman
   necromancer: SPRITE_NECROMANCER,
+  druid:       SPRITE_MONK,         // TODO: unique Druid sprite (placeholder: Monk)
+  amazonian:   SPRITE_ARCHER,       // TODO: unique Amazonian sprite (placeholder: Archer)
 };
 
 
