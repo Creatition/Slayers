@@ -128,6 +128,7 @@
   let runWavesCompleted = 0;
   let runBossesKilled = 0;
   let runXpAwarded = false;
+  let runXpEarned = 0;   // total gem XP collected this run → feeds persistent cp.xp
   let xpVacuumTimer = 0;       // end-of-run XP ground-gem vacuum
   let xpVacuumDone  = false;
   let xpVacuumAmount = 0;      // XP shown as '+N XP' pop
@@ -197,13 +198,16 @@
   function awardRunXp(wavesCompleted, bossesKilled, victory) {
     const cid = selectedClassId;
     const cp = ensureCP(cid);
-    let xp = wavesCompleted * 8 + bossesKilled * 30 + (victory ? 80 : 0);
-    // Levels come from in-run pickLevelUp; XP is stored for display only
-    if (cp.level < CHAR_LEVEL_CAP) {
-      cp.xp += xp;
-      const xpCap = charXpToNext(cp.level);
-      if (cp.xp >= xpCap) cp.xp = xpCap - 1; // bar fills to just-under-cap until next in-run level
+    if (cp.level >= CHAR_LEVEL_CAP) { saveData(); return; }
+    // XP from waves/bosses/victory + half of in-run gem XP — both gate persistent level
+    const gemBonus = Math.floor(runXpEarned * 0.5);
+    let xp = wavesCompleted * 20 + bossesKilled * 60 + (victory ? 100 : 0) + gemBonus;
+    cp.xp += xp;
+    while (cp.xp >= charXpToNext(cp.level) && cp.level < CHAR_LEVEL_CAP) {
+      cp.xp -= charXpToNext(cp.level);
+      cp.level++;
     }
+    if (cp.level >= CHAR_LEVEL_CAP) cp.xp = 0;
     // Sync run-time globals
     charLevel = cp.level; charXp = cp.xp; treePoints = cp.treePts; charStatPoints = cp.statPts;
     startXpVacuum(xp);  // vacuum ground gems
@@ -1568,15 +1572,14 @@
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
     if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Ability Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
-    // Award persistent character level + skill-tree + stat points every in-run level-up
+    // Award persistent skill-tree + stat points every in-run level-up
+    // (Persistent character LEVEL comes from run-completion XP via awardRunXp)
     { const _lcp = ensureCP(selectedClassId);
       if (_lcp.level < CHAR_LEVEL_CAP) {
-        _lcp.level++;
         _lcp.treePts++; _lcp.statPts++;
-        charLevel = _lcp.level; treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
-        spawnDamageNumber(player.x, player.y - 28, `▲ LV ${_lcp.level}`, { color: '#ffdd44', size: 12, vy: -60, life: 2.0 });
-        spawnDamageNumber(player.x, player.y - 42, '+1 Skill Tree Pt',   { color: '#ffd040', size: 9,  vy: -42, life: 1.6 });
-        spawnDamageNumber(player.x, player.y - 52, '+1 Stat Pt',         { color: '#ff8844', size: 9,  vy: -34, life: 1.6 });
+        treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
+        spawnDamageNumber(player.x, player.y - 28, '+1 Skill Tree Pt', { color: '#ffd040', size: 10, vy: -52, life: 1.8 });
+        spawnDamageNumber(player.x, player.y - 40, '+1 Stat Pt',       { color: '#ff8844', size: 10, vy: -42, life: 1.6 });
         saveData();
       }
     }
@@ -2103,11 +2106,14 @@
     applyPrimaryStatsToPlayer(player); // set base primary stats from allocated points
     applySkillTreeToPlayer(player); // apply skill tree bonuses (may += more primary stats)
     if (typeof applyParagonToPlayer === 'function') applyParagonToPlayer(player);
+    // Track in-run gem XP for persistent level carry-over
+    { const _origAddXp = player.addXp.bind(player);
+      player.addXp = function(amt) { runXpEarned += amt; _origAddXp(amt); }; }
     enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
-    runWavesCompleted = 0; runBossesKilled = 0; runXpAwarded = false;
+    runWavesCompleted = 0; runBossesKilled = 0; runXpAwarded = false; runXpEarned = 0;
     xpVacuumTimer = 0; xpVacuumDone = false; xpVacuumAmount = 0;
     legendaryEliteSpawned = false; uniqueEliteSpawned = false;
     uniqueEliteAvailable  = Math.random() < 0.20; // ~1 in 5 runs gets a unique elite
