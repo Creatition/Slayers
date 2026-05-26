@@ -72,213 +72,218 @@ function drawSprite(ctx, sprite, cx, cy, flip, hitFlash, scale) {
 
 const SPRITE_ARCHER = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=hair(brown) 4=tunic-dark(forest)
-  // 5=tunic-light 6=boots/belt 7=bowstring 8=bow 9=eye
+  // 0=outline(near-black) 1=skin-shadow(tanned) 2=skin(tanned) 3=unused
+  // 4=hood-dark 5=tunic-light 6=belt 7=bow-string 8=bow-wood 9=eye-amber
   palette: [
-    '#1a0e08', '#a87850', '#e8c898', '#5a3a20',
-    '#2a5530', '#4a8050', '#6a4828', '#e8d090',
-    '#8a6230', '#1a0e08',
+    '#070906', '#7a4c1c', '#c28030', '#070906',
+    '#0c2810', '#1a4c18', '#5a3810', '#f0d040',
+    '#7a4818', '#e87010',
   ],
   rows: [
-    '..00000...',  //  0  hair top
-    '.0333330..',  //  1  hair
-    '.0322230..',  //  2  forehead
-    '.0392290..',  //  3  eyes
-    '.0322220..',  //  4  cheeks
-    '..00220...',  //  5  chin
-    '.04444408.',  //  6  shoulders + bow notch
-    '0455554408',  //  7  chest with bow tip
-    '0455554478',  //  8  string + bow body
-    '.04555408.',  //  9  waist + bow
-    '.04555408.',  // 10  hips + bow
-    '.04..40...',  // 11  legs
-    '.04..40...',  // 12  legs
-    '.06..60...',  // 13  boots
+    '..04440...',
+    '.0444440..',
+    '.0444440..',
+    '.0492940..',
+    '.0442240..',
+    '..04420...',
+    '.04444487.',
+    '0455554708',
+    '0455554708',
+    '0466664408',
+    '.04555408.',
+    '.04..4408.',
+    '.04..4408.',
+    '.06..60.8.'
   ],
 };
 
 const SPRITE_WIZARD = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=beard(grey) 4=robe-dark(purple)
-  // 5=robe-light 6=trim(gold) 7=staff-orb 8=staff-wood 9=eye
+  // 0=outline(near-black) 1=skin-shadow 2=skin-pale 3=beard-grey
+  // 4=robe-near-black 5=robe-dark-violet 6=gold-trim 7=staff-orb 8=staff-wood 9=eye
   palette: [
-    '#1a0e08', '#a87850', '#e8c898', '#b0b0b8',
-    '#3a2055', '#5a3a85', '#d8a838', '#aaccff',
-    '#5a3a20', '#1a0e08',
+    '#070610', '#907060', '#d8c0a0', '#9090a8',
+    '#100630', '#281268', '#c09020', '#aaddff',
+    '#4a3818', '#070610',
   ],
   rows: [
-    '..04440...',  //  0  pointed hat top
-    '.0444440..',  //  1  hat
-    '.0444440..',  //  2  hat brim
-    '.0322230..',  //  3  forehead
-    '.0392290.7',  //  4  eyes + orb glow
-    '.0322220.8',  //  5  cheek + staff orb
-    '.03333308.',  //  6  beard
-    '0455554408',  //  7  shoulders robe
-    '0455554408',  //  8  robe body + staff
-    '0466666408',  //  9  belt
-    '04555540.8',  // 10  hips
-    '04555540.8',  // 11  robe
-    '.04...0...',  // 12  hem
-    '.04....0..',  // 13  hem
+    '...04440..',
+    '..044440..',
+    '0044444400',
+    '.0332230..',
+    '.0392290.7',
+    '.0333330.8',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466666488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.04..40.8.'
   ],
 };
 
 const SPRITE_WARRIOR = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=hair(red) 4=armor-dark(steel)
-  // 5=armor-light 6=boots/leather 7=sword-hilt 8=sword-blade 9=eye
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=hair-blood-red
+  // 4=armor-near-black 5=armor-steel 6=belt-leather 7=blade-gleam 8=blade-body 9=eye
   palette: [
-    '#1a0e08', '#a87850', '#e8c898', '#a83020',
-    '#4a4a55', '#8a8a98', '#5a3a20', '#d8a838',
-    '#d8d8e0', '#1a0e08',
+    '#0a0808', '#9a4c18', '#e09050', '#cc1a00',
+    '#222028', '#545060', '#3a2810', '#f0f0f8',
+    '#686878', '#0a0808',
   ],
   rows: [
-    '..03330...',  //  0  hair top
-    '.0333330..',  //  1  hair
-    '.0322230..',  //  2  forehead
-    '.0392290..',  //  3  eyes
-    '.0322220.8',  //  4  cheek + sword tip
-    '..00220..8',  //  5  chin + blade
-    '.04444408.',  //  6  pauldrons + blade
-    '0455554408',  //  7  chest plate
-    '0455554478',  //  8  armor + hilt
-    '0466666408',  //  9  belt + grip
-    '.04555408.',  // 10  hips
-    '.04...40..',  // 11  legs
-    '.04...40..',  // 12  legs
-    '.06...60..',  // 13  boots
+    '..03330...',
+    '.0333330..',
+    '.0322230..',
+    '.0392290..',
+    '.0322220.8',
+    '..00220..8',
+    '.04444408.',
+    '0455554408',
+    '0455554478',
+    '0466666408',
+    '.04555408.',
+    '.04..40.8.',
+    '.04..40.8.',
+    '.06..60.8.'
   ],
 };
 
 
 const SPRITE_ROGUE = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=hood-dark 4=leather-dark 5=leather-light 6=belt 7=blade 8=hilt 9=eye-glow
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=hood-near-black
+  // 4=leather-dark-violet 5=leather-violet 6=belt-dark 7=blade-shine 8=blade 9=eye-TEAL
   palette: [
-    '#0e081a', '#a87850', '#e8c898', '#2a1048',
-    '#4a2878', '#7848a8', '#1e0e38', '#c8c0e8',
-    '#8858b0', '#cc88ff',
+    '#06040e', '#907050', '#c89060', '#160828',
+    '#2a1460', '#502898', '#0e0820', '#d8d4f0',
+    '#8858c0', '#00f0d0',
   ],
   rows: [
-    '..03330...',  //  0  hood top
-    '.0333330..',  //  1  hood
-    '.0333340..',  //  2  hood brim (skin barely)
-    '.0309940..',  //  3  glowing eyes
-    '.0334430..',  //  4  mask shadow
-    '..03430...',  //  5  chin guard
-    '.04444487.',  //  6  shoulders + dagger tip
-    '0455554487',  //  7  chest + dagger
-    '0455554488',  //  8  body + dagger
-    '0466666488',  //  9  belt + hilt
-    '.04555488.',  // 10  hips
-    '.04..4488.',  // 11  legs
-    '.04..40...',  // 12  legs
-    '.06..60...',  // 13  boots
+    '..03330...',
+    '.0333330..',
+    '.0333340..',
+    '.0309940..',
+    '.0334430..',
+    '..03430...',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466666488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.06..60.8.'
   ],
 };
 
 const SPRITE_MONK = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=topknot 4=gi-dark 5=gi-light 6=sash-gold 7=wrap 8=accent 9=eye
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=topknot-dark
+  // 4=gi-dark-orange 5=gi-bright-orange 6=sash-gold 7=wrap-pale-gold 8=accent 9=eye-FIRE
   palette: [
-    '#1a0e08', '#a87850', '#e8c898', '#2a1a08',
-    '#7a3c10', '#d07028', '#d8a020', '#e8d098',
-    '#a05818', '#1a0e08',
+    '#080808', '#9a5018', '#e09050', '#1a1008',
+    '#8c3c08', '#e06010', '#e8a000', '#ffe880',
+    '#c87000', '#ff8800',
   ],
   rows: [
-    '...03330..',  //  0  topknot tip
-    '..033330..',  //  1  topknot
-    '.0322230..',  //  2  forehead
-    '.0392290..',  //  3  eyes
-    '.0322220..',  //  4  cheeks
-    '..00220...',  //  5  chin
-    '.0444447..',  //  6  gi shoulders + raised fist
-    '0455554477',  //  7  gi chest + fist out
-    '0455554472',  //  8  gi body + bare forearm
-    '0466666472',  //  9  sash + arm
-    '.04555.7..',  // 10  hips + fist level
-    '.04..40...',  // 11  legs
-    '.04..40...',  // 12  legs
-    '.02..20...',  // 13  bare feet
+    '...03330..',
+    '..033330..',
+    '.0322230..',
+    '.0392290..',
+    '.0322220..',
+    '..00220...',
+    '.0444447..',
+    '0455554477',
+    '0455554472',
+    '0466666472',
+    '.04555.7..',
+    '.04..40...',
+    '.04..40...',
+    '.02..20...'
   ],
 };
 
 const SPRITE_PALADIN = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=gold-trim 4=plate-dark 5=plate-light 6=gold 7=hammer-head 8=haft 9=visor
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=unused
+  // 4=plate-dark-steel 5=plate-blue-grey 6=plate-highlight+cross 7=hammer-HOLY-GOLD 8=haft 9=visor-GLOW
   palette: [
-    '#1a1008', '#a87850', '#e8c898', '#d8a828',
-    '#4a4840', '#9a9888', '#c8a020', '#906820',
-    '#4a2c18', '#1a1008',
+    '#0c0c18', '#a08050', '#e0c090', '#0c0c18',
+    '#282840', '#5868a0', '#dde8ff', '#ffe840',
+    '#5a4818', '#ffe840',
   ],
   rows: [
-    '..04440...',  //  0  helm dome top
-    '.0444440..',  //  1  helm dome
-    '.0444420..',  //  2  helm face gap
-    '.0499940..',  //  3  visor slit (eyes)
-    '.0444440..',  //  4  full visor lower
-    '..04440...',  //  5  chin guard
-    '.04444487.',  //  6  pauldrons + hammer head
-    '0455556487',  //  7  chest plate + hammer
-    '0455556488',  //  8  armor body + haft
-    '0466666488',  //  9  belt + haft
-    '5455556488',  // 10  hips + haft
-    '.04..4488.',  // 11  legs
-    '.04..40..8',  // 12  legs + butt end
-    '.06..60...',  // 13  greaves
+    '..04440...',
+    '.0444440..',
+    '.0444620..',
+    '.0499940..',
+    '.0444440..',
+    '..04440...',
+    '.04444487.',
+    '0456554487',
+    '0456554488',
+    '0466666488',
+    '5455556488',
+    '.04..4488.',
+    '.04..40..8',
+    '.06..60...'
   ],
 };
 
 const SPRITE_WITCH_DOCTOR = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin 3=bone-mask 4=robe-dark 5=robe-light 6=beads-orange 7=staff-glow 8=staff-wood 9=eye-hollow
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=bone-ivory
+  // 4=robe-near-black 5=robe-dark-green 6=beads-ORANGE 7=staff-glow-GREEN 8=staff-wood 9=eye-GREEN
   palette: [
-    '#0a1208', '#a87850', '#e8c898', '#d8d0b0',
-    '#183818', '#2a5828', '#d87020', '#77ff88',
-    '#4a3018', '#0a1208',
+    '#040c04', '#9a6030', '#d09050', '#e0d8a0',
+    '#080e08', '#142a14', '#e05a00', '#66ff44',
+    '#3a2010', '#66ff44',
   ],
   rows: [
-    '.03333340.',  //  0  headdress wide
-    '0333333330',  //  1  headdress
-    '.0333340..',  //  2  skull mask top
-    '.0399940..',  //  3  hollow eye sockets
-    '.0333340..',  //  4  skull lower
-    '..03340...',  //  5  jaw
-    '.04444487.',  //  6  robe shoulders + staff glow
-    '0455554487',  //  7  robe chest + staff
-    '0455554488',  //  8  robe body
-    '0466666488',  //  9  bead necklace + staff
-    '.04555488.',  // 10  robe hem
-    '.04..4488.',  // 11  legs
-    '.04..4488.',  // 12  legs
-    '.04..40.8.',  // 13  hem end + staff tip
+    '.03333340.',
+    '0333333330',
+    '.0333340..',
+    '.0399940..',
+    '.0333340..',
+    '..03340...',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466666488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.04..40.8.'
   ],
 };
 
 const SPRITE_NECROMANCER = {
   w: 10, h: 14,
-  // 0=outline 1=skin-shadow 2=skin(pale) 3=cowl-deep 4=robe-dark 5=robe-mid 6=trim-purple 7=bone-glow 8=staff-bone 9=eye-glow
+  // 0=outline(near-black) 1=skin-shadow 2=skin-pale-corpse 3=cowl-near-black
+  // 4=robe-near-black 5=robe-very-dark-purple 6=trim-purple 7=staff-bone-glow 8=staff-bone 9=eye-MAGENTA
   palette: [
-    '#0e0818', '#907060', '#d8c8b8', '#0a0618',
-    '#1a1230', '#2e224a', '#6644a0', '#ddccff',
-    '#9988cc', '#cc00ff',
+    '#04040e', '#786050', '#c0a890', '#060410',
+    '#080618', '#160e30', '#5028a0', '#f0c0ff',
+    '#9878d0', '#ff00ff',
   ],
   rows: [
-    '..03330...',  //  0  cowl peak
-    '.0333330..',  //  1  cowl deep
-    '.0333330..',  //  2  cowl shadow
-    '.0309930..',  //  3  pale glowing eyes
-    '.0333320..',  //  4  lower cowl (pale jaw)
-    '..03320...',  //  5  chin
-    '.04444487.',  //  6  robe shoulders + staff glow
-    '0455554487',  //  7  robe chest + staff
-    '0455554488',  //  8  robe body
-    '0466554488',  //  9  robe trim + staff
-    '.04555488.',  // 10  robe hem
-    '.04..4488.',  // 11  legs
-    '.04..4488.',  // 12  legs
-    '.04..40.8.',  // 13  hem + staff tip
+    '..03330...',
+    '.0333330..',
+    '.0333330..',
+    '.0309930..',
+    '.0333320..',
+    '..03320...',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466554488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.04..40.8.'
   ],
 };
 
@@ -289,26 +294,28 @@ const SPRITE_NECROMANCER = {
 // ============================================================
 const SPRITE_DRUID = {
   w: 10, h: 14,
+  // 0=outline(near-black) 1=skin-shadow 2=skin 3=antler-bone-brown
+  // 4=bark-near-black 5=bark-dark-green 6=leaf-trim-BRIGHT 7=staff-glow-GREEN 8=staff-wood 9=eye-EMERALD
   palette: [
-    '#0e1508', '#a87850', '#e8c898', '#7a5220',
-    '#2a5a18', '#447a28', '#66aa30', '#77ff88',
-    '#5a3c18', '#00cc44',
+    '#04100a', '#9a7040', '#d8a860', '#8a5c1c',
+    '#0a2008', '#1a5010', '#4aaa18', '#88ff44',
+    '#5a3a14', '#44ff88',
   ],
   rows: [
-    '..03.30...',  //  0  antler tines (two prongs)
-    '.0333330..',  //  1  antler base / crown
-    '.0322230..',  //  2  forehead
-    '.0392290..',  //  3  eyes (9=glowing green)
-    '.0322220..',  //  4  cheeks
-    '..00220...',  //  5  chin
-    '.04444487.',  //  6  bark-shoulders + staff glow tip
-    '0455554487',  //  7  bark-chest + staff
-    '0455554488',  //  8  bark-body + shaft
-    '0466554488',  //  9  leaf-trim belt + shaft
-    '.04555488.',  // 10  hips + shaft
-    '.04..4488.',  // 11  legs + shaft
-    '.04..4488.',  // 12  legs + shaft
-    '.04..40.8.',  // 13  bare feet + staff end
+    '..03.30...',
+    '.0333330..',
+    '.0322230..',
+    '.0392290..',
+    '.0322220..',
+    '..00220...',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466554488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.04..40.8.'
   ],
 };
 
@@ -321,26 +328,28 @@ const SPRITE_DRUID = {
 // ============================================================
 const SPRITE_AMAZONIAN = {
   w: 10, h: 14,
+  // 0=outline(near-black) 1=skin-shadow(deep-tan) 2=skin(vivid-tan) 3=feather-RED-ORANGE
+  // 4=leather-dark 5=leather-light 6=gold-trim 7=spear-tip-IVORY 8=spear-shaft 9=eye
   palette: [
-    '#1a0808', '#8a5c30', '#c88840', '#cc4400',
-    '#5a3818', '#8a5828', '#d8a838', '#f0e8c0',
-    '#7a4818', '#1a0808',
+    '#100806', '#7a4818', '#c87830', '#e03c00',
+    '#3a2010', '#7a4820', '#e0a820', '#f8f0d0',
+    '#7a4c18', '#100806',
   ],
   rows: [
-    '..03330...',  //  0  feather crest top
-    '.0333330..',  //  1  feathers spread
-    '.0322230..',  //  2  forehead (tanned)
-    '.0392290..',  //  3  eyes
-    '.0322220..',  //  4  cheeks (tanned)
-    '..00220...',  //  5  chin
-    '.04444487.',  //  6  leather-shoulders + spear tip (bone 7)
-    '0455554487',  //  7  chest + spear shaft-top
-    '0455554488',  //  8  body + shaft
-    '0466664488',  //  9  gold-trim belt + shaft
-    '.04555488.',  // 10  hips + shaft
-    '.04..4488.',  // 11  legs + shaft
-    '.04..4488.',  // 12  legs + shaft
-    '.06..60.8.',  // 13  boots + shaft base
+    '..03330...',
+    '.0333330..',
+    '.0322230..',
+    '.0392290..',
+    '.0322220..',
+    '..00220...',
+    '.04444487.',
+    '0455554487',
+    '0455554488',
+    '0466664488',
+    '.04555488.',
+    '.04..4488.',
+    '.04..4488.',
+    '.06..60.8.'
   ],
 };
 
