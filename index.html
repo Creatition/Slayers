@@ -3031,17 +3031,25 @@
     // ── Header — always read from classProgress[charTreeClass] for correct per-class data ───
     const _vcp = ensureCP(charTreeClass); // viewed class progress
     const _vcl = _vcp.level, _vcx = _vcp.xp, _vtp = _vcp.treePts;
-    ctx.fillStyle = '#ffaa44'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
-    ctx.fillText('CHARACTER', W / 2, 18);
+    // ── Class name header ──────────────────────────────────────
+    const _hdrCl = getClassById(charTreeClass);
+    ctx.fillStyle = _hdrCl.color; ctx.textAlign = 'center'; ctx.font = 'bold 13px monospace';
+    ctx.fillText(_hdrCl.name.toUpperCase(), W / 2, 14);
+    // XP bar — taller, class-colored, outlined
     const xpNeeded = _vcl < CHAR_LEVEL_CAP ? charXpToNext(_vcl) : 0;
     const xpPct    = _vcl < CHAR_LEVEL_CAP ? _vcx / xpNeeded : 1;
-    ctx.fillStyle = '#555'; ctx.fillRect(10, 24, W - 20, 8);
-    ctx.fillStyle = '#ffaa44'; ctx.fillRect(10, 24, Math.floor((W - 20) * xpPct), 8);
-    ctx.fillStyle = '#fff'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(_vcl < CHAR_LEVEL_CAP ? `LV ${_vcl}  —  ${_vcx} / ${xpNeeded} XP` : `LV ${_vcl}  MAX`, W / 2, 30);
-    ctx.fillStyle = _vtp > 0 ? '#ffd040' : '#666';
-    ctx.font = 'bold 8px monospace';
-    ctx.fillText(_vtp > 0 ? `${_vtp} SKILL POINT${_vtp > 1 ? 'S' : ''} UNSPENT` : 'No unspent points', W / 2, 42);
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(10, 18, W - 20, 12);
+    ctx.fillStyle = _hdrCl.color; ctx.fillRect(10, 18, Math.floor((W - 20) * xpPct), 12);
+    ctx.strokeStyle = '#444'; ctx.lineWidth = 1; ctx.strokeRect(10, 18, W - 20, 12); ctx.lineWidth = 1;
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(_vcl < CHAR_LEVEL_CAP ? `LV ${_vcl}  —  ${_vcx} / ${xpNeeded} XP` : `LV ${_vcl}  MAX LEVEL`, W / 2, 27);
+    // Unspent points — show both tree pts and ability pts
+    const _utp = _vtp, _usp = player ? (player.skillPoints || 0) : 0;
+    const _uHints = [];
+    if (_utp > 0) _uHints.push(`${_utp} Skill Pt${_utp > 1 ? 's' : ''}`);
+    if (_usp > 0) _uHints.push(`${_usp} Ability Pt${_usp > 1 ? 's' : ''}`);
+    ctx.fillStyle = _uHints.length > 0 ? '#ffd040' : '#555'; ctx.font = 'bold 7px monospace';
+    ctx.fillText(_uHints.length > 0 ? `✦ ${_uHints.join('  ·  ')} unspent` : 'No unspent points', W / 2, 40);
 
     // ── View toggle: SKILL TREE / ABILITIES ──────────────────────
     const toggleY = 46;
@@ -3058,25 +3066,29 @@
     ctx.fillText(spLabel, ablBtn.x + ablBtn.w/2, ablBtn.y + 10);
     ctx.lineWidth = 1;
 
-    // ── Class tabs ─────────────────────────────────────────────
+    // ── Class tabs — hidden during active run, locked to played class ──────────
+    const _inRun = (state === STATE.INVENTORY);
+    if (_inRun && player) charTreeClass = player.class.id;
     const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
-    const tabW = Math.floor((W - 16) / allClasses.length), tabH = 14, tabY = 63;
-    for (let i = 0; i < allClasses.length; i++) {
-      const cid = allClasses[i]; const tx = 8 + i * tabW;
-      const active = cid === charTreeClass;
-      const cl = getClassById(cid);
-      ctx.fillStyle = active ? cl.color : '#222'; ctx.fillRect(tx, tabY, tabW - 2, tabH);
-      ctx.strokeStyle = cl.color; ctx.lineWidth = active ? 2 : 1;
-      ctx.strokeRect(tx, tabY, tabW - 2, tabH); ctx.lineWidth = 1;
-      ctx.fillStyle = active ? '#000' : cl.color; ctx.font = `bold 7px monospace`; ctx.textAlign = 'center';
-      ctx.fillText(cl.name.substring(0, 6).toUpperCase(), tx + (tabW - 2) / 2, tabY + 10);
+    if (!_inRun) {
+      const tabW = Math.floor((W - 16) / allClasses.length), tabH = 14, tabY = 63;
+      for (let i = 0; i < allClasses.length; i++) {
+        const cid = allClasses[i]; const tx = 8 + i * tabW;
+        const active = cid === charTreeClass;
+        const cl = getClassById(cid);
+        ctx.fillStyle = active ? cl.color : '#222'; ctx.fillRect(tx, tabY, tabW - 2, tabH);
+        ctx.strokeStyle = cl.color; ctx.lineWidth = active ? 2 : 1;
+        ctx.strokeRect(tx, tabY, tabW - 2, tabH); ctx.lineWidth = 1;
+        ctx.fillStyle = active ? '#000' : cl.color; ctx.font = `bold 7px monospace`; ctx.textAlign = 'center';
+        ctx.fillText(cl.name.substring(0, 6).toUpperCase(), tx + (tabW - 2) / 2, tabY + 10);
+      }
     }
 
     // ── Skill tree or Abilities view ────────────────────────
     const tree = SKILL_TREES[charTreeClass];
     const cl   = getClassById(charTreeClass);
     const spent = spentSkillNodes[charTreeClass] || {};
-    const treeStartY = 80; // shifted down for toggle row
+    const treeStartY = _inRun ? 66 : 80; // no class tabs during run = extra vertical space
     if (charTreeTab === 'abilities') {
       // ── ABILITIES VIEW ─────────────────────────────────────
       const viewCl = getClassById(charTreeClass);
@@ -3085,7 +3097,7 @@
       const ablPerRow = 3;
       const totalAblW = ablPerRow * cardW2 + (ablPerRow - 1) * gap2;
       const ablX0 = Math.floor((W - totalAblW) / 2);
-      const ablY0 = 92; // cards start here (below class tabs at ~77)
+      const ablY0 = _inRun ? 78 : 92; // shift cards up when class tabs are hidden
       // Clamp scroll
       const ablTotalRows = Math.ceil(allAbl.length / ablPerRow);
       const ablMaxScroll = Math.max(0, ablTotalRows * (cardH2 + gap2) - (H - ablY0 - 10));
@@ -3161,11 +3173,20 @@
           const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
           ctx.fillStyle = hovered2 ? '#aaffaa' : '#225522'; ctx.fillRect(btnX, btnY, 18, 12);
           ctx.strokeStyle = '#aaffaa'; ctx.lineWidth = 1; ctx.strokeRect(btnX, btnY, 18, 12);
-          ctx.fillStyle = '#aaffaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+          ctx.fillStyle = hovered2 ? '#002200' : '#aaffaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
           ctx.fillText('+1', btnX + 9, btnY + 9);
         } else if (isMaxed) {
           ctx.fillStyle = '#ffd040'; ctx.font = 'bold 6px monospace'; ctx.textAlign = 'center';
           ctx.fillText('★MAX', ax + cardW2 - 11, ay + cardH2 - 6);
+        }
+        // [-1] refund button — only for purchased ranks (rank > 1 was bought with skill pts)
+        if (owned2 && curRank > 1 && player && charTreeClass === player.class.id) {
+          const rdBtnX = ax + 4, rdBtnY = ay + cardH2 - 16;
+          const rdHov = mouseX >= rdBtnX && mouseX < rdBtnX + 18 && mouseY >= rdBtnY && mouseY < rdBtnY + 12;
+          ctx.fillStyle = rdHov ? '#ff6655' : '#3a1111'; ctx.fillRect(rdBtnX, rdBtnY, 18, 12);
+          ctx.strokeStyle = '#ff6655'; ctx.lineWidth = 1; ctx.strokeRect(rdBtnX, rdBtnY, 18, 12); ctx.lineWidth = 1;
+          ctx.fillStyle = rdHov ? '#000' : '#ff8866'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+          ctx.fillText('-1', rdBtnX + 9, rdBtnY + 9);
         }
       }
       ctx.restore(); // end clip
@@ -3173,6 +3194,18 @@
       if (ablMaxScroll > 0) {
         ctx.fillStyle = '#444'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
         ctx.fillText('scroll ▼  ' + Math.round(charAbilScroll / ablMaxScroll * 100) + '%', W - 30, H - 8);
+      }
+      // RESET ALL — refund ability rank-ups + skill tree nodes for this class
+      const _hasAblRanks = player && charTreeClass === player.class.id &&
+        player.abilities.some(a => a && (a.rank || 1) > 1);
+      const _hasTreeNodes = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
+      if (_hasAblRanks || _hasTreeNodes) {
+        const resetHov = isHovering(W - 108, H - 26, 100, 20);
+        ctx.fillStyle = resetHov ? '#ff6633' : '#331100';
+        ctx.fillRect(W - 108, H - 26, 100, 20);
+        ctx.strokeStyle = '#ff6633'; ctx.lineWidth = 1; ctx.strokeRect(W - 108, H - 26, 100, 20);
+        ctx.fillStyle = resetHov ? '#000' : '#ff9966'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('↺ RESET ALL', W - 58, H - 13);
       }
       drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
       ctx.textAlign = 'left';
@@ -3354,7 +3387,18 @@
       ctx.fillStyle='#44445a'; ctx.font='5px monospace'; ctx.textAlign='right';
       ctx.fillText('Scroll=zoom  Drag=pan', mm.x-2, H-4);
     }
-    // ── Back button ────────────────────────────────────────────
+    // ── Back button + Reset button ────────────────────────────
+    const _hasTreeNodes2 = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
+    const _hasAblRanks2  = player && charTreeClass === player.class.id &&
+      player.abilities.some(a => a && (a.rank || 1) > 1);
+    if (_hasTreeNodes2 || _hasAblRanks2) {
+      const resetHov2 = isHovering(W - 108, H - 26, 100, 20);
+      ctx.fillStyle = resetHov2 ? '#ff6633' : '#331100';
+      ctx.fillRect(W - 108, H - 26, 100, 20);
+      ctx.strokeStyle = '#ff6633'; ctx.lineWidth = 1; ctx.strokeRect(W - 108, H - 26, 100, 20);
+      ctx.fillStyle = resetHov2 ? '#000' : '#ff9966'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('↺ RESET ALL', W - 58, H - 13);
+    }
     drawButton(8, H - 26, 80, 20, 'BACK', true, '#888');
     ctx.textAlign = 'left';
   }
@@ -5546,15 +5590,57 @@
     treeViewY = (vH/2 + treeOY2) - treeOY2 - cy * treeViewZoom;
   }
   // ── Shared char-tree click handler ───────────────────────────────────────
+  function resetClassProgress(cid) {
+    // Refund all skill tree nodes for this class
+    const spentNodes = spentSkillNodes[cid] || {};
+    const treeRefund = Object.values(spentNodes).filter(Boolean).length;
+    spentSkillNodes[cid] = {};
+    const _rcp = ensureCP(cid);
+    _rcp.treePts += treeRefund;
+    if (cid === selectedClassId) treePoints = _rcp.treePts;
+    // Refund all ability rank-ups for current player (rank > 1 was purchased)
+    let ablRefund = 0;
+    if (player && cid === player.class.id) {
+      for (const abl of player.abilities) {
+        if (abl && (abl.rank || 1) > 1) {
+          ablRefund += (abl.rank || 1) - 1;
+          abl.rank = 1;
+        }
+      }
+      player.skillPoints = (player.skillPoints || 0) + ablRefund;
+    }
+    // Re-apply skill tree to player since nodes were cleared
+    if (player && cid === player.class.id) {
+      applySkillTreeToPlayer(player);
+      player.recomputeStats();
+    }
+    saveData();
+    const totalRefund = treeRefund + ablRefund;
+    if (player && cid === player.class.id) {
+      spawnDamageNumber(player.x, player.y - 32, `↺ Reset — ${totalRefund} pts returned`, { color: '#ff9966', size: 11, vy: -55, life: 2.2 });
+    }
+    Sfx.uiConfirm && Sfx.uiConfirm();
+  }
+
   function handleCharTreeClicks(backFn) {
     if (!mouseClicked) return;
     if (isHovering(8, H - 26, 80, 20)) { backFn(); return; }
+    // RESET ALL button
+    if (isHovering(W - 108, H - 26, 100, 20)) {
+      const _hasNodes = Object.values(spentSkillNodes[charTreeClass] || {}).some(Boolean);
+      const _hasRanks = player && charTreeClass === player.class.id &&
+        player.abilities.some(a => a && (a.rank || 1) > 1);
+      if (_hasNodes || _hasRanks) { resetClassProgress(charTreeClass); return; }
+    }
     if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'tree'; fitTreeView(); }
     if (isHovering(W/2 + 4,  46, 78, 14)) charTreeTab = 'abilities';
     const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
     const cTabW = Math.floor((W - 16) / allClasses.length);
-    for (let i = 0; i < allClasses.length; i++) {
-      if (isHovering(8 + i * cTabW, 63, cTabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
+    // Only allow class tab switching when not in an active run
+    if (state !== STATE.INVENTORY) {
+      for (let i = 0; i < allClasses.length; i++) {
+        if (isHovering(8 + i * cTabW, 63, cTabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
+      }
     }
     if (charTreeTab === 'abilities') {
       const viewAbl = classAbilities(charTreeClass);
@@ -5567,6 +5653,7 @@
         const ax = ablX0 + col * (cardW2 + gap2), ay = ablY0 + row * (cardH2 + gap2) - charAbilScroll;
         if (ay + cardH2 < ablY0 || ay > H) continue;
         const btnX = ax + cardW2 - 22, btnY = ay + cardH2 - 16;
+        // [+1] rank up
         if (isHovering(btnX, btnY, 18, 12)) {
           const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
           const curRank = owned2 ? (owned2.rank || 1) : 0;
@@ -5576,6 +5663,18 @@
             const lbl = owned2.rank >= 5 ? '★CAPSTONE!' : owned2.rank >= 3 ? '★Notable!' : `Rank ${owned2.rank}`;
             spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${lbl}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
             Sfx.uiConfirm();
+          }
+          break;
+        }
+        // [-1] refund click — only for purchased ranks (rank > 1)
+        const rdBtnX = ax + 4, rdBtnY = ay + cardH2 - 16;
+        if (isHovering(rdBtnX, rdBtnY, 18, 12)) {
+          const owned2r = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+          if (owned2r && (owned2r.rank || 1) > 1 && player && charTreeClass === player.class.id) {
+            owned2r.rank--;
+            player.skillPoints = (player.skillPoints || 0) + 1;
+            spawnDamageNumber(player.x, player.y - 28, `${adef.name} refunded`, { color: '#ff8866', size: 10, vy: -50, life: 1.8 });
+            Sfx.uiClick && Sfx.uiClick();
           }
           break;
         }
