@@ -563,6 +563,7 @@ class Player {
     }
   }
   effectiveCritChance() {
+    if ((this.bloodRitualCritTimer || 0) > 0) return 100;
     let c = this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0);
     if (this.wildShapePantherCrit) c += this.wildShapePantherCrit;
     return c;
@@ -587,6 +588,7 @@ class Player {
     if (this.wildShapeDragonSlowSpd) s *= (1 + this.wildShapeDragonSlowSpd);
     if (this.bondWolf) s *= 1.35;
     if (this.epiphanyTimer > 0 && this.epiphanySpeedBonus) s *= (1 + this.epiphanySpeedBonus);
+    if ((this.spiritWalkTimer || 0) > 0 && this.spiritWalkSpeedBonus) s *= (1 + this.spiritWalkSpeedBonus);
     return s;
   }
   effectiveDmgMult() {
@@ -599,6 +601,7 @@ class Player {
     if (this.primalRageTimer > 0 && this.primalRageDmgBonus) d *= (1 + this.primalRageDmgBonus);
     if (this.blessingTimer > 0 && this.blessingDmgBonus) d *= (1 + this.blessingDmgBonus);
     if (this.crusaderEdgeTimer > 0 && this.crusaderEdgeDmgBonus) d *= (1 + this.crusaderEdgeDmgBonus);
+    if ((this.lichFormTimer || 0) > 0 && this.lichFormDmgBonus) d *= (1 + this.lichFormDmgBonus);
     return d;
   }
   recomputeStats() {
@@ -1093,6 +1096,7 @@ class Enemy {
       return false;
     }
     if ((this.judged || 0) > 0) amount = Math.ceil(amount * (this.judgedMult || 2.0));
+    if ((this.cursed || 0) > 0) amount = Math.ceil(amount * (this.cursedMult || 1.35));
     this.hp -= amount; this.hitFlash = 0.1;
     if (typeof spawnDamageNumber === 'function') {
       const o = opts || {};

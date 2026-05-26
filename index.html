@@ -4188,6 +4188,303 @@
 
   } // end Crusader
 
+  // ── SHAMAN CLASS MECHANICS ────────────────────────────────────
+  if (player.class.id === 'shaman') {
+
+    // ── Cursed status tick on all enemies ─────────────────────
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if ((e.cursed || 0) > 0) {
+        e.cursed -= dt;
+        if (e.cursed <= 0) { e.cursed = 0; e.cursedMult = 1.0; }
+      }
+    }
+
+    // ── Spirit Totem: fires at nearest enemy ──────────────────
+    if (player.spiritTotemTimer > 0) {
+      player.spiritTotemTimer -= dt;
+      player.spiritTotemHitTimer = (player.spiritTotemHitTimer || 0) + dt;
+      const fireInterval = 1.0 / (player.spiritTotemFireRate || 1.0);
+      if (player.spiritTotemHitTimer >= fireInterval) {
+        player.spiritTotemHitTimer = 0;
+        const tx = player.spiritTotemX || player.x;
+        const ty = player.spiritTotemY || player.y;
+        const targets = [];
+        const sorted = enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-tx,a.y-ty)-Math.hypot(b.x-tx,b.y-ty));
+        const numTargets = player.spiritTotemTargets || 1;
+        for (let i=0;i<numTargets&&i<sorted.length;i++) targets.push(sorted[i]);
+        for (const t of targets) {
+          const dx=t.x-tx, dy=t.y-ty, d=Math.hypot(dx,dy)||1;
+          const sp = player.weaponProjSpeed * 1.1;
+          const dmg = player.spiritTotemDmg || (player.weaponDamage * player.dmgMult * 1.2);
+          const isCrit = Math.random()*100 < player.effectiveCritChance();
+          const fd = isCrit ? dmg*2 : dmg;
+          const proj = new Projectile(tx, ty, (dx/d)*sp, (dy/d)*sp, fd, d/sp+0.1, isCrit);
+          proj.r = 4; proj.theme = 'arcane';
+          if (isCrit) player.onCrit();
+          if (player.spiritTotemHex) {
+            proj.onHit = (e) => { e.cursed = Math.max(e.cursed||0, 4); e.cursedMult = 1.35; };
+          }
+          projectiles.push(proj);
+          spawnBurst(tx, ty, ['#aaff44','#55dd66'], 4);
+        }
+      }
+      if (player.spiritTotemTimer <= 0) {
+        player.spiritTotemTimer = 0;
+        if (player.spiritTotemExplode) {
+          const tx = player.spiritTotemX || player.x;
+          const ty = player.spiritTotemY || player.y;
+          const expDmg = player.weaponDamage * player.dmgMult * 4;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x-tx, e.y-ty) < 90) {
+              const died = e.takeDamage(expDmg, {crit:true,color:'#aaff44'});
+              player.onCrit(); spawnBurst(e.x,e.y,['#aaff44','#55dd66','#ffffff'],10);
+              if (died) handleEnemyDeath(e);
+            }
+          }
+          spawnBurst(tx, ty, ['#aaff44','#55dd66','#ffffff'], 24);
+          shake = Math.min(shake+5,10);
+        }
+        player.spiritTotemDmg = 0; player.spiritTotemHex = false;
+      }
+    }
+
+    // ── Spirit Walk: rolling iframe + speed bonus + exit effects ─
+    if ((player.spiritWalkTimer || 0) > 0) {
+      player.spiritWalkTimer -= dt;
+      player.iframeTimer = Math.max(player.iframeTimer, dt + 0.05);
+      // Trail of spirit pools
+      if (player.spiritWalkTrail) {
+        groundEffects.push({type:'burn',x:player.x,y:player.y,r:20,life:1.5,maxLife:1.5,dmgPerSec:player.weaponDamage*player.dmgMult*0.4,color:'#99eeff',hit:new Set()});
+      }
+      if (player.spiritWalkTimer <= 0) {
+        player.spiritWalkTimer = 0;
+        if (player.spiritWalkFillMana) player.resource = player.maxResource;
+        // Exit AoE burst
+        const exitDmg = player.weaponDamage * player.dmgMult * 3;
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x-player.x,e.y-player.y)<100) {
+            const died=e.takeDamage(exitDmg,{crit:true,color:'#99eeff'});
+            player.onCrit(); spawnBurst(e.x,e.y,['#99eeff','#55ddcc','#ffffff'],10);
+            if (died) handleEnemyDeath(e);
+          }
+        }
+        // Summon spirits (rank 5)
+        if (player.spiritWalkSummon) {
+          if (!player.summons) player.summons=[];
+          for (let s=0;s<3;s++){const a=(s/3)*Math.PI*2;player.summons.push({type:'spirit',x:player.x+Math.cos(a)*25,y:player.y+Math.sin(a)*25,hp:999,maxHp:999,alive:true,life:8,dmg:player.weaponDamage*player.dmgMult*1.2,fireTimer:0,fireRate:1.2,r:6,theme:'spirit'});}
+        }
+        spawnBurst(player.x,player.y,['#99eeff','#55ddcc','#ffffff'],24);
+        player.spiritWalkSpeedBonus = 0;
+        player.spiritWalkFillMana = false;
+        player.spiritWalkTrail = false;
+        player.spiritWalkSummon = false;
+      }
+    }
+
+    // ── Spirit Storm: random lightning bolts each frame tick ──
+    if ((player.spiritStormTimer || 0) > 0) {
+      player.spiritStormTimer -= dt;
+      player.spiritStormBoltTimer = (player.spiritStormBoltTimer || 0) + dt;
+      if (player.spiritStormBoltTimer >= (player.spiritStormInterval || 0.40)) {
+        player.spiritStormBoltTimer = 0;
+        const dmg = player.spiritStormDmg || (player.weaponDamage * player.dmgMult * 3);
+        let target;
+        if (player.spiritStormSeek) {
+          // Prefer cursed enemies
+          const cursed = enemies.filter(e=>e.alive&&(e.cursed||0)>0);
+          const pool = cursed.length ? cursed : enemies.filter(e=>e.alive);
+          target = pool[Math.floor(Math.random()*pool.length)];
+        } else {
+          const alive = enemies.filter(e=>e.alive);
+          target = alive[Math.floor(Math.random()*alive.length)];
+        }
+        if (target) {
+          const isCrit = Math.random()*100 < player.effectiveCritChance();
+          let fd = dmg*(isCrit?2:1);
+          if (player.spiritStormDetonate && (target.cursed||0)>0) fd *= 10;
+          const died = target.takeDamage(fd,{crit:isCrit,color:'#cceeff'});
+          if (isCrit) player.onCrit();
+          spawnBurst(target.x,target.y,['#cceeff','#88ddff','#ffffff'],12);
+          spawnDamageNumber(target.x,target.y-target.r,fd,{color:'#cceeff',crit:isCrit});
+          if (died) handleEnemyDeath(target);
+        }
+      }
+      if (player.spiritStormTimer <= 0) {
+        player.spiritStormTimer = 0;
+        player.spiritStormDmg = 0;
+        player.spiritStormBoltTimer = 0;
+      }
+    }
+
+    // ── Summon tick (shared: spirits + skeleton warriors for Shaman) ─
+    if (player.summons && player.summons.length) {
+      for (let i = player.summons.length-1; i >= 0; i--) {
+        const s = player.summons[i];
+        if (!s.alive) { player.summons.splice(i,1); continue; }
+        s.life -= dt;
+        if (s.life <= 0) {
+          if (s.explodeOnDeath) {
+            const expDmg = player.weaponDamage*player.dmgMult*2.5;
+            for (const e of enemies){if(!e.alive)continue;if(Math.hypot(e.x-s.x,e.y-s.y)<55){const d=e.takeDamage(expDmg,{crit:false,color:'#aaff44'});spawnBurst(e.x,e.y,['#aaff44','#ffffff'],8);if(d)handleEnemyDeath(e);}}
+            spawnBurst(s.x,s.y,['#aaff44','#55dd66','#ffffff'],16);
+          }
+          player.summons.splice(i,1); continue;
+        }
+        // Move toward nearest enemy
+        const target = findNearestEnemy(s.x,s.y,200);
+        if (target) {
+          const dx=target.x-s.x,dy=target.y-s.y,d=Math.hypot(dx,dy)||1;
+          if (d > 30) { s.x+=(dx/d)*80*dt; s.y+=(dy/d)*80*dt; }
+          s.fireTimer=(s.fireTimer||0)+dt;
+          if (s.fireTimer>=1.0/(s.fireRate||1.0)){
+            s.fireTimer=0;
+            const isCrit=s.copyPlayerCrit?Math.random()*100<player.effectiveCritChance():false;
+            const dmg=s.dmg*(isCrit?2:1);
+            const died=target.takeDamage(dmg,{crit:isCrit,color:s.theme==='spirit'?'#aaff88':'#ccbbee'});
+            if(isCrit)player.onCrit();
+            spawnBurst(target.x,target.y,[s.theme==='spirit'?'#aaff88':'#ccbbee','#ffffff'],6);
+            if(died)handleEnemyDeath(target);
+          }
+        }
+      }
+    }
+
+  } // end Shaman
+
+  // ── NECROMANCER CLASS MECHANICS ───────────────────────────────
+  if (player.class.id === 'necromancer') {
+
+    // ── Cursed tick (necro also uses cursed via hexBolt synergies)
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if ((e.cursed || 0) > 0) { e.cursed -= dt; if (e.cursed<=0){e.cursed=0;e.cursedMult=1.0;} }
+      // Bone Crack decay
+      if ((e.boneCrack || 0) > 0) {
+        e.boneCrackDecayTimer = (e.boneCrackDecayTimer||0)+dt;
+        if (e.boneCrackDecayTimer >= 6.0) { e.boneCrack=0; e.boneCrackMult=1.0; e.boneCrackDecayTimer=0; }
+      }
+      // Necrotic Apocalypse mark tick
+      if ((e.necroApocMark || 0) > 0) {
+        e.necroApocMark -= dt;
+        if (e.necroApocMark <= 0.1 && e.necroApocMark > 0) {
+          // Deadline — obliterate or detonate
+          const finDmg = player.weaponDamage * player.dmgMult * (player.necroApocMult || 10);
+          const died = e.takeDamage(finDmg, {crit:true, color:'#440066'});
+          player.onCrit();
+          spawnBurst(e.x,e.y,['#440066','#9944cc','#ffffff'],16);
+          e.necroApocMark = 0;
+          if (died) {
+            if (player.necroApocRaiseSkeleton) {
+              if(!player.summons)player.summons=[];
+              player.summons.push({type:'skeleton',x:e.x,y:e.y,hp:player.maxHp*0.3,maxHp:player.maxHp*0.3,alive:true,life:10,dmg:player.weaponDamage*player.dmgMult*0.9,fireTimer:0,fireRate:1.1,r:6,theme:'arcane',explodeOnDeath:player.necroApocCorpseExplode});
+            }
+            handleEnemyDeath(e);
+          }
+        }
+      }
+    }
+
+    // ── Lich Form: dmg buff + free casts + bone armor rolling ─
+    if ((player.lichFormTimer || 0) > 0) {
+      player.lichFormTimer -= dt;
+      player.boneArmorCharges = Math.max(player.boneArmorCharges||0, 1); // always at least 1 charge
+      if (player.lichFormKillFill) {
+        // Passive: small Necrotic Power trickle (kill hook is in handleEnemyDeath)
+      }
+      if (player.lichFormTimer <= 0) {
+        player.lichFormTimer = 0;
+        player.lichFormDmgBonus = 0;
+        player.lichFormFreeCasts = false;
+        player.lichFormBoneArmor = false;
+        // Revive mechanic flag persists for rest of wave (rank 5)
+        if (!player.lichFormRevive) player.lichFormRevive = false;
+        player.boneArmorCharges = Math.min(player.boneArmorCharges, 3);
+        spawnDamageNumber(player.x,player.y-26,'LICH FADES',{color:'#7755aa',size:10,vy:-40,life:1.0});
+      }
+    }
+
+    // ── Blood Ritual: guaranteed crits timer ──────────────────
+    if ((player.bloodRitualCritTimer || 0) > 0) {
+      player.bloodRitualCritTimer -= dt;
+      if (player.bloodRitualCritTimer <= 0) player.bloodRitualCritTimer = 0;
+    }
+
+    // ── Bone Storm: orbital AoE + shard bursts ────────────────
+    if ((player.boneStormTimer || 0) > 0) {
+      player.boneStormTimer -= dt;
+      player.boneStormAngle = (player.boneStormAngle || 0) + dt * 3.5;
+      player.boneStormHitTimer = (player.boneStormHitTimer || 0) + dt;
+      // Hit enemies in orbit zone every 0.25s
+      if (player.boneStormHitTimer >= 0.25) {
+        player.boneStormHitTimer = 0;
+        const orbitR = (player.boneStormExpand && player.boneStormTimer < 2.0) ? 160 : (player.boneStormRadius || 75);
+        const dmg = player.boneStormDmg || (player.weaponDamage * player.dmgMult * 2);
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x-player.x, e.y-player.y) < orbitR) {
+            const isCrit = Math.random()*100 < player.effectiveCritChance();
+            const fd = dmg*(isCrit?2:1);
+            const died = e.takeDamage(fd,{crit:isCrit,color:'#ccbbee'});
+            if (isCrit) player.onCrit();
+            spawnBurst(e.x,e.y,['#ccbbee','#9988cc'],5);
+            if (died) handleEnemyDeath(e);
+          }
+        }
+        // Orbit visual indicator
+        const ox = player.x + Math.cos(player.boneStormAngle)*(player.boneStormRadius||75);
+        const oy = player.y + Math.sin(player.boneStormAngle)*(player.boneStormRadius||75);
+        spawnBurst(ox, oy, ['#ccbbee','#9988cc'], 3);
+      }
+      // Outward shards every 1s (rank 3)
+      if (player.boneStormShards) {
+        player.boneStormShardTimer = (player.boneStormShardTimer||0)+dt;
+        if (player.boneStormShardTimer >= 1.0) {
+          player.boneStormShardTimer = 0;
+          const shardDmg = (player.boneStormDmg||1)*0.8;
+          const count=8;
+          for(let i=0;i<count;i++){const a=(i/count)*Math.PI*2;const sp=player.weaponProjSpeed*1.2;const proj=new Projectile(player.x,player.y,Math.cos(a)*sp,Math.sin(a)*sp,shardDmg,0.7,false);proj.r=3;proj.theme='arcane';proj.piercing=true;projectiles.push(proj);}
+        }
+      }
+      if (player.boneStormTimer <= 0) {
+        player.boneStormTimer = 0;
+        player.boneStormDmg = 0;
+        spawnBurst(player.x,player.y,['#ccbbee','#9988cc','#ffffff'],20);
+      }
+    }
+
+    // ── Necromancer summon tick (skeletons) ───────────────────
+    if (player.summons && player.summons.length) {
+      for (let i = player.summons.length-1; i>=0; i--) {
+        const s = player.summons[i];
+        if (!s.alive) { player.summons.splice(i,1); continue; }
+        s.life -= dt;
+        if (s.life <= 0) {
+          if (s.explodeOnDeath){const expDmg=player.weaponDamage*player.dmgMult*2.0;for(const e of enemies){if(!e.alive)continue;if(Math.hypot(e.x-s.x,e.y-s.y)<60){const d=e.takeDamage(expDmg,{crit:false,color:'#9988cc'});spawnBurst(e.x,e.y,['#9988cc','#ccbbee','#ffffff'],10);if(d)handleEnemyDeath(e);}}spawnBurst(s.x,s.y,['#9988cc','#ccbbee','#ffffff'],18);}
+          player.summons.splice(i,1); continue;
+        }
+        const target2 = findNearestEnemy(s.x,s.y,220);
+        if (target2) {
+          const dx=target2.x-s.x,dy=target2.y-s.y,d=Math.hypot(dx,dy)||1;
+          if(d>28){s.x+=(dx/d)*75*dt;s.y+=(dy/d)*75*dt;}
+          s.fireTimer=(s.fireTimer||0)+dt;
+          if(s.fireTimer>=1.0/(s.fireRate||1.1)){
+            s.fireTimer=0;
+            const isCrit=s.copyPlayerCrit?Math.random()*100<player.effectiveCritChance():Math.random()*100<8;
+            const dmg2=s.dmg*(isCrit?2:1);
+            const died2=target2.takeDamage(dmg2,{crit:isCrit,color:'#ccbbee'});
+            if(isCrit)player.onCrit();
+            spawnBurst(target2.x,target2.y,['#ccbbee','#9988cc'],6);
+            if(died2)handleEnemyDeath(target2);
+          }
+        }
+      }
+    }
+
+  } // end Necromancer
+
 
 
   // ============================================================

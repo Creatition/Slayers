@@ -2234,7 +2234,7 @@ const ABILITIES = {
     },
   },
   bigBadVoodoo: {
-    id: 'bigBadVoodoo', tier: 1, name: 'Big Bad Voodoo', letter: 'V', classOf: 'shaman',
+    id: 'bigBadVoodoo', tier: 2, name: 'Big Bad Voodoo', letter: 'V', classOf: 'shaman',
     desc: '+35% dmg & +15% speed for 8s',
     maxRank: 5, rankDesc: ['+30% all stats 20s', '35% 25s', '40% 30s ★Notable: 45s duration', '50% 40s', '70% 60s ★Capstone: doubles effect of all buffs'],
     cost: 60, cooldown: 15.0, color: '#aaff44',
@@ -2245,7 +2245,7 @@ const ABILITIES = {
     },
   },
   corpseSpiders: {
-    id: 'corpseSpiders', tier: 1, name: 'Corpse Spiders', letter: 'S', classOf: 'shaman',
+    id: 'corpseSpiders', tier: 2, name: 'Corpse Spiders', letter: 'S', classOf: 'shaman',
     desc: 'Explosive projectile splits into 3 fast piercers',
     maxRank: 5, rankDesc: ['3 spiders 1.2×', '4 spiders', '5 spiders ★Notable: webs slow 50% 2s', '6 venomous', '8 spiders ★Capstone: explode on death AoE'],
     cost: 30, cooldown: 3.5, color: '#885522',
@@ -2281,7 +2281,7 @@ const ABILITIES = {
     },
   },
   locustSwarm: {
-    id: 'locustSwarm', tier: 1, name: 'Locust Swarm', letter: 'L', classOf: 'shaman',
+    id: 'locustSwarm', tier: 3, name: 'Locust Swarm', letter: 'L', classOf: 'shaman',
     desc: 'Slow + damage all enemies in 130px',
     maxRank: 5, rankDesc: ['Swarm 1.5× DoT', '1.7× spreads', '2.0× ★Notable: spreads on kill', '2.4× 2 swarms', '3.0× ★Capstone: 3 swarms + double spread'],
     cost: 40, cooldown: 6.0, color: '#66aa22',
@@ -2372,7 +2372,7 @@ const ABILITIES = {
     },
   },
   bloodNova: {
-    id: 'bloodNova', tier: 1, name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
+    id: 'bloodNova', tier: 2, name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
     desc: 'Sacrifice 15% max HP for massive AoE',
     maxRank: 5, rankDesc: ['Blood ring 2.0×', '2.3× bigger', '2.6× ★Notable: 8% lifesteal per hit', '3.0×', '4.0× ★Capstone: leaves blood puddle 4s'],
     cost: 0, cooldown: 6.0, color: '#cc2244',
@@ -2403,7 +2403,7 @@ const ABILITIES = {
     },
   },
   corpseLance: {
-    id: 'corpseLance', tier: 1, name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
+    id: 'corpseLance', tier: 3, name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
     desc: 'Fire bone lances at 3 nearest enemies',
     maxRank: 5, rankDesc: ['3.0× piercing', '3.3×', '3.6× ★Notable: splits into 2 on pierce', '4.0× homing', '5.0× ★Capstone: 3 simultaneous lances'],
     cost: 45, cooldown: 3.0, color: '#aa99dd',
@@ -2429,6 +2429,456 @@ const ABILITIES = {
       return true;
     },
   },
+  // ── SHAMAN T1 (new ability: hexBolt) ────────────────────────
+  hexBolt: {
+    id: 'hexBolt', name: 'Hex Bolt', letter: 'X', tier: 1, classOf: 'shaman',
+    desc: 'Fast hex projectile. Curses the target: takes +35% damage for 5s.',
+    maxRank: 5, rankDesc: ['Hex bolt 1.8×, Curse 5s', '2.0× Curse 7s', '2.2× ★Notable: Curse spreads to 1 nearby on kill', '2.5× Curse 10s double', '★Capstone: 3.0×, Curse chains to all enemies in 80px'],
+    cost: 20, cooldown: 1.5, color: '#55dd66',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?3.0:rank>=4?2.5:rank>=3?2.2:rank>=2?2.0:1.8;
+      const curseDur = rank>=4?10:rank>=2?7:5;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
+      if (!target) return false;
+      const dx = target.x - player.x, dy = target.y - player.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const sp = player.weaponProjSpeed * 1.4;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      const isCrit = Math.random() * 100 < player.critChance;
+      const proj = new Projectile(player.x, player.y, (dx/d)*sp, (dy/d)*sp, isCrit?dmg*2:dmg, d/sp+0.1, isCrit);
+      if (isCrit) player.onCrit();
+      proj.r = 4; proj.theme = 'arcane';
+      proj.onHit = (e) => {
+        e.cursed = curseDur; e.cursedMult = rank>=4?1.50:1.35;
+        if (rank>=3) {
+          const spread = enemies.filter(n=>n.alive&&n!==e&&Math.hypot(n.x-e.x,n.y-e.y)<80);
+          if (spread.length) { spread[0].cursed=curseDur*0.5; spread[0].cursedMult=1.35; }
+        }
+        if (rank>=5) {
+          for (const n of enemies) { if(n.alive&&n!==e&&Math.hypot(n.x-e.x,n.y-e.y)<80){ n.cursed=curseDur; n.cursedMult=1.35; } }
+        }
+        spawnBurst(e.x, e.y, ['#55dd66', '#88ff88', '#aaff44'], 8);
+      };
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#55dd66', '#88ff88'], 6);
+      return true;
+    },
+  },
+  spiritTotem: {
+    id: 'spiritTotem', name: 'Spirit Totem', letter: 'T', tier: 1, classOf: 'shaman',
+    desc: 'Plant a spirit totem that fires at the nearest enemy for 10s.',
+    maxRank: 5, rankDesc: ['Totem 10s 1×/s', '12s 1.3×/s faster', '12s ★Notable: totem fires hexed shots (Curse)', '15s 1.6×/s 2 targets', '★Capstone: 15s, totem explodes AoE on expire'],
+    cost: 30, cooldown: 12.0, color: '#aaff44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?15:rank>=2?12:10;
+      const fireRate = rank>=4?1.6:rank>=2?1.3:1.0;
+      player.spiritTotemTimer = dur;
+      player.spiritTotemDmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg * rScale;
+      player.spiritTotemX = player.x; player.spiritTotemY = player.y;
+      player.spiritTotemFireRate = fireRate;
+      player.spiritTotemHitTimer = 0;
+      player.spiritTotemHex = rank>=3;
+      player.spiritTotemExplode = rank>=5;
+      player.spiritTotemTargets = rank>=4?2:1;
+      spawnBurst(player.x, player.y, ['#aaff44', '#55dd66', '#ffffff'], 16);
+      spawnDamageNumber(player.x, player.y-22, 'TOTEM!', {color:'#aaff44', size:11, vy:-45, life:1.2});
+      return true;
+    },
+  },
+
+  // ── SHAMAN T2 (new ability: venomCloud) ──────────────────────
+  venomCloud: {
+    id: 'venomCloud', name: 'Venom Cloud', letter: 'C', tier: 2, classOf: 'shaman',
+    desc: 'Drop a poisonous cloud at cursor. Enemies inside take DoT and are slowed.',
+    maxRank: 5, rankDesc: ['Cloud 5s slow 40% DoT', '6s wider', '6s ★Notable: cloud spawns 2 toxic frogs on expire', '8s double DoT', '★Capstone: 8s, cloud hexes all enemies inside on spawn'],
+    cost: 35, cooldown: 8.0, color: '#44cc22',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?8:rank>=2?6:5;
+      const dmgPerSec = player.weaponDamage * player.dmgMult * 0.8 * rDmg * rScale * (rank>=4?2:1);
+      const r = rank>=2?70:55;
+      const tx = (typeof mouseX !== 'undefined' ? mouseX : player.x);
+      const ty = (typeof mouseY !== 'undefined' ? mouseY : player.y);
+      groundEffects.push({type:'burn', x:tx, y:ty, r, life:dur, maxLife:dur, dmgPerSec, color:'#44cc22', hit:new Set(), slow:0.40});
+      if (rank>=3) {
+        // flag to spawn frogs on expire — store in groundEffect directly
+        groundEffects[groundEffects.length-1].onExpire = () => {
+          for (let i=0;i<2;i++){const a=i*Math.PI;const sp=player.weaponProjSpeed*0.7;const p2=new Projectile(tx,ty,Math.cos(a)*sp,Math.sin(a)*sp,dmgPerSec*2,1.0,false);p2.piercing=true;p2.r=3;p2.theme='arcane';projectiles.push(p2);}
+        };
+      }
+      if (rank>=5) {
+        for (const e of enemies) { if(e.alive&&Math.hypot(e.x-tx,e.y-ty)<r){e.cursed=(e.cursed||0)+4;e.cursedMult=1.35;} }
+      }
+      spawnBurst(tx, ty, ['#44cc22', '#88ff44', '#55dd66'], 16);
+      return true;
+    },
+  },
+
+  // ── SHAMAN T3 (2 new abilities) ──────────────────────────────
+  stormCall: {
+    id: 'stormCall', name: 'Storm Call', letter: 'O', tier: 3, classOf: 'shaman',
+    desc: 'Call lightning that chains between 4 enemies. Stuns and generates Mojo.',
+    maxRank: 5, rankDesc: ['Chain 4 targets 2.5× stun 0.5s', '5 targets 2.8×', '5 targets ★Notable: Cursed enemies hit for 2× chain dmg', '7 targets 3.5×', '★Capstone: 7 targets 4×, each strike drops a thunder zone 3s'],
+    cost: 40, cooldown: 7.0, color: '#88ddff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const bounces = rank>=4?7:rank>=2?5:4;
+      const mult = rank>=5?4.0:rank>=4?3.5:rank>=2?2.8:2.5;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      const hit = new Set(); let last = null;
+      for (let b = 0; b < bounces; b++) {
+        const pool = enemies.filter(e=>e.alive&&!hit.has(e));
+        if (!pool.length) break;
+        const t = pool.sort((a,b2)=>Math.hypot(a.x-(last?last.x:player.x),a.y-(last?last.y:player.y))-Math.hypot(b2.x-(last?last.x:player.x),b2.y-(last?last.y:player.y)))[0];
+        hit.add(t); last = t;
+        const isCrit = Math.random()*100<player.effectiveCritChance();
+        let fd = dmg*(isCrit?2:1);
+        if (rank>=3 && (t.cursed||0)>0) fd *= 2;
+        const died = t.takeDamage(fd,{crit:isCrit,color:'#88ddff'});
+        if (isCrit) player.onCrit();
+        t.stunTimer = Math.max(t.stunTimer||0, 0.5);
+        t.shocked = true;
+        spawnBurst(t.x, t.y, ['#88ddff','#44aaff','#ffffff'], 10);
+        spawnDamageNumber(t.x, t.y-t.r, fd, {color:'#88ddff', crit:isCrit});
+        if (rank>=5) groundEffects.push({type:'holy_zone',x:t.x,y:t.y,r:35,life:3.0,maxLife:3.0,damage:Math.round(dmg*0.3),cooldowns:new Map()});
+        if (died) handleEnemyDeath(t);
+      }
+      player.resource = Math.min(player.maxResource, player.resource + 20);
+      shake = Math.min(shake+4,8);
+      spawnDamageNumber(player.x, player.y-28, 'STORM CALL!', {color:'#88ddff',size:13,vy:-55,life:1.5});
+      return true;
+    },
+  },
+  spiritWalk: {
+    id: 'spiritWalk', name: 'Spirit Walk', letter: 'W', tier: 3, classOf: 'shaman',
+    desc: '3s: phase through enemies, +60% speed, rapid Mojo regen. Exit = AoE spirit burst.',
+    maxRank: 5, rankDesc: ['Spirit walk 2s +50% spd', '3s +60% spd', '3s ★Notable: Mojo fills completely on exit', '4s +80% spd spirit trail', '★Capstone: 4s, on exit summon 3 spirit warriors 8s'],
+    cost: 50, cooldown: 18.0, color: '#99eeff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const dur = rank>=4?4:rank>=2?3:2;
+      player.spiritWalkTimer = dur;
+      player.spiritWalkSpeedBonus = rank>=4?0.80:rank>=2?0.60:0.50;
+      player.iframeTimer = Math.max(player.iframeTimer, dur);
+      player.spiritWalkFillMana = rank>=3;
+      player.spiritWalkTrail = rank>=4;
+      player.spiritWalkSummon = rank>=5;
+      spawnBurst(player.x, player.y, ['#99eeff','#55ddcc','#ffffff'], 20);
+      spawnDamageNumber(player.x, player.y-26, 'SPIRIT WALK!', {color:'#99eeff',size:13,vy:-52,life:1.4});
+      return true;
+    },
+  },
+
+  // ── SHAMAN T4 (Ultimates) ─────────────────────────────────────
+  massHex: {
+    id: 'massHex', name: 'Mass Hex', letter: 'M', tier: 4, classOf: 'shaman',
+    desc: 'Hex ALL enemies simultaneously. All take +60% damage for 8s.',
+    maxRank: 5, rankDesc: ['All enemies Cursed 5s +50%', '7s +60%', '7s ★Notable: Cursed enemies stunned 1.5s on cast', '8s +75%', '★Capstone: 10s +100%, Hex also halves all enemies speed'],
+    cost: 70, cooldown: 35.0, color: '#55dd66',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const dur = rank>=4?8:rank>=2?7:5;
+      const mult = rank>=5?2.0:rank>=4?1.75:rank>=2?1.60:1.50;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        e.cursed = dur; e.cursedMult = mult;
+        if (rank>=3) e.stunTimer = Math.max(e.stunTimer||0, 1.5);
+        if (rank>=5) { e.slowTimer = Math.max(e.slowTimer||0, dur); e.slowFactor = 0.50; }
+        spawnBurst(e.x, e.y, ['#55dd66','#aaff44'], 6);
+      }
+      spawnBurst(player.x, player.y, ['#55dd66','#aaff44','#ffffff'], 32);
+      spawnDamageNumber(player.x, player.y-32, 'MASS HEX!', {color:'#55dd66',size:15,vy:-65,life:2.0});
+      shake = Math.min(shake+6,12);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.12);
+      return true;
+    },
+  },
+  spiritStorm: {
+    id: 'spiritStorm', name: 'Spirit Storm', letter: 'R', tier: 4, classOf: 'shaman',
+    desc: '8s channeled storm: random lightning strikes across entire arena every 0.3s.',
+    maxRank: 5, rankDesc: ['Storm 6s bolt every 0.4s 3×', '7s 0.35s', '7s ★Notable: bolts seek Cursed enemies', '8s 0.3s 4×', '★Capstone: 10s, bolts detonate Cursed enemies for 10× on hit'],
+    cost: 70, cooldown: 45.0, color: '#cceeff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=5?10:rank>=4?8:rank>=2?7:6;
+      player.spiritStormTimer = dur;
+      player.spiritStormDmg = player.weaponDamage * player.dmgMult * 3.0 * rDmg * rScale;
+      player.spiritStormInterval = rank>=4?0.30:rank>=2?0.35:0.40;
+      player.spiritStormBoltTimer = 0;
+      player.spiritStormSeek = rank>=3;
+      player.spiritStormDetonate = rank>=5;
+      spawnBurst(player.x, player.y, ['#cceeff','#88ddff','#ffffff'], 28);
+      spawnDamageNumber(player.x, player.y-30, 'SPIRIT STORM!', {color:'#cceeff',size:14,vy:-62,life:1.8});
+      shake = Math.min(shake+5,10);
+      return true;
+    },
+  },
+  ancestralFury: {
+    id: 'ancestralFury', name: 'Ancestral Fury', letter: 'A', tier: 4, classOf: 'shaman',
+    desc: 'Summon 3 ancestor spirits that each unleash a massive soul blast, then fight for 12s.',
+    maxRank: 5, rankDesc: ['3 spirits 3× blast', '4× blast spirits 10s', '4× ★Notable: spirits inherit Curse', '5× spirits 14s', '★Capstone: 5 spirits 6× blast 15s, spirits explode on death'],
+    cost: 80, cooldown: 50.0, color: '#aaff88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank>=5?5:3;
+      const blastMult = rank>=5?6:rank>=4?5:rank>=2?4:3;
+      const summonDur = rank>=4?14:rank>=2?10:8;
+      const blastDmg = player.weaponDamage * player.dmgMult * blastMult * rDmg * rScale;
+      // Immediate blast: each spirit fires a radial burst
+      for (let s = 0; s < count; s++) {
+        const bCount = 10;
+        for (let i = 0; i < bCount; i++) {
+          const a = (i/bCount)*Math.PI*2 + (s/count)*Math.PI*2;
+          const sp = player.weaponProjSpeed;
+          const proj = new Projectile(player.x, player.y, Math.cos(a)*sp, Math.sin(a)*sp, blastDmg, 0.8, false);
+          proj.theme = 'arcane'; proj.r = 3; proj.piercing = true;
+          if (rank>=3) proj.onHit = (e) => { e.cursed=(e.cursed||0)+3; e.cursedMult=1.35; };
+          projectiles.push(proj);
+        }
+        spawnBurst(player.x, player.y, ['#aaff88','#55dd66','#ffffff'], 8);
+      }
+      // Summon spirit minions (reuse summons array)
+      if (!player.summons) player.summons = [];
+      for (let s = 0; s < count; s++) {
+        const angle = (s/count)*Math.PI*2;
+        player.summons.push({
+          type:'spirit', x:player.x+Math.cos(angle)*30, y:player.y+Math.sin(angle)*30,
+          hp:999, maxHp:999, alive:true, life:summonDur,
+          dmg:player.weaponDamage*player.dmgMult*1.5*rDmg*rScale,
+          fireTimer:0, fireRate:1.5, r:7, theme:'spirit',
+          explodeOnDeath: rank>=5,
+        });
+      }
+      spawnBurst(player.x, player.y, ['#aaff88','#55dd66','#ccff88','#ffffff'], 36);
+      spawnDamageNumber(player.x, player.y-32, 'ANCESTRAL FURY!', {color:'#aaff88',size:15,vy:-65,life:2.0});
+      shake = Math.min(shake+8,14);
+      hitPauseTimer = Math.max(hitPauseTimer, 0.14);
+      return true;
+    },
+  },
+
+  // ── NECROMANCER T2 (2 new abilities) ─────────────────────────
+  corpseExplosion: {
+    id: 'corpseExplosion', name: 'Corpse Explosion', letter: 'E', tier: 2, classOf: 'necromancer',
+    desc: 'Detonate a corpse (or enemy below 20% HP) for massive AoE bone shrapnel.',
+    maxRank: 5, rankDesc: ['Detonate 1 target 3×', '3.5× bigger', '3.5× ★Notable: shrapnel pierce 3 targets each', '4.5× 2 targets', '★Capstone: 5× detonate all low-HP enemies simultaneously'],
+    cost: 35, cooldown: 5.0, color: '#9988cc',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank>=5?5:rank>=4?4.5:rank>=2?3.5:3;
+      const aoeR = rank>=2?80:60;
+      const targets = rank>=4?2:1;
+      // Find low-HP enemies (under 20%) or just nearest
+      const lowHp = enemies.filter(e=>e.alive&&e.hp<=e.maxHp*0.20);
+      const pool = lowHp.length ? lowHp : enemies.filter(e=>e.alive);
+      if (!pool.length) return false;
+      const sorted = pool.sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y));
+      const explodeList = rank>=5 ? (lowHp.length?lowHp:sorted.slice(0,1)) : sorted.slice(0,targets);
+      for (const t of explodeList) {
+        const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+        const died = t.takeDamage(dmg*3, {crit:true, color:'#9988cc'});
+        player.onCrit();
+        // Shrapnel burst
+        const shards = 8;
+        for (let i=0;i<shards;i++){
+          const a=(i/shards)*Math.PI*2;const sp=player.weaponProjSpeed*1.1;
+          const proj=new Projectile(t.x,t.y,Math.cos(a)*sp,Math.sin(a)*sp,dmg,0.7,false);
+          proj.r=3;proj.theme='arcane';proj.piercing=(rank>=3);
+          projectiles.push(proj);
+        }
+        spawnBurst(t.x,t.y,['#9988cc','#ccbbee','#ffffff'],20);
+        spawnDamageNumber(t.x,t.y-t.r,'CORPSE!',{color:'#9988cc',size:12,vy:-50,life:1.3});
+        shake=Math.min(shake+5,9);
+        if(died)handleEnemyDeath(t);
+        // AoE neighbors
+        for(const n of enemies){if(!n.alive||n===t)continue;if(Math.hypot(n.x-t.x,n.y-t.y)<aoeR){const nd=n.takeDamage(dmg,{crit:false,color:'#9988cc'});spawnBurst(n.x,n.y,['#9988cc','#ffffff'],8);if(nd)handleEnemyDeath(n);}}
+      }
+      return true;
+    },
+  },
+  skeletonWarrior: {
+    id: 'skeletonWarrior', name: 'Skeleton Warrior', letter: 'K', tier: 2, classOf: 'necromancer',
+    desc: 'Raise 2 skeleton warriors that attack nearby enemies for 15s.',
+    maxRank: 5, rankDesc: ['2 skeletons 15s', '3 skeletons 18s', '3 skeletons ★Notable: skeletons explode on death AoE', '4 skeletons 20s', '★Capstone: 5 skeletons 25s, skeletons copy player crits'],
+    cost: 40, cooldown: 20.0, color: '#ccbbee',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank>=5?5:rank>=4?4:rank>=2?3:2;
+      const dur = rank>=4?20:rank>=2?18:15;
+      if (!player.summons) player.summons = [];
+      for (let s = 0; s < count; s++) {
+        const angle = (s/count)*Math.PI*2;
+        player.summons.push({
+          type:'skeleton', x:player.x+Math.cos(angle)*35, y:player.y+Math.sin(angle)*35,
+          hp:player.maxHp*0.3, maxHp:player.maxHp*0.3, alive:true, life:dur,
+          dmg:player.weaponDamage*player.dmgMult*0.9*rDmg*rScale,
+          fireTimer:0, fireRate:1.1, r:6, theme:'arcane',
+          explodeOnDeath:rank>=3,
+          copyPlayerCrit:rank>=5,
+        });
+      }
+      spawnBurst(player.x, player.y, ['#ccbbee','#9988cc','#ffffff'], 18);
+      spawnDamageNumber(player.x, player.y-24, 'RISE!', {color:'#ccbbee',size:12,vy:-48,life:1.3});
+      return true;
+    },
+  },
+
+  // ── NECROMANCER T3 (2 new abilities) ─────────────────────────
+  deathCoil: {
+    id: 'deathCoil', name: 'Death Coil', letter: 'D', tier: 3, classOf: 'necromancer',
+    desc: 'Seeking bone coil: homes on nearest enemy, bounces to 3 more. Heals on kill.',
+    maxRank: 5, rankDesc: ['Coil 3 bounces 2.5×', '4 bounces 2.8×', '4 bounces ★Notable: each bounce applies Bone Crack (×1.3 dmg taken)', '5 bounces 3.5×', '★Capstone: 6 bounces 4×, kill heals 8% max HP'],
+    cost: 40, cooldown: 6.0, color: '#aa88dd',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const bounces = rank>=5?6:rank>=4?5:rank>=2?4:3;
+      const mult = rank>=5?4.0:rank>=4?3.5:rank>=2?2.8:2.5;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      const boneCrack = rank>=3;
+      const healOnKill = rank>=5;
+      const hit = new Set(); let last = null;
+      for (let b=0;b<bounces;b++){
+        const pool=enemies.filter(e=>e.alive&&!hit.has(e));
+        if(!pool.length)break;
+        const t=pool.sort((a,bx)=>Math.hypot(a.x-(last?last.x:player.x),a.y-(last?last.y:player.y))-Math.hypot(bx.x-(last?last.x:player.x),bx.y-(last?last.y:player.y)))[0];
+        hit.add(t); last=t;
+        const isCrit=Math.random()*100<player.effectiveCritChance();
+        const fd=dmg*(isCrit?2:1)*Math.pow(0.9,b);
+        if(boneCrack){t.boneCrack=(t.boneCrack||0)+1;t.boneCrackMult=1+t.boneCrack*0.15;}
+        const died=t.takeDamage(fd*(t.boneCrackMult||1),{crit:isCrit,color:'#aa88dd'});
+        if(isCrit)player.onCrit();
+        spawnBurst(t.x,t.y,['#aa88dd','#ccbbee','#ffffff'],10);
+        spawnDamageNumber(t.x,t.y-t.r,fd,{color:'#aa88dd',crit:isCrit});
+        if(died){if(healOnKill)player.hp=Math.min(player.maxHp,player.hp+Math.ceil(player.maxHp*0.08));handleEnemyDeath(t);}
+      }
+      spawnBurst(player.x,player.y,['#aa88dd','#9988cc'],8);
+      return true;
+    },
+  },
+  lichForm: {
+    id: 'lichForm', name: 'Lich Form', letter: 'F', tier: 3, classOf: 'necromancer',
+    desc: '12s: become undying. +60% dmg, bone armor infinite, abilities cost no resource.',
+    maxRank: 5, rankDesc: ['Lich 8s +50% dmg, bone armor', '10s +60% dmg', '10s ★Notable: Necrotic Power fills on kill', '12s +75% dmg', '★Capstone: 15s, on Lich expire: rise to 30% HP if at 0 (once per wave)'],
+    cost: 60, cooldown: 40.0, color: '#7755aa',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.lichFormTimer = dur;
+      player.lichFormDmgBonus = rank>=4?0.75:rank>=2?0.60:0.50;
+      player.lichFormFreeCasts = true;
+      player.lichFormBoneArmor = true;
+      player.lichFormKillFill = rank>=3;
+      player.lichFormRevive = rank>=5;
+      player.boneArmorCharges = 999; // effectively infinite
+      spawnBurst(player.x, player.y, ['#7755aa','#9988cc','#ccbbee','#ffffff'], 28);
+      spawnDamageNumber(player.x, player.y-30, 'LICH FORM!', {color:'#7755aa',size:14,vy:-60,life:1.8});
+      shake = Math.min(shake+6,12);
+      return true;
+    },
+  },
+
+  // ── NECROMANCER T4 (Ultimates) ────────────────────────────────
+  boneStorm: {
+    id: 'boneStorm', name: 'Bone Storm', letter: 'O', tier: 4, classOf: 'necromancer',
+    desc: '10s cyclone of bone shards orbiting you, shredding everything nearby.',
+    maxRank: 5, rankDesc: ['Bone storm 8s orbit 2×', '10s faster orbit', '10s ★Notable: orbit fires outward shards every 1s', '12s 2.5×', '★Capstone: 12s, storm expands to entire arena on last 2s'],
+    cost: 70, cooldown: 45.0, color: '#ccbbee',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?12:rank>=2?10:8;
+      player.boneStormTimer = dur;
+      player.boneStormDmg = player.weaponDamage * player.dmgMult * 2.0 * rDmg * rScale;
+      player.boneStormRadius = 75;
+      player.boneStormAngle = 0;
+      player.boneStormHitTimer = 0;
+      player.boneStormShardTimer = 0;
+      player.boneStormShards = rank>=3;
+      player.boneStormExpand = rank>=5;
+      spawnBurst(player.x, player.y, ['#ccbbee','#9988cc','#ffffff'], 24);
+      spawnDamageNumber(player.x, player.y-30, 'BONE STORM!', {color:'#ccbbee',size:14,vy:-62,life:1.8});
+      shake = Math.min(shake+7,13);
+      return true;
+    },
+  },
+  bloodRitual: {
+    id: 'bloodRitual', name: 'Blood Ritual', letter: 'U', tier: 4, classOf: 'necromancer',
+    desc: 'Sacrifice 40% max HP: massive AoE 8×, spawn 5 skeletons, all crits for 8s.',
+    maxRank: 5, rankDesc: ['Ritual 5× AoE sacrifice 40%', '6× AoE 3 skeletons', '6× ★Notable: sacrificed HP becomes shield on skeletons', '8× 5 skeletons 8s crits', '★Capstone: 10× if below 30% HP triple damage'],
+    cost: 0, cooldown: 50.0, color: '#cc2244',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const sacrifice = Math.round(player.maxHp * 0.40);
+      if (player.hp <= sacrifice + 5) return false;
+      player.hp -= sacrifice;
+      const mult = rank>=5?10:rank>=4?8:rank>=2?6:5;
+      let d = player.weaponDamage * player.dmgMult * mult * rDmg * rScale + sacrifice * 0.8;
+      if (rank>=5 && player.hp < player.maxHp*0.30) d *= 3;
+      const radius = 140;
+      for (const e of enemies) {
+        if(!e.alive)continue;
+        if(Math.hypot(e.x-player.x,e.y-player.y)<radius){
+          const died=e.takeDamage(d,{crit:true,color:'#cc2244'});
+          player.onCrit();
+          spawnBurst(e.x,e.y,['#cc2244','#ff4466','#ffffff'],12);
+          if(died)handleEnemyDeath(e);
+        }
+      }
+      // Guaranteed crits for 8s (rank 4)
+      if (rank>=4) { player.bloodRitualCritTimer = 8.0; }
+      // Summon skeletons
+      const skelCount = rank>=4?5:rank>=2?3:2;
+      if (!player.summons) player.summons = [];
+      for (let s=0;s<skelCount;s++){
+        const angle=(s/skelCount)*Math.PI*2;
+        player.summons.push({type:'skeleton',x:player.x+Math.cos(angle)*30,y:player.y+Math.sin(angle)*30,hp:player.maxHp*0.4,maxHp:player.maxHp*0.4,alive:true,life:15,dmg:player.weaponDamage*player.dmgMult*1.2*rDmg*rScale,fireTimer:0,fireRate:1.0,r:7,theme:'arcane',explodeOnDeath:true});
+      }
+      groundEffects.push({type:'shockwave',x:player.x,y:player.y,r:10,maxR:radius,damage:0,life:0.5,maxLife:0.5,color:'#cc2244',hit:new Set(),target:'none'});
+      spawnBurst(player.x,player.y,['#cc2244','#ff4466','#9988cc','#ffffff'],40);
+      spawnDamageNumber(player.x,player.y-34,'BLOOD RITUAL!',{color:'#cc2244',size:16,vy:-68,life:2.0});
+      shake=Math.min(shake+10,16);hitPauseTimer=Math.max(hitPauseTimer,0.15);
+      return true;
+    },
+  },
+  necroticApocalypse: {
+    id: 'necroticApocalypse', name: 'Necrotic Apocalypse', letter: 'P', tier: 4, classOf: 'necromancer',
+    desc: 'Curse all enemies to die within 8s. Any survivors at 0.1s take 15× damage.',
+    maxRank: 5, rankDesc: ['All cursed die in 8s or 10×', '6s or 12×', '6s ★Notable: death raises a skeleton warrior', '4s or 15×', '★Capstone: 3s or 20×, each death triggers corpse explosion'],
+    cost: 90, cooldown: 60.0, color: '#440066',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank>=4?4:rank>=2?6:8;
+      const finMult = rank>=5?20:rank>=4?15:rank>=2?12:10;
+      player.necroApocTimer = dur;
+      player.necroApocMult = finMult * rDmg * rScale;
+      player.necroApocRaiseSkeleton = rank>=3;
+      player.necroApocCorpseExplode = rank>=5;
+      // Mark all enemies
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        e.necroApocMark = dur;
+        spawnBurst(e.x, e.y, ['#440066','#9944cc','#ffffff'], 8);
+      }
+      spawnBurst(player.x,player.y,['#440066','#9944cc','#ccbbee','#ffffff'],40);
+      spawnDamageNumber(player.x,player.y-34,'NECROTIC APOCALYPSE!',{color:'#440066',size:14,vy:-70,life:2.2});
+      shake=Math.min(shake+10,16);hitPauseTimer=Math.max(hitPauseTimer,0.15);
+      return true;
+    },
+  },
+
   // ── BERSERKER T1 ─────────────────────────────────────────────
   bloodRend: {
     id: 'bloodRend', name: 'Blood Rend', letter: 'R', tier: 1, classOf: 'berserker',
