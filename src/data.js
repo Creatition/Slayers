@@ -18,7 +18,7 @@ const TRIAL_MULT = { 1: 1.5, 2: 2.0, 3: 2.7, 4: 3.6, 5: 5.0 };
 // ============================================================
 const BIOME = {
   CRYPT:      { id: 'crypt',      name: 'The Crypt',        bg: '#15181a', grid: '#1d2220', decoColors: ['#3a3f3a', '#2a2e2a', '#4a4f44', '#557755'] },
-  FROSTSPIRE: { id: 'frostspire', name: 'Frostspire Peaks', bg: '#1a2030', grid: '#232c3c', decoColors: ['#5a7090', '#3a4a60', '#88aabb', '#aaccff'] },
+  FROSTSPIRE: { id: 'frostspire', tier: 1, name: 'Frostspire Peaks', bg: '#1a2030', grid: '#232c3c', decoColors: ['#5a7090', '#3a4a60', '#88aabb', '#aaccff'] },
   INFERNO:    { id: 'inferno',    name: 'Infernal Depths',  bg: '#1a0e0a', grid: '#2a1410', decoColors: ['#5a2010', '#7a3020', '#aa4020', '#ff8040'] },
   VOID:       { id: 'void',       name: 'The Void Throne',  bg: '#10081a', grid: '#180c28', decoColors: ['#4a2a6a', '#3a1a5a', '#aa66ff', '#dd99ff'] },
 };
@@ -41,10 +41,10 @@ const SLOT_LABEL = {
 const RARITY = {
   WHITE:  { id: 'white',  name: 'Common',    color: '#cccccc', affixMin: 0, affixMax: 1, weight: 600, dmgMult: 1.00 },
   BLUE:   { id: 'blue',   name: 'Magic',     color: '#5599ff', affixMin: 2, affixMax: 3, weight: 290, dmgMult: 1.15 },
-  YELLOW: { id: 'yellow', name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 100, dmgMult: 1.30 },
+  YELLOW: { id: 'yellow', tier: 1, name: 'Rare',      color: '#ffcc33', affixMin: 4, affixMax: 4, weight: 100, dmgMult: 1.30 },
   // Legendary: ~0.9% base (feels special). Set: ~0.1% (incredibly rare).
   // Unique: never in this pool — drops via special boss conditions only.
-  ORANGE: { id: 'orange', name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 9,   dmgMult: 1.50 },
+  ORANGE: { id: 'orange', tier: 1, name: 'Legendary', color: '#ff8000', affixMin: 4, affixMax: 4, weight: 9,   dmgMult: 1.50 },
   GREEN:  { id: 'green',  name: 'Set',       color: '#33cc55', affixMin: 4, affixMax: 4, weight: 1,   dmgMult: 1.40 },
 };
 const RARITY_LIST = [RARITY.WHITE, RARITY.BLUE, RARITY.YELLOW, RARITY.ORANGE, RARITY.GREEN];
@@ -53,23 +53,23 @@ const ITEM_BASES = [
   // Armor — maxSockets: chest/offhand get 2, small pieces get 1
   { id: 'cap',    name: 'Leather Cap',    slot: 'helm',    letter: 'H', maxSockets: 1 },
   { id: 'tunic',  name: 'Leather Tunic',  slot: 'chest',   letter: 'C', maxSockets: 2 },
-  { id: 'gloves', name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G', maxSockets: 1 },
+  { id: 'gloves', tier: 1, name: 'Cloth Gloves',   slot: 'gloves',  letter: 'G', maxSockets: 1 },
   { id: 'boots',  name: 'Soft Boots',     slot: 'boots',   letter: 'F', maxSockets: 1 },
   { id: 'belt',   name: 'Worn Belt',      slot: 'belt',    letter: 'L', maxSockets: 1 },
   // Jewelry — amulet gets 1 socket, rings get 0 (too small)
-  { id: 'amulet', name: 'Tin Amulet',     slot: 'amulet',  letter: 'A', maxSockets: 1 },
+  { id: 'amulet', tier: 1, name: 'Tin Amulet',     slot: 'amulet',  letter: 'A', maxSockets: 1 },
   { id: 'ring',   name: 'Iron Ring',      slot: 'ring',    letter: 'R', maxSockets: 0 },
   // Weapons — 2 sockets each
   { id: 'bow',    name: 'Hunter Bow',     slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
   { id: 'sword',  name: 'Iron Sword',     slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
   { id: 'axe',    name: 'Hand Axe',       slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
-  { id: 'dagger', name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
+  { id: 'dagger', tier: 1, name: 'Sharp Dagger',   slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
   { id: 'staff',  name: 'Gnarled Staff',  slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
   { id: 'wand',   name: 'Carved Wand',    slot: 'weapon',  letter: 'W', kind: 'ranged', maxSockets: 2 },
   { id: 'mace',   name: 'Spiked Mace',    slot: 'weapon',  letter: 'W', kind: 'melee',  maxSockets: 2 },
   // Off-hands — shield/offhand get 2, quiver gets 1
-  { id: 'quiver', name: 'Tattered Quiver',slot: 'offhand', letter: 'Q', maxSockets: 1 },
-  { id: 'shield', name: 'Wooden Shield',  slot: 'offhand', letter: 'O', maxSockets: 2 },
+  { id: 'quiver', tier: 1, name: 'Tattered Quiver',slot: 'offhand', letter: 'Q', maxSockets: 1 },
+  { id: 'shield', tier: 1, name: 'Wooden Shield',  slot: 'offhand', letter: 'O', maxSockets: 2 },
   { id: 'orb',    name: 'Magic Orb',      slot: 'offhand', letter: 'O', maxSockets: 2 },
 ];
 const AFFIX_POOL = [
@@ -147,14 +147,16 @@ function generateItemMinRarity(minId, iLvl) {
 }
 // Class-biased item: prefers the class's weapon types, falls back to random
 const CLASS_PREFERRED_BASES = {
-  archer:      ['bow','quiver','dagger','ring','amulet'],
-  wizard:      ['staff','wand','orb','ring','amulet'],
-  warrior:     ['sword','axe','mace','shield','belt'],
-  rogue:       ['dagger','bow','ring','amulet','gloves'],
-  monk:        ['orb','ring','gloves','amulet','boots'],
-  paladin:     ['mace','shield','sword','belt','amulet'],
-  witchdoctor: ['staff','wand','orb','ring','amulet'],
+  ranger:      ['bow','quiver','dagger','ring','amulet'],
+  sorcerer:      ['staff','wand','orb','ring','amulet'],
+  berserker:     ['sword','axe','mace','shield','belt'],
+  assassin:       ['dagger','bow','ring','amulet','gloves'],
+  templar:        ['orb','ring','gloves','amulet','boots'],
+  crusader:     ['mace','shield','sword','belt','amulet'],
+  shaman: ['staff','wand','orb','ring','amulet'],
   necromancer: ['staff','orb','wand','ring','amulet'],
+  druid:       ['staff','orb','ring','amulet','boots'],
+  amazonian:   ['bow','quiver','ring','amulet','gloves'],
 };
 function generateItemForClass(classId) {
   const preferred = CLASS_PREFERRED_BASES[classId] || [];
@@ -464,22 +466,22 @@ const GEM_QUALITIES = [
 ];
 const GEM_TYPES = [
   {
-    id: 'ruby', name: 'Ruby', color: '#ff3333',
+    id: 'ruby', tier: 1, name: 'Ruby', color: '#ff3333',
     bonuses: [ '+3 HP, +1 Armor', '+6 HP, +2 Armor', '+10 HP, +3 Armor', '+16 HP, +5 Armor', '+25 HP, +8 Armor' ],
     apply: (p, q) => { const hp=[3,6,10,16,25][q]; const ar=[1,2,3,5,8][q]; p.bonusMaxHp+=hp; p.bonusArmor+=ar; },
   },
   {
-    id: 'sapphire', name: 'Sapphire', color: '#3366ff',
+    id: 'sapphire', tier: 1, name: 'Sapphire', color: '#3366ff',
     bonuses: [ '+5 Resource, +1 Regen', '+10 Resource, +1.5 Regen', '+18 Resource, +2 Regen', '+28 Resource, +3 Regen', '+40 Resource, +5 Regen' ],
     apply: (p, q) => { const rs=[5,10,18,28,40][q]; const rr=[1,1.5,2,3,5][q]; p.bonusMaxResource+=rs; p.bonusResourceRegen+=rr; },
   },
   {
-    id: 'topaz', name: 'Topaz', color: '#ffcc00',
+    id: 'topaz', tier: 1, name: 'Topaz', color: '#ffcc00',
     bonuses: [ '+3% Dmg, +2% Atk Spd', '+5% Dmg, +4% Atk Spd', '+8% Dmg, +6% Atk Spd', '+13% Dmg, +10% Atk Spd', '+20% Dmg, +15% Atk Spd' ],
     apply: (p, q) => { const dm=[3,5,8,13,20][q]; const fs=[2,4,6,10,15][q]; p.bonusDmgPct+=dm; p.bonusFireRatePct+=fs; },
   },
   {
-    id: 'emerald', name: 'Emerald', color: '#22cc55',
+    id: 'emerald', tier: 1, name: 'Emerald', color: '#22cc55',
     bonuses: [ '+1% Crit, +1% Dodge', '+2% Crit, +2% Dodge', '+4% Crit, +3% Dodge', '+6% Crit, +5% Dodge', '+10% Crit, +8% Dodge' ],
     apply: (p, q) => { const cc=[1,2,4,6,10][q]; const dg=[1,2,3,5,8][q]; p.bonusCritChance+=cc; p.bonusDodge+=dg; },
   },
@@ -526,8 +528,8 @@ function salvageGold(item) { return Math.floor(itemPrice(item) * 0.5); }
 // CLASS SYSTEM
 // ============================================================
 const CLASS = {
-  ARCHER: {
-    id: 'archer', name: 'Archer', color: '#7ad96b',
+  RANGER: {
+    id: 'ranger', tier: 1, name: 'Ranger', color: '#7ad96b',
     desc: 'Fast and crit-heavy. Auto-fires arrows. Crits refund Focus.',
     baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
     weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
@@ -536,8 +538,8 @@ const CLASS = {
     baseMaxResource: 100, baseResourceRegen: 15, critResourceGain: 18,
     signature: 'multishot',
   },
-  WIZARD: {
-    id: 'wizard', name: 'Wizard', color: '#5599ff',
+  SORCERER: {
+    id: 'sorcerer', tier: 1, name: 'Sorcerer', color: '#5599ff',
     desc: 'Glass cannon. Slow heavy spells. Bigger Mana pool, slower regen.',
     baseMaxHp: 60, baseSpeed: 95, baseCritChance: 3,
     weaponDamage: 7, weaponFireRate: 1.4, weaponRange: 240, weaponProjSpeed: 240,
@@ -546,8 +548,8 @@ const CLASS = {
     baseMaxResource: 140, baseResourceRegen: 8, critResourceGain: 0,
     signature: 'fireball',
   },
-  WARRIOR: {
-    id: 'warrior', name: 'Warrior', color: '#cc4040',
+  BERSERKER: {
+    id: 'berserker', tier: 1, name: 'Berserker', color: '#cc4040',
     desc: 'Tanky melee cleaver. Rage builds from dealing and taking hits.',
     baseMaxHp: 140, baseSpeed: 90, baseCritChance: 4,
     weaponDamage: 11, weaponFireRate: 1.6, weaponRange: 52, weaponProjSpeed: 1,
@@ -558,8 +560,8 @@ const CLASS = {
     baseMaxResource: 150, baseResourceRegen: 0, critResourceGain: 0,
     signature: 'whirlwind',
   },
-  ROGUE: {
-    id: 'rogue', name: 'Rogue', color: '#cc88ff',
+  ASSASSIN: {
+    id: 'assassin', tier: 1, name: 'Assassin', color: '#cc88ff',
     desc: 'Fastest attacks, highest crit. ENERGY refills quickly.',
     baseMaxHp: 70, baseSpeed: 125, baseCritChance: 10,
     weaponDamage: 3, weaponFireRate: 3.0, weaponRange: 130, weaponProjSpeed: 340,
@@ -568,8 +570,8 @@ const CLASS = {
     baseMaxResource: 80, baseResourceRegen: 30, critResourceGain: 0,
     signature: 'shadowStrike',
   },
-  MONK: {
-    id: 'monk', name: 'Monk', color: '#ffaa44',
+  TEMPLAR: {
+    id: 'templar', tier: 1, name: 'Templar', color: '#ffaa44',
     desc: 'Close-range brawler. Chi flows steadily. Heals through combat.',
     baseMaxHp: 90, baseSpeed: 115, baseCritChance: 5,
     weaponDamage: 5, weaponFireRate: 2.2, weaponRange: 110, weaponProjSpeed: 260,
@@ -578,8 +580,8 @@ const CLASS = {
     baseMaxResource: 80, baseResourceRegen: 12, critResourceGain: 8,
     signature: 'fistsOfThunder',
   },
-  PALADIN: {
-    id: 'paladin', name: 'Paladin', color: '#ffe866',
+  CRUSADER: {
+    id: 'crusader', tier: 1, name: 'Crusader', color: '#ffe866',
     desc: 'Holy tank. Hits heal. Consecrated ground burns the wicked.',
     baseMaxHp: 110, baseSpeed: 85, baseCritChance: 4,
     weaponDamage: 7, weaponFireRate: 1.5, weaponRange: 170, weaponProjSpeed: 230,
@@ -588,8 +590,8 @@ const CLASS = {
     baseMaxResource: 100, baseResourceRegen: 7, critResourceGain: 0,
     signature: 'holyNova',
   },
-  WITCH_DOCTOR: {
-    id: 'witchdoctor', name: 'Witch Doctor', color: '#55dd66',
+  SHAMAN: {
+    id: 'shaman', tier: 1, name: 'Shaman', color: '#55dd66',
     desc: 'Long-range hex caster. MOJO fuels devastating curses.',
     baseMaxHp: 75, baseSpeed: 88, baseCritChance: 3,
     weaponDamage: 4, weaponFireRate: 1.2, weaponRange: 260, weaponProjSpeed: 185,
@@ -599,33 +601,58 @@ const CLASS = {
     signature: 'plagueFrogs',
   },
   NECROMANCER: {
-    id: 'necromancer', name: 'Necromancer', color: '#9988cc',
-    desc: 'Master of death. Bone spells pierce. Blood sacrifices shatter.',
+    id: 'necromancer', tier: 1, name: 'Necromancer', color: '#9988cc',
+    desc: 'Master of death. Bone spells pierce. Corpses fuel the army.',
     baseMaxHp: 65, baseSpeed: 88, baseCritChance: 4,
     weaponDamage: 5, weaponFireRate: 1.1, weaponRange: 230, weaponProjSpeed: 200,
     defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
-    resourceName: 'ESSENCE', resourceColor: '#9988cc',
-    baseMaxResource: 100, baseResourceRegen: 10, critResourceGain: 0,
+    resourceName: 'NECROTIC POWER', resourceColor: '#9988cc',
+    baseMaxResource: 100, baseResourceRegen: 5, critResourceGain: 0,
     signature: 'boneSpear',
+  },
+  DRUID: {
+    id: 'druid', tier: 1, name: 'Druid', color: '#66cc88',
+    desc: 'Shapeshifter and summoner. Shift between Human, Dragon and Panther forms.',
+    baseMaxHp: 95, baseSpeed: 98, baseCritChance: 4,
+    weaponDamage: 6, weaponFireRate: 1.6, weaponRange: 160, weaponProjSpeed: 220,
+    defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
+    resourceName: 'SPIRIT', resourceColor: '#66cc88',
+    baseMaxResource: 100, baseResourceRegen: 5, critResourceGain: 0,
+    wildShape: 'human',
+    signature: 'shred',
+  },
+  AMAZONIAN: {
+    id: 'amazonian', tier: 1, name: 'Amazonian', color: '#ddaa33',
+    desc: 'Spirit-bonded javelin hunter. Bond with Eagle, Serpent, Wolf or Bear.',
+    baseMaxHp: 75, baseSpeed: 118, baseCritChance: 8,
+    weaponDamage: 5, weaponFireRate: 2.0, weaponRange: 220, weaponProjSpeed: 310,
+    defaultWeapon: 'bow', defaultWeaponKind: 'ranged',
+    resourceName: 'SPIRIT CHARGE', resourceColor: '#ddaa33',
+    baseMaxResource: 100, baseResourceRegen: 0, critResourceGain: 8,
+    spiritBond: 'eagle',
+    signature: 'javelinVolley',
   },
 };
 function getClassById(id) {
-  if (id === 'wizard')      return CLASS.WIZARD;
-  if (id === 'warrior')     return CLASS.WARRIOR;
-  if (id === 'rogue')       return CLASS.ROGUE;
-  if (id === 'monk')        return CLASS.MONK;
-  if (id === 'paladin')     return CLASS.PALADIN;
-  if (id === 'witchdoctor') return CLASS.WITCH_DOCTOR;
+  if (id === 'sorcerer')    return CLASS.SORCERER;
+  if (id === 'berserker')   return CLASS.BERSERKER;
+  if (id === 'assassin')    return CLASS.ASSASSIN;
+  if (id === 'templar')     return CLASS.TEMPLAR;
+  if (id === 'crusader')    return CLASS.CRUSADER;
+  if (id === 'shaman')      return CLASS.SHAMAN;
   if (id === 'necromancer') return CLASS.NECROMANCER;
-  return CLASS.ARCHER;
+  if (id === 'druid')       return CLASS.DRUID;
+  if (id === 'amazonian')   return CLASS.AMAZONIAN;
+  return CLASS.RANGER;
 }
+
 
 // ============================================================
 // ABILITIES
 // ============================================================
 const ABILITIES = {
   multishot: {
-    id: 'multishot', name: 'Multishot', letter: 'M', classOf: 'archer',
+    id: 'multishot', tier: 1, name: 'Multishot', tier: 1, letter: 'M', classOf: 'ranger',
     desc: '3 arrows in spread (+20% dmg)',
     maxRank: 5, rankDesc: ['3 arrows +20% dmg', '4 arrows +30% dmg', '4 arrows piercing +50% dmg ★Notable', '5 arrows pierce-all +70% dmg', '6 arrows pierce-all +100% dmg ★Capstone: AoE burst per arrow'],
     cost: 25, cooldown: 1.8, color: '#ffd23f',
@@ -657,7 +684,7 @@ const ABILITIES = {
     },
   },
   rainOfArrows: {
-    id: 'rainOfArrows', name: 'Rain of Arrows', letter: 'R', classOf: 'archer',
+    id: 'rainOfArrows', tier: 1, name: 'Rain of Arrows', tier: 2, letter: 'R', classOf: 'ranger',
     desc: 'AoE rain on target (3x dmg)',
     maxRank: 5, rankDesc: ['AoE rain 3× dmg r=50', '3× dmg r=60 +20% power', '3.5× dmg r=70 ★Notable: burning ground 2s', '4× dmg r=80', '5× dmg r=100 ★Capstone: chains to 2nd target'],
     cost: 40, cooldown: 4.0, color: '#ffaa44',
@@ -697,7 +724,7 @@ const ABILITIES = {
     },
   },
   piercingShot: {
-    id: 'piercingShot', name: 'Piercing Shot', letter: 'P', classOf: 'archer',
+    id: 'piercingShot', tier: 1, name: 'Piercing Shot', tier: 1, letter: 'P', classOf: 'ranger',
     desc: 'Pierces all enemies (+150% dmg)',
     maxRank: 5, rankDesc: ['+250% dmg piercing', '300% dmg faster proj', '350% dmg ★Notable: slows hit enemies 2s', '425% dmg bigger hitbox', '500% dmg ★Capstone: shatters into 3 arcs'],
     cost: 30, cooldown: 2.5, color: '#5599ff',
@@ -725,7 +752,7 @@ const ABILITIES = {
     },
   },
   hawkEye: {
-    id: 'hawkEye', name: 'Hawk Eye', letter: 'E', classOf: 'archer',
+    id: 'hawkEye', tier: 1, name: 'Hawk Eye', tier: 1, letter: 'E', classOf: 'ranger',
     desc: '+30% crit & atk speed (5s)',
     maxRank: 5, rankDesc: ['+30% crit+spd 5s', '+35% crit+spd 6s', '+40% crit+spd 7s ★Notable: +50% crit dmg', '50% crit+spd 8s', '60% crit+spd 10s ★Capstone: auto-crits for duration'],
     cost: 50, cooldown: 12.0, color: '#33cc55',
@@ -741,7 +768,7 @@ const ABILITIES = {
     },
   },
   arrowVolley: {
-    id: 'arrowVolley', name: 'Arrow Volley', letter: 'V', classOf: 'archer',
+    id: 'arrowVolley', tier: 1, name: 'Arrow Volley', tier: 2, letter: 'V', classOf: 'ranger',
     desc: '8 arrows in full circle',
     maxRank: 5, rankDesc: ['8 arrows full circle', '10 arrows', '12 arrows ★Notable: arrows return once', '14 arrows return', '16 arrows ★Capstone: arrows orbit + homing'],
     cost: 35, cooldown: 3.0, color: '#ff8000',
@@ -765,7 +792,7 @@ const ABILITIES = {
     },
   },
   fireball: {
-    id: 'fireball', name: 'Fireball', letter: 'F', classOf: 'wizard',
+    id: 'fireball', tier: 1, name: 'Fireball', tier: 1, letter: 'F', classOf: 'sorcerer',
     desc: 'Big projectile, explodes on impact', cost: 30, cooldown: 1.5, color: '#ff5520',
     maxRank: 5, rankDesc: ['Explodes r=40 1.4× dmg', '1.6× dmg r=50', '1.8× dmg r=60 ★Notable: explosion chains 1', '2.1× dmg r=70', '2.5× dmg r=80 ★Capstone: leaves 3s fire puddle'],
     cast: (player, slot) => {
@@ -795,7 +822,7 @@ const ABILITIES = {
     },
   },
   frostNova: {
-    id: 'frostNova', name: 'Frost Nova', letter: 'N', classOf: 'wizard',
+    id: 'frostNova', tier: 1, name: 'Frost Nova', tier: 1, letter: 'N', classOf: 'sorcerer',
     desc: 'AoE around player, slows enemies', cost: 50, cooldown: 5.0, color: '#aaccff',
     maxRank: 5, rankDesc: ['AoE freeze r=80 1.8× slow', '2.0× dmg wider', '2.2× dmg ★Notable: full freeze 1.5s', '2.6× dmg', '3.0× dmg ★Capstone: ice shards burst outward'],
     cast: (player, slot) => {
@@ -838,7 +865,7 @@ const ABILITIES = {
     },
   },
   chainLightning: {
-    id: 'chainLightning', name: 'Chain Lightning', letter: 'L', classOf: 'wizard',
+    id: 'chainLightning', tier: 1, name: 'Chain Lightning', tier: 2, letter: 'L', classOf: 'sorcerer',
     desc: 'Hits target, chains to 3 nearby', cost: 40, cooldown: 2.5, color: '#ffff80',
     maxRank: 5, rankDesc: ['Chains 3 targets 1.8× dmg', 'Chains 4 1.9×', 'Chains 6 2.0× ★Notable: +2 chains', 'Chains 7 2.3×', 'Chains 8 2.8× ★Capstone: stun each jump 0.5s'],
     cast: (player, slot) => {
@@ -883,7 +910,7 @@ const ABILITIES = {
     },
   },
   arcaneOrb: {
-    id: 'arcaneOrb', name: 'Arcane Orb', letter: 'O', classOf: 'wizard',
+    id: 'arcaneOrb', tier: 1, name: 'Arcane Orb', tier: 2, letter: 'O', classOf: 'sorcerer',
     desc: 'Slow piercing orb, big damage', cost: 45, cooldown: 3.0, color: '#aa66ff',
     maxRank: 5, rankDesc: ['Slow piercing 3.0× dmg', '3.3× bigger orb', '3.6× ★Notable: splits into 2 on expiry', '4.0×', '5.0× ★Capstone: splits into 4 seeking orbs'],
     cast: (player, slot) => {
@@ -911,7 +938,7 @@ const ABILITIES = {
     },
   },
   whirlwind: {
-    id: 'whirlwind', name: 'Whirlwind', letter: 'W', classOf: 'warrior',
+    id: 'whirlwind', tier: 1, name: 'Whirlwind', tier: 2, letter: 'W', classOf: 'berserker',
     desc: 'Spin attack, big AoE around you', cost: 30, cooldown: 2.0, color: '#ff6060',
     maxRank: 5, rankDesc: ['AoE spin 2.4× dmg r=75', '2.6× r=80', '2.8× r=90 ★Notable: lifesteal 6% per hit', '3.2×', '4.0× ★Capstone: pulls enemies in while spinning'],
     cast: (player, slot) => {
@@ -945,7 +972,7 @@ const ABILITIES = {
     },
   },
   cleave: {
-    id: 'cleave', name: 'Cleave', letter: 'C', classOf: 'warrior',
+    id: 'cleave', tier: 1, name: 'Cleave', tier: 1, letter: 'C', classOf: 'berserker',
     desc: 'Massive forward swing (250% dmg)', cost: 25, cooldown: 2.0, color: '#ffaa40',
     maxRank: 5, rankDesc: ['Cone 2.6× dmg', '2.8× wider cone', '3.0× ★Notable: applies bleed 3s', '3.5× wide', '4.0× ★Capstone: 180° sweep + 2s knockback'],
     cast: (player, slot) => {
@@ -982,7 +1009,7 @@ const ABILITIES = {
     },
   },
   warCry: {
-    id: 'warCry', name: 'War Cry', letter: 'Y', classOf: 'warrior',
+    id: 'warCry', tier: 1, name: 'War Cry', tier: 1, letter: 'Y', classOf: 'berserker',
     desc: '+40% damage for 6s', cost: 50, cooldown: 14.0, color: '#cc4040',
     maxRank: 5, rankDesc: ['+40% dmg 6s', '+40% dmg+speed 7s', '+50% dmg+spd 8s ★Notable: resets lowest CD', '60% 9s', '70% 12s ★Capstone: instantly fills resource'],
     cast: (player, slot) => {
@@ -1001,7 +1028,7 @@ const ABILITIES = {
     },
   },
   charge: {
-    id: 'charge', name: 'Charge', letter: 'H', classOf: 'warrior',
+    id: 'charge', tier: 1, name: 'Charge', tier: 2, letter: 'H', classOf: 'berserker',
     desc: 'Dash to enemy, damage path (200% dmg)', cost: 35, cooldown: 3.0, color: '#ffaa40',
     maxRank: 5, rankDesc: ['Dash+path 2.0× dmg', '2.2× wider path', '2.5× ★Notable: stuns hit enemies 1.5s', '3.0×', '3.5× ★Capstone: triple charge + reset on kill'],
     cast: (player, slot) => {
@@ -1045,7 +1072,7 @@ const ABILITIES = {
     },
   },
   groundSlam: {
-    id: 'groundSlam', name: 'Ground Slam', letter: 'S', classOf: 'warrior',
+    id: 'groundSlam', tier: 1, name: 'Ground Slam', tier: 2, letter: 'S', classOf: 'berserker',
     desc: 'AoE slam, slows enemies', cost: 45, cooldown: 4.5, color: '#cc6020',
     maxRank: 5, rankDesc: ['AoE slow 2.2× dmg r=90', '2.4× r=100', '2.6× r=110 ★Notable: cracks persist 3s', '3.0×', '3.5× ★Capstone: 2× radius shockwave'],
     cast: (player, slot) => {
@@ -1077,7 +1104,7 @@ const ABILITIES = {
     },
   },
   meteor: {
-    id: 'meteor', name: 'Meteor', letter: 'T', classOf: 'wizard',
+    id: 'meteor', tier: 1, name: 'Meteor', tier: 3, letter: 'T', classOf: 'sorcerer',
     desc: 'Falling meteor, big AoE (delay)', cost: 60, cooldown: 4.5, color: '#ff4400',
     maxRank: 5, rankDesc: ['Meteor 4.0× dmg r=60', '4.5× r=70', '5.0× r=80 ★Notable: scorches ground 3s', '5.8×', '7.0× ★Capstone: 2 simultaneous meteors'],
     cast: (player, slot) => {
@@ -1101,7 +1128,7 @@ const ABILITIES = {
 
   // ── ROGUE ────────────────────────────────────────────────────
   shadowStrike: {
-    id: 'shadowStrike', name: 'Shadow Strike', letter: 'S', classOf: 'rogue',
+    id: 'shadowStrike', tier: 1, name: 'Shadow Strike', tier: 1, letter: 'S', classOf: 'assassin',
     desc: 'Blink behind nearest enemy, 350% dmg + brief iframe',
     maxRank: 5, rankDesc: ['Blink+stab 2.5× dmg', '2.8× leaves shadow', '3.0× ★Notable: shadow copy fights 3s', '3.5×', '4.5× ★Capstone: 2 copies + vanish 1s'],
     cost: 20, cooldown: 4.0, color: '#cc88ff',
@@ -1125,7 +1152,7 @@ const ABILITIES = {
     },
   },
   bladeFlurry: {
-    id: 'bladeFlurry', name: 'Blade Flurry', letter: 'F', classOf: 'rogue',
+    id: 'bladeFlurry', tier: 1, name: 'Blade Flurry', tier: 1, letter: 'F', classOf: 'assassin',
     desc: '5 daggers in a forward arc',
     maxRank: 5, rankDesc: ['6-hit flurry 1.5× each', '7 hits 1.6×', '8 hits ★Notable: applies poison 3s', '9 hits 2.0×', '12 hits ★Capstone: triggers again on dodge'],
     cost: 30, cooldown: 2.5, color: '#dd99ff',
@@ -1150,7 +1177,7 @@ const ABILITIES = {
     },
   },
   smokeBomb: {
-    id: 'smokeBomb', name: 'Smoke Bomb', letter: 'B', classOf: 'rogue',
+    id: 'smokeBomb', tier: 1, name: 'Smoke Bomb', tier: 2, letter: 'B', classOf: 'assassin',
     desc: 'Slow nearby enemies, gain +40% speed for 4s',
     maxRank: 5, rankDesc: ['AoE slow 1.5× dmg', '1.6× + bigger', '1.8× ★Notable: invulnerable 1s on entry', '2.0×', '2.5× ★Capstone: explodes on exit dealing 3×'],
     cost: 35, cooldown: 8.0, color: '#887799',
@@ -1168,7 +1195,7 @@ const ABILITIES = {
     },
   },
   backstab: {
-    id: 'backstab', name: 'Backstab', letter: 'K', classOf: 'rogue',
+    id: 'backstab', tier: 1, name: 'Backstab', tier: 2, letter: 'K', classOf: 'assassin',
     desc: 'Guaranteed crit for 450% dmg on nearest',
     maxRank: 5, rankDesc: ['Rear 3.0× dmg', '3.3× from any angle', '3.6× ★Notable: stuns 1.5s', '4.0× bleeds', '5.0× ★Capstone: guaranteed crit + triggers dodge'],
     cost: 40, cooldown: 5.0, color: '#ff66cc',
@@ -1189,7 +1216,7 @@ const ABILITIES = {
     },
   },
   evasion: {
-    id: 'evasion', name: 'Evasion', letter: 'E', classOf: 'rogue',
+    id: 'evasion', tier: 1, name: 'Evasion', tier: 1, letter: 'E', classOf: 'assassin',
     desc: 'Dash away from nearest threat, 0.5s iframe',
     maxRank: 5, rankDesc: ['Dodge +2 charges', 'Dodge +3 faster', 'Dodge ★Notable: leaves afterimage decoy', 'Afterimage taunts', '★Capstone: counter-attack after each dodge'],
     cost: 15, cooldown: 3.0, color: '#aa66cc',
@@ -1208,7 +1235,7 @@ const ABILITIES = {
 
   // ── MONK ─────────────────────────────────────────────────────
   fistsOfThunder: {
-    id: 'fistsOfThunder', name: 'Fists of Thunder', letter: 'F', classOf: 'monk',
+    id: 'fistsOfThunder', tier: 1, name: 'Fists of Thunder', tier: 1, letter: 'F', classOf: 'templar',
     desc: '5 rapid strikes on nearest for 120% dmg each',
     maxRank: 5, rankDesc: ['5-hit lightning 1.2×', '6-hit 1.4×', '7-hit ★Notable: knockback + stun last hit', '8-hit 1.8×', '10-hit ★Capstone: lightning chain on final blow'],
     cost: 25, cooldown: 2.0, color: '#ffaa44',
@@ -1233,7 +1260,7 @@ const ABILITIES = {
     },
   },
   innerSanctuary: {
-    id: 'innerSanctuary', name: 'Inner Sanctuary', letter: 'I', classOf: 'monk',
+    id: 'innerSanctuary', tier: 1, name: 'Inner Sanctuary', tier: 1, letter: 'I', classOf: 'templar',
     desc: 'Heal 25% max HP',
     maxRank: 5, rankDesc: ['Shield zone 3s 2.5× dmg', '3.5s bigger', '4s ★Notable: regen 8 hp/s inside', '4.5s regen+speed', '5s ★Capstone: reflects projectiles 50%'],
     cost: 40, cooldown: 8.0, color: '#ffe0a0',
@@ -1245,7 +1272,7 @@ const ABILITIES = {
     },
   },
   cycloneStrike: {
-    id: 'cycloneStrike', name: 'Cyclone Strike', letter: 'C', classOf: 'monk',
+    id: 'cycloneStrike', tier: 1, name: 'Cyclone Strike', tier: 2, letter: 'C', classOf: 'templar',
     desc: 'Pull enemies in 120px toward you, then deal AoE',
     maxRank: 5, rankDesc: ['Pull+AoE 2.2×', '2.4× wider pull', '2.6× ★Notable: pulls 2× harder', '3.0× stun center', '3.5× ★Capstone: leaves tornado 3s'],
     cost: 35, cooldown: 4.0, color: '#ffcc66',
@@ -1275,7 +1302,7 @@ const ABILITIES = {
     },
   },
   sevenSidedStrike: {
-    id: 'sevenSidedStrike', name: 'Seven-Sided Strike', letter: 'V', classOf: 'monk',
+    id: 'sevenSidedStrike', tier: 1, name: 'Seven-Sided Strike', tier: 3, letter: 'V', classOf: 'templar',
     desc: '7 hits distributed among nearby enemies',
     maxRank: 5, rankDesc: ['7 strikes 1.8× each', '7 hits 2.0×', '9 hits ★Notable: each hit stuns 0.3s', '11 hits 2.5×', '14 hits ★Capstone: last hit AoE explosion'],
     cost: 50, cooldown: 5.0, color: '#ff8822',
@@ -1301,7 +1328,7 @@ const ABILITIES = {
     },
   },
   mantraOfHealing: {
-    id: 'mantraOfHealing', name: 'Mantra of Healing', letter: 'M', classOf: 'monk',
+    id: 'mantraOfHealing', tier: 1, name: 'Mantra of Healing', letter: 'M', classOf: 'templar',
     desc: '+4 HP/s regen for 8s',
     maxRank: 5, rankDesc: ['Heal 20% HP', '25% HP + regen 3s', '30% ★Notable: HoT 8 hp/s for 6s', '35% + stronger HoT', '50% ★Capstone: full heal + invuln 1.5s'],
     cost: 30, cooldown: 12.0, color: '#ffeeaa',
@@ -1314,7 +1341,7 @@ const ABILITIES = {
 
   // ── PALADIN ──────────────────────────────────────────────────
   holyNova: {
-    id: 'holyNova', name: 'Holy Nova', letter: 'N', classOf: 'paladin',
+    id: 'holyNova', tier: 1, name: 'Holy Nova', letter: 'N', classOf: 'crusader',
     desc: 'AoE blast: damage enemies, heal 4 HP each hit',
     maxRank: 5, rankDesc: ['AoE holy 2.0× heal 5%', '2.2× heal 7%', '2.5× ★Notable: blinds enemies 1.5s', '3.0× heal 10%', '4.0× ★Capstone: leaves holy ground 4s'],
     cost: 40, cooldown: 5.0, color: '#ffe866',
@@ -1344,7 +1371,7 @@ const ABILITIES = {
     },
   },
   consecration: {
-    id: 'consecration', name: 'Consecration', letter: 'C', classOf: 'paladin',
+    id: 'consecration', tier: 1, name: 'Consecration', letter: 'C', classOf: 'crusader',
     desc: 'Holy ground burns enemies for 5s',
     maxRank: 5, rankDesc: ['Holy ground 5s slow', '6s + dmg', '7s ★Notable: slows 50% + ignites', '8s heal on ground', '10s ★Capstone: doubles holy ground + heals nearby'],
     cost: 50, cooldown: 8.0, color: '#ffdd44',
@@ -1356,7 +1383,7 @@ const ABILITIES = {
     },
   },
   divineShield: {
-    id: 'divineShield', name: 'Divine Shield', letter: 'D', classOf: 'paladin',
+    id: 'divineShield', tier: 1, name: 'Divine Shield', letter: 'D', classOf: 'crusader',
     desc: '2s full invincibility + knockback pulse',
     maxRank: 5, rankDesc: ['Invuln 2.5s', '3s + counter', '3.5s ★Notable: reflects 100% dmg taken', '4s + AoE on end', '5s ★Capstone: AoE holy explosion on exit'],
     cost: 60, cooldown: 15.0, color: '#ffffff',
@@ -1379,7 +1406,7 @@ const ABILITIES = {
     },
   },
   hammerOfJustice: {
-    id: 'hammerOfJustice', name: 'Hammer of Justice', letter: 'H', classOf: 'paladin',
+    id: 'hammerOfJustice', tier: 1, name: 'Hammer of Justice', letter: 'H', classOf: 'crusader',
     desc: 'Heavy projectile slows on impact (220% dmg)',
     maxRank: 5, rankDesc: ['Slow hammer 2.5×', '2.8× faster', '3.0× ★Notable: pierces + stuns 1s', '3.5× splits', '4.5× ★Capstone: 3 hammers + chain stun'],
     cost: 30, cooldown: 3.0, color: '#ffcc44',
@@ -1404,7 +1431,7 @@ const ABILITIES = {
     },
   },
   layOnHands: {
-    id: 'layOnHands', name: 'Lay on Hands', letter: 'L', classOf: 'paladin',
+    id: 'layOnHands', tier: 1, name: 'Lay on Hands', letter: 'L', classOf: 'crusader',
     desc: 'Restore 70% max HP',
     maxRank: 5, rankDesc: ['Full heal', '+ cleanse debuffs', '★Notable: invuln 1.5s after cast', '+ AoE heal nearby', '★Capstone: heal + burst of holy energy 5×'],
     cost: 80, cooldown: 20.0, color: '#fffacc',
@@ -1418,7 +1445,7 @@ const ABILITIES = {
 
   // ── WITCH DOCTOR ─────────────────────────────────────────────
   plagueFrogs: {
-    id: 'plagueFrogs', name: 'Plague of Frogs', letter: 'T', classOf: 'witchdoctor',
+    id: 'plagueFrogs', tier: 1, name: 'Plague of Frogs', letter: 'T', classOf: 'shaman',
     desc: '8 piercing toad projectiles in a ring',
     maxRank: 5, rankDesc: ['3 frogs bounce 1.5×', '4 frogs 1.6×', '5 frogs ★Notable: frogs leave poison pool', '6 chain frogs', '8 frogs ★Capstone: frogs spawn on kill chains'],
     cost: 25, cooldown: 3.0, color: '#55dd66',
@@ -1443,7 +1470,7 @@ const ABILITIES = {
     },
   },
   soulHarvest: {
-    id: 'soulHarvest', name: 'Soul Harvest', letter: 'H', classOf: 'witchdoctor',
+    id: 'soulHarvest', tier: 1, name: 'Soul Harvest', letter: 'H', classOf: 'shaman',
     desc: 'AoE damage, heal 4 HP per enemy hit',
     maxRank: 5, rankDesc: ['Drain souls 2.0×', '2.2× more', '2.5× ★Notable: 5% lifesteal per hit', '3.0× bigger', '4.0× ★Capstone: stacking buff 5 charges'],
     cost: 35, cooldown: 5.0, color: '#22aa44',
@@ -1473,7 +1500,7 @@ const ABILITIES = {
     },
   },
   bigBadVoodoo: {
-    id: 'bigBadVoodoo', name: 'Big Bad Voodoo', letter: 'V', classOf: 'witchdoctor',
+    id: 'bigBadVoodoo', tier: 1, name: 'Big Bad Voodoo', letter: 'V', classOf: 'shaman',
     desc: '+35% dmg & +15% speed for 8s',
     maxRank: 5, rankDesc: ['+30% all stats 20s', '35% 25s', '40% 30s ★Notable: 45s duration', '50% 40s', '70% 60s ★Capstone: doubles effect of all buffs'],
     cost: 60, cooldown: 15.0, color: '#aaff44',
@@ -1484,7 +1511,7 @@ const ABILITIES = {
     },
   },
   corpseSpiders: {
-    id: 'corpseSpiders', name: 'Corpse Spiders', letter: 'S', classOf: 'witchdoctor',
+    id: 'corpseSpiders', tier: 1, name: 'Corpse Spiders', letter: 'S', classOf: 'shaman',
     desc: 'Explosive projectile splits into 3 fast piercers',
     maxRank: 5, rankDesc: ['3 spiders 1.2×', '4 spiders', '5 spiders ★Notable: webs slow 50% 2s', '6 venomous', '8 spiders ★Capstone: explode on death AoE'],
     cost: 30, cooldown: 3.5, color: '#885522',
@@ -1520,7 +1547,7 @@ const ABILITIES = {
     },
   },
   locustSwarm: {
-    id: 'locustSwarm', name: 'Locust Swarm', letter: 'L', classOf: 'witchdoctor',
+    id: 'locustSwarm', tier: 1, name: 'Locust Swarm', letter: 'L', classOf: 'shaman',
     desc: 'Slow + damage all enemies in 130px',
     maxRank: 5, rankDesc: ['Swarm 1.5× DoT', '1.7× spreads', '2.0× ★Notable: spreads on kill', '2.4× 2 swarms', '3.0× ★Capstone: 3 swarms + double spread'],
     cost: 40, cooldown: 6.0, color: '#66aa22',
@@ -1549,7 +1576,7 @@ const ABILITIES = {
 
   // ── NECROMANCER ──────────────────────────────────────────────
   boneSpear: {
-    id: 'boneSpear', name: 'Bone Spear', letter: 'B', classOf: 'necromancer',
+    id: 'boneSpear', tier: 1, name: 'Bone Spear', letter: 'B', classOf: 'necromancer',
     desc: 'Fast piercing bone lance (280% dmg)',
     maxRank: 5, rankDesc: ['Bone spear 2.0×', '2.3× faster', '2.6× ★Notable: piercing spear', '3.0× bigger', '4.0× ★Capstone: shatters into 5 bone shards'],
     cost: 30, cooldown: 2.0, color: '#ccbbee',
@@ -1573,7 +1600,7 @@ const ABILITIES = {
     },
   },
   deathNova: {
-    id: 'deathNova', name: 'Death Nova', letter: 'N', classOf: 'necromancer',
+    id: 'deathNova', tier: 1, name: 'Death Nova', letter: 'N', classOf: 'necromancer',
     desc: 'Bone explosion AoE around player (200% dmg)',
     maxRank: 5, rankDesc: ['Death ring 2.5×', '2.8× wider', '3.0× ★Notable: bone zone persists 3s', '3.5×', '4.5× ★Capstone: 2× radius + slows 70%'],
     cost: 40, cooldown: 4.0, color: '#7766aa',
@@ -1600,7 +1627,7 @@ const ABILITIES = {
     },
   },
   boneArmor: {
-    id: 'boneArmor', name: 'Bone Armor', letter: 'R', classOf: 'necromancer',
+    id: 'boneArmor', tier: 1, name: 'Bone Armor', letter: 'R', classOf: 'necromancer',
     desc: 'Absorb the next 3 hits',
     maxRank: 5, rankDesc: ['5 bone stacks absorb', '6 stacks + thorns', '7 stacks ★Notable: thorns reflect 30% dmg', '8 stacks spike AoE', '10 stacks ★Capstone: spikes detonate on 0'],
     cost: 35, cooldown: 10.0, color: '#d0c8ee',
@@ -1611,7 +1638,7 @@ const ABILITIES = {
     },
   },
   bloodNova: {
-    id: 'bloodNova', name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
+    id: 'bloodNova', tier: 1, name: 'Blood Nova', letter: 'V', classOf: 'necromancer',
     desc: 'Sacrifice 15% max HP for massive AoE',
     maxRank: 5, rankDesc: ['Blood ring 2.0×', '2.3× bigger', '2.6× ★Notable: 8% lifesteal per hit', '3.0×', '4.0× ★Capstone: leaves blood puddle 4s'],
     cost: 0, cooldown: 6.0, color: '#cc2244',
@@ -1642,7 +1669,7 @@ const ABILITIES = {
     },
   },
   corpseLance: {
-    id: 'corpseLance', name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
+    id: 'corpseLance', tier: 1, name: 'Corpse Lance', letter: 'L', classOf: 'necromancer',
     desc: 'Fire bone lances at 3 nearest enemies',
     maxRank: 5, rankDesc: ['3.0× piercing', '3.3×', '3.6× ★Notable: splits into 2 on pierce', '4.0× homing', '5.0× ★Capstone: 3 simultaneous lances'],
     cost: 45, cooldown: 3.0, color: '#aa99dd',
@@ -1668,6 +1695,784 @@ const ABILITIES = {
       return true;
     },
   },
+  // ── BERSERKER T1 ─────────────────────────────────────────────
+  bloodRend: {
+    id: 'bloodRend', name: 'Blood Rend', letter: 'R', tier: 1, classOf: 'berserker',
+    desc: '3-hit savage slash combo. Applies Bleed. Generates Fury.',
+    maxRank: 5, rankDesc: ['3-hit combo, Bleed 3s', '4-hit, Bleed 4s', '5-hit ★Notable: Bleed stacks spread on kill', '5-hit 2× dmg on Bleeding targets', '★Capstone: 6-hit, each crit resets combo cooldown'],
+    cost: 0, cooldown: 1.2, color: '#cc4040',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const hits = rank >= 5 ? 6 : rank >= 3 ? 5 : rank >= 2 ? 4 : 3;
+      const target = findNearestEnemy(player.x, player.y, 80);
+      if (!target) return false;
+      let died = false;
+      for (let i = 0; i < hits; i++) {
+        if (!target.alive) break;
+        const isCrit = Math.random() * 100 < player.critChance;
+        let dmg = player.weaponDamage * player.dmgMult * 0.9 * rDmg * rScale;
+        if (rank >= 4 && target.bleedTimer > 0) dmg *= 2;
+        if (isCrit) { dmg *= 2; player.onCrit(); }
+        died = target.takeDamage(dmg, { crit: isCrit });
+        spawnBurst(target.x+(Math.random()-0.5)*8, target.y+(Math.random()-0.5)*8, ['#cc4040','#ff8888','#ffffff'], 3);
+        if (died) { handleEnemyDeath(target); break; }
+      }
+      target.bleedTimer = (target.bleedTimer || 0) + (rank >= 2 ? 4 : 3);
+      target.bleedDmg = (player.weaponDamage * player.dmgMult * 0.2 * rScale);
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 12);
+      shake = Math.min(shake + 2, 5);
+      return true;
+    },
+  },
+  recklessSwing: {
+    id: 'recklessSwing', name: 'Reckless Swing', letter: 'S', tier: 1, classOf: 'berserker',
+    desc: 'Massive single strike. Costs 8% HP. Massive Fury gain.',
+    maxRank: 5, rankDesc: ['3.0× dmg, costs 8% HP', '3.5× costs 6% HP', '4.0× ★Notable: if this kills, heal 15% HP', '4.5× costs 4% HP', '★Capstone: 5.5× dmg, costs 2% HP, guaranteed Overpower'],
+    cost: 0, cooldown: 2.5, color: '#ff4444',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const target = findNearestEnemy(player.x, player.y, 90);
+      if (!target) return false;
+      const hpCost = [0.08,0.08,0.06,0.06,0.04,0.02][Math.min(rank,5)];
+      const mult = rank >= 5 ? 5.5 : rank >= 4 ? 4.5 : rank >= 3 ? 4.0 : rank >= 2 ? 3.5 : 3.0;
+      player.hp = Math.max(1, player.hp - player.maxHp * hpCost);
+      if (rank >= 5) player.overpowerReady = true;
+      const isCrit = Math.random() * 100 < player.critChance;
+      let dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      if (isCrit) { dmg *= 2; player.onCrit(); }
+      const died = target.takeDamage(dmg, { crit: isCrit });
+      if (died) {
+        handleEnemyDeath(target);
+        if (rank >= 3) player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.15);
+      }
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 20);
+      spawnBurst(target.x, target.y, ['#ff4444','#ffaa00','#ffffff'], 20);
+      shake = Math.min(shake + 5, 8); hitPauseTimer = Math.max(hitPauseTimer, 0.08);
+      return true;
+    },
+  },
+  battleShout: {
+    id: 'battleShout', name: 'Battle Shout', letter: 'B', tier: 1, classOf: 'berserker',
+    desc: '+25% damage for 5s. Instantly grants Fury.',
+    maxRank: 5, rankDesc: ['+25% dmg 5s', '+30% dmg 6s', '+35% dmg ★Notable: also +20% attack speed', '+40% dmg 8s', '★Capstone: also heals 20% max HP on cast + Overpower ready'],
+    cost: 0, cooldown: 10.0, color: '#ffaa00',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dmgBonus = [0.25, 0.30, 0.35, 0.40, 0.40][rank-1];
+      const dur = rank >= 4 ? 8 : rank >= 2 ? 6 : 5;
+      player.shoutTimer = dur;
+      player.shoutDmgBonus = dmgBonus;
+      if (rank >= 3) player.shoutSpeedBonus = 0.20;
+      if (rank >= 5) {
+        player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.20);
+        player.overpowerReady = true;
+      }
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 25);
+      spawnBurst(player.x, player.y, ['#ffaa00','#ffdd44','#ffffff'], 18);
+      return true;
+    },
+  },
+
+  // ── BERSERKER T2 ─────────────────────────────────────────────
+  berserkerLeap: {
+    id: 'berserkerLeap', name: 'Leap', letter: 'L', tier: 2, classOf: 'berserker',
+    desc: 'Leap to cursor. AoE on landing. Fury per enemy hit.',
+    maxRank: 5, rankDesc: ['1.8× AoE on land', '2.2× wider radius', '2.6× ★Notable: brief stun on landing', '3.0× knocks back', '★Capstone: leaves lava zone 3s on landing'],
+    cost: 0, cooldown: 5.0, color: '#ff6600',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const tx = Math.max(player.r, Math.min(W-player.r, mouseX));
+      const ty = Math.max(player.r, Math.min(H-player.r, mouseY));
+      player.x = tx; player.y = ty;
+      player.iframeTimer = Math.max(player.iframeTimer, 0.15);
+      const radius = rank >= 2 ? 70 : 55;
+      const dmg = player.weaponDamage * player.dmgMult * (rank >= 4 ? 3.0 : rank >= 3 ? 2.6 : rank >= 2 ? 2.2 : 1.8) * rDmg * rScale;
+      let furyGain = 0;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const d = Math.hypot(e.x-tx, e.y-ty);
+        if (d < radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (rank >= 3) e.stunTimer = Math.max(e.stunTimer||0, 0.8);
+          if (rank >= 4) { e.x += (e.x-tx)/(d||1)*30; e.y += (e.y-ty)/(d||1)*30; }
+          furyGain += 8;
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      player.resource = Math.min(player.maxResource, (player.resource||0) + Math.min(furyGain, 40));
+      if (rank >= 5) groundEffects.push({ type:'burn', x:tx, y:ty, r:radius*0.8, life:3.0, maxLife:3.0, dmgPerSec: player.weaponDamage*player.dmgMult*0.5, color:'#ff4400', hit:new Set() });
+      groundEffects.push({ type:'shockwave', x:tx, y:ty, r:10, maxR:radius, damage:0, life:0.35, maxLife:0.35, color:'#ff6600', hit:new Set(), target:'none' });
+      spawnBurst(tx, ty, ['#ff6600','#ffaa44','#ffffff'], 22);
+      shake = Math.min(shake+4, 8); hitPauseTimer = Math.max(hitPauseTimer, 0.07);
+      return true;
+    },
+  },
+  berserkerRage: {
+    id: 'berserkerRage', name: 'Berserker Rage', letter: 'G', tier: 2, classOf: 'berserker',
+    desc: 'Enter frenzy: +50% attack speed, +20% speed for 4s. Fury cannot decay.',
+    maxRank: 5, rankDesc: ['Frenzy 4s +50% aspd', '5s +55% aspd', '6s ★Notable: also +30% damage', '7s Fury regen 2×', '★Capstone: 8s, Overpower triggers every 3rd hit'],
+    cost: 25, cooldown: 14.0, color: '#ff2222',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = [4,5,6,7,8][rank-1];
+      const speedBonus = 0.50 + rank * 0.01;
+      player.rageTimer = dur;
+      player.rageMoveBonus = 0.20;
+      player.rageSpeedBonus = speedBonus;
+      if (rank >= 3) player.rageDmgBonus = 0.30;
+      if (rank >= 5) player.rageOverpowerEvery3 = true;
+      spawnBurst(player.x, player.y, ['#ff2222','#ff6666','#ffaa44','#ffffff'], 24);
+      return true;
+    },
+  },
+  warchiefCall: {
+    id: 'warchiefCall', name: "Warchief's Brand", letter: 'W', tier: 2, classOf: 'berserker',
+    desc: 'Call 3 spectral warriors that strike enemies then explode.',
+    maxRank: 5, rankDesc: ['3 warriors 1.5× each', '3 warriors 2.0×', '4 warriors ★Notable: each brands enemies (+15% dmg taken)', '5 warriors 2.5×', '★Capstone: warriors explode in chain reaction AoE on death'],
+    cost: 30, cooldown: 12.0, color: '#cc8800',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank >= 4 ? 5 : rank >= 3 ? 4 : 3;
+      const dmgMult = rank >= 4 ? 2.5 : rank >= 2 ? 2.0 : 1.5;
+      const nearby = enemies.filter(e => e.alive).slice(0, count * 2);
+      if (!nearby.length) return false;
+      for (let i = 0; i < count; i++) {
+        const e = nearby[i % nearby.length];
+        if (!e || !e.alive) continue;
+        const dmg = player.weaponDamage * player.dmgMult * dmgMult * rDmg * rScale;
+        const isCrit = Math.random() * 100 < player.critChance;
+        if (isCrit) player.onCrit();
+        if (rank >= 3) e.brandTimer = Math.max(e.brandTimer||0, 4.0);
+        const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+        spawnBurst(e.x, e.y, ['#cc8800','#ffdd44','#ffffff'], 10);
+        if (died) {
+          if (rank >= 5) {
+            for (const n of enemies) {
+              if (n.alive && Math.hypot(n.x-e.x,n.y-e.y) < 60) {
+                n.takeDamage(dmg*0.6, {}); 
+              }
+            }
+          }
+          handleEnemyDeath(e);
+        }
+      }
+      player.resource = Math.min(player.maxResource, (player.resource||0)+15);
+      shake = Math.min(shake+3,6);
+      return true;
+    },
+  },
+
+  // ── BERSERKER T3 ─────────────────────────────────────────────
+  berserkerWhirlwind: {
+    id: 'berserkerWhirlwind', name: 'Whirlwind', letter: 'V', tier: 3, classOf: 'berserker',
+    desc: 'Spin and deal AoE for 2.5s. Fury regenerates during spin.',
+    maxRank: 5, rankDesc: ['Spin 2.5s 1.4× per tick', '3.0s 1.6×', '3.5s ★Notable: pulls enemies in during spin', '4.0s 2.0×', '★Capstone: 4.5s, each kill during spin extends duration 0.3s'],
+    cost: 35, cooldown: 9.0, color: '#ff8822',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = [2.5,3.0,3.5,4.0,4.5][rank-1];
+      const dmgMult = rank >= 4 ? 2.0 : rank >= 2 ? 1.6 : 1.4;
+      player.whirlwindTimer = dur;
+      player.whirlwindDmg = player.weaponDamage * player.dmgMult * dmgMult * rDmg * rScale;
+      player.whirlwindRadius = 65;
+      player.whirlwindPull = rank >= 3;
+      player.whirlwindExtend = rank >= 5;
+      spawnBurst(player.x, player.y, ['#ff8822','#ffcc66','#ffffff'], 16);
+      return true;
+    },
+  },
+  earthshatter: {
+    id: 'earthshatter', name: 'Earthshatter', letter: 'E', tier: 3, classOf: 'berserker',
+    desc: 'Slam ground for massive AoE. Scales with current Fury.',
+    maxRank: 5, rankDesc: ['2.5× + Fury bonus', '3.0× bigger AoE', '3.5× ★Notable: leaves rubble zone 2s', '4.0× stuns all hit', '★Capstone: consumes all Fury for +(Fury/10)× bonus damage'],
+    cost: 0, cooldown: 8.0, color: '#aa6633',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const fury = player.resource || 0;
+      const baseMult = rank >= 4 ? 4.0 : rank >= 3 ? 3.5 : rank >= 2 ? 3.0 : 2.5;
+      const furyBonus = rank >= 5 ? fury/10 : fury/20;
+      const dmg = player.weaponDamage * player.dmgMult * (baseMult + furyBonus) * rDmg * rScale;
+      const radius = rank >= 2 ? 90 : 70;
+      if (rank >= 5) player.resource = 0;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        if (Math.hypot(e.x-player.x, e.y-player.y) < radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (rank >= 4) e.stunTimer = Math.max(e.stunTimer||0, 1.2);
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      if (rank >= 3) groundEffects.push({ type:'slow', x:player.x, y:player.y, r:radius, life:2.0, maxLife:2.0, color:'#aa6633', slowAmt:0.5, hit:new Set() });
+      groundEffects.push({ type:'shockwave', x:player.x, y:player.y, r:10, maxR:radius, damage:0, life:0.4, maxLife:0.4, color:'#aa6633', hit:new Set(), target:'none' });
+      spawnBurst(player.x, player.y, ['#aa6633','#cc8844','#ffffff'], 26);
+      shake = Math.min(shake+6,10); hitPauseTimer = Math.max(hitPauseTimer,0.10);
+      return true;
+    },
+  },
+  titansFall: {
+    id: 'titansFall', name: "Titan's Fall", letter: 'T', tier: 3, classOf: 'berserker',
+    desc: 'Massive leap crash. Invincible in air. Huge AoE on landing.',
+    maxRank: 5, rankDesc: ['4.0× massive AoE', '4.5× wider', '5.0× ★Notable: launches enemies into air', '6.0× shockwave bounces off walls', '★Capstone: 7× dmg + leaves magma zone 4s'],
+    cost: 40, cooldown: 14.0, color: '#ff4400',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const tx = Math.max(player.r, Math.min(W-player.r, mouseX));
+      const ty = Math.max(player.r, Math.min(H-player.r, mouseY));
+      player.x = tx; player.y = ty;
+      player.iframeTimer = Math.max(player.iframeTimer, 0.5);
+      const mult = rank >= 5 ? 7.0 : rank >= 4 ? 6.0 : rank >= 3 ? 5.0 : rank >= 2 ? 4.5 : 4.0;
+      const radius = rank >= 2 ? 100 : 80;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        if (Math.hypot(e.x-tx, e.y-ty) < radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (rank >= 3) { const ang = Math.atan2(e.y-ty,e.x-tx); e.x += Math.cos(ang)*50; e.y += Math.sin(ang)*50; }
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      if (rank >= 5) groundEffects.push({ type:'burn', x:tx, y:ty, r:radius*0.7, life:4.0, maxLife:4.0, dmgPerSec:player.weaponDamage*player.dmgMult*0.8, color:'#ff4400', hit:new Set() });
+      groundEffects.push({ type:'shockwave', x:tx, y:ty, r:10, maxR:radius, damage:0, life:0.4, maxLife:0.4, color:'#ff4400', hit:new Set(), target:'none' });
+      spawnBurst(tx, ty, ['#ff4400','#ff8844','#ffcc00','#ffffff'], 32);
+      shake = Math.min(shake+8,12); hitPauseTimer = Math.max(hitPauseTimer,0.12);
+      return true;
+    },
+  },
+
+  // ── BERSERKER T4 (Ultimates) ──────────────────────────────────
+  bloodTide: {
+    id: 'bloodTide', name: 'Blood Tide', letter: 'D', tier: 4, classOf: 'berserker',
+    desc: '10s: kills restore HP, Fury 3× faster, Overpower every 3rd hit.',
+    maxRank: 5, rankDesc: ['Blood Tide 10s', '12s +60% dmg', '12s ★Notable: lifesteal 20% per hit', '14s Fury fills instantly', '★Capstone: 14s + immune to death once (1HP survive)'],
+    cost: 50, cooldown: 40.0, color: '#cc0033',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 4 ? 14 : rank >= 2 ? 12 : 10;
+      player.bloodTideTimer = dur;
+      player.bloodTideDmgBonus = rank >= 2 ? 0.60 : 0.50;
+      player.bloodTideLifesteal = rank >= 3 ? 0.20 : 0.10;
+      player.bloodTideOverpowerRate = 3;
+      if (rank >= 4) player.resource = player.maxResource;
+      if (rank >= 5) player.deathShield = true;
+      spawnBurst(player.x, player.y, ['#cc0033','#ff4466','#ff8888','#ffffff'], 30);
+      return true;
+    },
+  },
+  primalRoar: {
+    id: 'primalRoar', name: 'Primal Roar', letter: 'P', tier: 4, classOf: 'berserker',
+    desc: 'Fear all enemies 3s, then charge through dealing damage. Fury fills to 100.',
+    maxRank: 5, rankDesc: ['Fear 3s + charge 3.0×', 'Fear 4s + 3.5×', 'Fear 4s ★Notable: charge stuns all hit 1.5s', 'Fear 5s + 4.5×', '★Capstone: Fear + charge + Titan\'s Fall at charge end'],
+    cost: 40, cooldown: 35.0, color: '#ff8800',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const fearDur = rank >= 4 ? 5 : rank >= 2 ? 4 : 3;
+      const mult = rank >= 4 ? 4.5 : rank >= 3 ? 4.0 : rank >= 2 ? 3.5 : 3.0;
+      // Fear all enemies
+      for (const e of enemies) {
+        if (e.alive) { e.fearTimer = fearDur; e.fearSource = {x:player.x, y:player.y}; }
+      }
+      player.resource = player.maxResource; // Fury to 100
+      // Charge damage to all enemies in a line toward cursor
+      const dx = mouseX-player.x, dy = mouseY-player.y;
+      const dist = Math.hypot(dx,dy)||1;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      player.x = Math.max(player.r, Math.min(W-player.r, player.x + dx*0.8));
+      player.y = Math.max(player.r, Math.min(H-player.r, player.y + dy*0.8));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.3);
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        const ex = e.x-player.x, ey = e.y-player.y;
+        if (Math.hypot(ex,ey) < 60) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg*2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          if (rank >= 3) e.stunTimer = Math.max(e.stunTimer||0, 1.5);
+          if (died) handleEnemyDeath(e);
+        }
+      }
+      spawnBurst(player.x, player.y, ['#ff8800','#ffcc44','#ffffff'], 28);
+      shake = Math.min(shake+5,9);
+      return true;
+    },
+  },
+  berserkerArmyUlt: {
+    id: 'berserkerArmyUlt', name: 'Blood Oath', letter: 'O', tier: 4, classOf: 'berserker',
+    desc: '10s frenzy: +80% dmg, immune to stun/slow, kills explode for AoE.',
+    maxRank: 5, rankDesc: ['Blood Oath 10s +80%', '12s +90%', '12s ★Notable: kill explosions chain', '14s +100%, immune damage 0.5s on kill', '★Capstone: 14s + all attacks guaranteed Overpower'],
+    cost: 50, cooldown: 45.0, color: '#ff0000',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 3 ? 12 : rank >= 4 ? 14 : 10;
+      player.bloodOathTimer = dur;
+      player.bloodOathDmgBonus = rank >= 4 ? 1.0 : rank >= 2 ? 0.9 : 0.8;
+      player.bloodOathKillExplode = true;
+      player.bloodOathChain = rank >= 3;
+      player.bloodOathGuaranteedOP = rank >= 5;
+      spawnBurst(player.x, player.y, ['#ff0000','#ff4444','#ffaaaa','#ffffff'], 36);
+      return true;
+    },
+  },
+
+  // ── RANGER T1 ────────────────────────────────────────────────
+  huntersArrow: {
+    id: 'huntersArrow', name: "Hunter's Arrow", letter: 'H', tier: 1, classOf: 'ranger',
+    desc: 'Fire a precise arrow. Crits grant Focus. Guarantees crit on Focus cap.',
+    maxRank: 5, rankDesc: ['1.8× precise shot', '2.0× +crit chance', '2.2× ★Notable: crit applies Mark (enemy takes +20% dmg 4s)', '2.6×, Mark spreads on kill', '★Capstone: 3.0×, at max Focus always crits + pierces'],
+    cost: 0, cooldown: 0.8, color: '#7ad96b',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank >= 5 ? 3.0 : rank >= 4 ? 2.6 : rank >= 3 ? 2.2 : rank >= 2 ? 2.0 : 1.8;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange);
+      if (!target) return false;
+      const atMax = player.resource >= player.maxResource;
+      let isCrit = Math.random() * 100 < (player.critChance + (rank >= 2 ? 5 : 0));
+      if (rank >= 5 && atMax) isCrit = true;
+      let dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      if (isCrit) { dmg *= 2; player.onCrit(); }
+      const died = target.takeDamage(dmg, { crit: isCrit });
+      if (rank >= 3 && isCrit) {
+        target.markTimer = 4.0; target.markDmgBonus = 0.20;
+        if (rank >= 4 && died) {
+          for (const n of enemies) { if (n.alive && Math.hypot(n.x-target.x,n.y-target.y)<80) { n.markTimer=3.0; n.markDmgBonus=0.20; } }
+        }
+      }
+      const dx = target.x-player.x, dy = target.y-player.y, d=Math.hypot(dx,dy)||1;
+      const proj = new Projectile(player.x,player.y,(dx/d)*player.weaponProjSpeed,
+        (dy/d)*player.weaponProjSpeed, 0, d/player.weaponProjSpeed+0.1, isCrit);
+      proj.r=2; proj.theme='arrow'; proj.preHit=true; proj.dmg=dmg;
+      projectiles.push(proj);
+      if (died) handleEnemyDeath(target);
+      return true;
+    },
+  },
+  focusShot: {
+    id: 'focusShot', name: 'Focus Shot', letter: 'F', tier: 1, classOf: 'ranger',
+    desc: 'Consumes all Focus for a massive single shot.',
+    maxRank: 5, rankDesc: ['Focus×0.08 bonus dmg', '×0.10 bonus', '×0.12 ★Notable: pierces all enemies in line', '×0.14 leaves burning arrow in ground', '★Capstone: ×0.16, splits into 3 at max range'],
+    cost: 0, cooldown: 3.0, color: '#aaff55',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const focus = player.resource || 0;
+      const focusMult = [0.08,0.10,0.12,0.14,0.16][rank-1];
+      const baseMult = 2.5 + focus * focusMult;
+      player.resource = 0;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange*1.5);
+      if (!target) return false;
+      const dx = target.x-player.x, dy = target.y-player.y, d=Math.hypot(dx,dy)||1;
+      const isCrit = Math.random()*100 < player.critChance;
+      let dmg = player.weaponDamage * player.dmgMult * baseMult * rDmg * rScale;
+      if (isCrit) { dmg*=2; player.onCrit(); }
+      const sp = player.weaponProjSpeed * 1.6;
+      const proj = new Projectile(player.x,player.y,(dx/d)*sp,(dy/d)*sp,dmg,280/sp+0.1,isCrit);
+      proj.r=4; proj.theme='arrow'; proj.pierce=(rank>=3);
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#aaff55','#ffff88','#ffffff'], 10);
+      return true;
+    },
+  },
+
+  // ── RANGER T2 ────────────────────────────────────────────────
+  trapNet: {
+    id: 'trapNet', name: 'Snare Trap', letter: 'N', tier: 2, classOf: 'ranger',
+    desc: 'Place a trap that roots the first enemy to step on it.',
+    maxRank: 5, rankDesc: ['Root 2.5s single target', '3s + bleed on snap', '3s ★Notable: trap also silences (no specials)', '4s, 2 traps active', '★Capstone: 3 traps, root spreads to nearby enemies'],
+    cost: 15, cooldown: 6.0, color: '#88cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const maxTraps = rank >= 4 ? 2 : rank >= 5 ? 3 : 1;
+      const tx = mouseX, ty = mouseY;
+      if (!player.traps) player.traps = [];
+      if (player.traps.length >= maxTraps) player.traps.shift();
+      player.traps.push({ x:tx, y:ty, rank, rScale, rDmg, active:true,
+        rootDur: rank>=4 ? 4.0 : rank>=2 ? 3.0 : 2.5,
+        bleed: rank>=2, silence: rank>=3, spreadRoot: rank>=5 });
+      groundEffects.push({ type:'marker', x:tx, y:ty, r:12, life:15.0, maxLife:15.0, color:'#88cc44', hit:new Set(), target:'none' });
+      return true;
+    },
+  },
+  volleyShot: {
+    id: 'volleyShot', name: 'Arrow Volley', tier: 2, letter: 'V', classOf: 'ranger',
+    desc: 'Fire 5 arrows in a spread at nearest enemies.',
+    maxRank: 5, rankDesc: ['5 arrows spread', '7 arrows wider', '9 arrows ★Notable: arrows pierce 1 enemy each', '11 arrows, crits chain', '★Capstone: 15 arrows, fills Focus on full volley hit'],
+    cost: 20, cooldown: 4.0, color: '#55dd88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = [5,7,9,11,15][rank-1];
+      const spread = 0.5;
+      const target = findNearestEnemy(player.x, player.y, player.weaponRange*1.3);
+      const baseAngle = target ? Math.atan2(target.y-player.y, target.x-player.x) : 0;
+      let dmg = player.weaponDamage * player.dmgMult * 0.9 * rDmg * rScale;
+      for (let i = 0; i < count; i++) {
+        const ang = baseAngle + (i/(count-1)-0.5)*spread*2;
+        const isCrit = Math.random()*100 < player.critChance;
+        const pd = isCrit ? dmg*2 : dmg;
+        if (isCrit) player.onCrit();
+        const proj = new Projectile(player.x,player.y,Math.cos(ang)*player.weaponProjSpeed,
+          Math.sin(ang)*player.weaponProjSpeed, pd, 0.5, isCrit);
+        proj.r=2; proj.theme='arrow'; proj.pierce=(rank>=3?1:0);
+        projectiles.push(proj);
+      }
+      if (rank>=5) player.resource = Math.min(player.maxResource, (player.resource||0)+30);
+      return true;
+    },
+  },
+
+  // ── RANGER T3 ────────────────────────────────────────────────
+  stormOfArrows: {
+    id: 'stormOfArrows', name: 'Storm of Arrows', letter: 'A', tier: 3, classOf: 'ranger',
+    desc: 'Rain arrows over target area for 3s.',
+    maxRank: 5, rankDesc: ['Rain 3s 20 arrows', '4s 28 arrows', '4s ★Notable: arrows seek enemies in zone', '5s 40 arrows, crits Bleed', '★Capstone: 5s 50 arrows, generates Focus per arrow hit'],
+    cost: 40, cooldown: 12.0, color: '#44bb44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 5 : rank >= 2 ? 4 : 3;
+      const arrowCount = [20,28,28,40,50][rank-1];
+      const tx = mouseX, ty = mouseY;
+      player.arrowRain = { x:tx, y:ty, r:80, timer:dur, maxTimer:dur,
+        arrows:arrowCount, interval:dur/arrowCount,
+        nextArrow:0, dmg: player.weaponDamage*player.dmgMult*0.8*rDmg*rScale,
+        seek: rank>=3, bleed: rank>=4, focusPerHit: rank>=5, player };
+      return true;
+    },
+  },
+  eagleEyeShot: {
+    id: 'eagleEyeShot', name: 'Eagle Eye', tier: 3, letter: 'Y', classOf: 'ranger',
+    desc: 'Boost: next 5 shots guaranteed crit and +50% dmg for 6s.',
+    maxRank: 5, rankDesc: ['5 shots guaran. crit 6s', '7 shots 8s', '8 shots ★Notable: crits also silence target 1s', '10 shots +80% dmg', '★Capstone: 10 shots +100% dmg, crits pierce'],
+    cost: 30, cooldown: 10.0, color: '#ffee44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const shots = [5,7,8,10,10][rank-1];
+      const dur = rank >= 2 ? 8 : 6;
+      const dmgBonus = rank >= 4 ? (rank>=5?1.0:0.8) : 0.5;
+      player.eagleEyeShots = shots;
+      player.eagleEyeTimer = dur;
+      player.eagleEyeDmgBonus = dmgBonus;
+      player.eagleEyeSilence = rank >= 3;
+      player.eagleEyePierce = rank >= 5;
+      spawnBurst(player.x, player.y, ['#ffee44','#ffffff'], 12);
+      return true;
+    },
+  },
+
+  // ── RANGER T4 (Ultimates) ─────────────────────────────────────
+  huntersMark: {
+    id: 'huntersMark', name: "Hunter's Mark", tier: 4, letter: 'M', classOf: 'ranger',
+    desc: 'Mark all enemies. Marked take +40% dmg for 12s. Kills grant Focus.',
+    maxRank: 5, rankDesc: ['All enemies marked 12s', '14s +50% dmg', '14s ★Notable: kills refresh Mark on nearby', '16s crits explode Marked', '★Capstone: 16s, you gain +100% crit chance while any enemy is Marked'],
+    cost: 50, cooldown: 35.0, color: '#33ff77',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 3 ? 14 : rank >= 4 ? 16 : 12;
+      const bonus = rank >= 2 ? 0.50 : 0.40;
+      for (const e of enemies) { if (e.alive) { e.markTimer=dur; e.markDmgBonus=bonus; } }
+      player.huntersMarkActive = true;
+      player.huntersMarkCritBonus = rank >= 5 ? 100 : 0;
+      player.huntersMarkExplode = rank >= 4;
+      spawnBurst(player.x, player.y, ['#33ff77','#aaffcc','#ffffff'], 24);
+      return true;
+    },
+  },
+  deathMark: {
+    id: 'deathMark', name: 'Death Mark', tier: 4, letter: 'K', classOf: 'ranger',
+    desc: '10s: +60% dmg, attack speed +30%, kills chain arrows to nearby.',
+    maxRank: 5, rankDesc: ['Death Mark 10s', '12s +70% dmg', '12s ★Notable: chain arrows pierce', '14s +80% dmg speed +50%', '★Capstone: 14s, guaranteed Overpower on every 5th shot'],
+    cost: 50, cooldown: 40.0, color: '#00cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 3 ? 12 : rank >= 4 ? 14 : 10;
+      player.deathMarkTimer = dur;
+      player.deathMarkDmg = rank >= 4 ? 0.80 : rank >= 2 ? 0.70 : 0.60;
+      player.deathMarkChain = true;
+      player.deathMarkPierce = rank >= 3;
+      player.deathMarkSpeed = rank >= 4 ? 0.50 : 0.30;
+      player.deathMarkOverpower = rank >= 5;
+      spawnBurst(player.x, player.y, ['#00cc44','#88ffaa','#ffffff'], 20);
+      return true;
+    },
+  },
+  trueshot: {
+    id: 'trueshot', name: 'Trueshot', tier: 4, letter: 'U', classOf: 'ranger',
+    desc: 'Channel 1s, release one perfect arrow that traverses the screen dealing 10× damage.',
+    maxRank: 5, rankDesc: ['10× screen-wide pierce', '12× splits on each hit', '12× ★Notable: split arrows also seek', '15× splits into 5 each', '★Capstone: 15×, if kills all targets in path, resets to 0 cooldown'],
+    cost: 60, cooldown: 45.0, color: '#ffff00',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank >= 4 ? 15 : rank >= 2 ? 12 : 10;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      const target = findNearestEnemy(player.x, player.y, 9999);
+      if (!target) return false;
+      const dx = target.x-player.x, dy = target.y-player.y, d=Math.hypot(dx,dy)||1;
+      const isCrit = true; player.onCrit();
+      const proj = new Projectile(player.x,player.y,(dx/d)*player.weaponProjSpeed*1.8,
+        (dy/d)*player.weaponProjSpeed*1.8, dmg, 2.0, isCrit);
+      proj.r=5; proj.theme='arrow'; proj.pierce=true; proj.trueshot=true;
+      proj.splitOnHit = rank >= 2; proj.splitCount = rank >= 4 ? 5 : 3;
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#ffff00','#ffffff'], 16);
+      return true;
+    },
+  },
+
+  // ── DRUID stubs ───────────────────────────────────────────────
+  shred: {
+    id: 'shred', name: 'Shred', letter: 'S', tier: 1, classOf: 'druid',
+    desc: 'Savage claw combo. Free in Panther form. Applies Bleed.',
+    maxRank: 5, rankDesc: ['3-hit claw combo', '4-hit Bleed 3s', '5-hit ★Notable: Feral Frenzy on 4th combo', '5-hit 2× on Bleeding', '★Capstone: 6-hit, Frenzy spawns 2 claw echoes'],
+    cost: 0, cooldown: 1.0, color: '#66cc88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const hits = rank >= 5 ? 6 : rank >= 3 ? 5 : rank >= 2 ? 4 : 3;
+      const target = findNearestEnemy(player.x, player.y, 85);
+      if (!target) return false;
+      let died = false;
+      for (let i = 0; i < hits; i++) {
+        if (!target.alive) break;
+        const isCrit = Math.random()*100 < player.critChance;
+        let dmg = player.weaponDamage * player.dmgMult * 0.85 * rDmg * rScale;
+        if (rank>=4 && target.bleedTimer>0) dmg *= 2;
+        if (isCrit) { dmg*=2; player.onCrit(); }
+        died = target.takeDamage(dmg, { crit:isCrit });
+        spawnBurst(target.x+(Math.random()-0.5)*8, target.y+(Math.random()-0.5)*8, ['#66cc88','#aaffcc','#ffffff'], 3);
+        if (died) { handleEnemyDeath(target); break; }
+      }
+      if (rank>=2) { target.bleedTimer=(target.bleedTimer||0)+3; target.bleedDmg=player.weaponDamage*player.dmgMult*0.15*rScale; }
+      player.resource = Math.min(player.maxResource,(player.resource||0)+6);
+      shake = Math.min(shake+1,4);
+      return true;
+    },
+  },
+  stormStrike: {
+    id: 'stormStrike', name: 'Storm Strike', letter: 'T', tier: 1, classOf: 'druid',
+    desc: 'Nature energy chains as lightning to 3 enemies.',
+    maxRank: 5, rankDesc: ['Nature chain 3 targets', '4 targets', '5 targets ★Notable: leaves Static Field on primary', '6 targets +Spirit', '★Capstone: chains bounce until no new targets found'],
+    cost: 0, cooldown: 1.4, color: '#88ddff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const chains = rank >= 4 ? 6 : rank >= 3 ? 5 : rank >= 2 ? 4 : 3;
+      const nearby = enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-player.x,a.y-player.y)-Math.hypot(b.x-player.x,b.y-player.y)).slice(0,chains);
+      if (!nearby.length) return false;
+      const dmg = player.weaponDamage * player.dmgMult * 1.4 * rDmg * rScale;
+      for (let i=0; i<nearby.length; i++) {
+        const e = nearby[i];
+        const chainDmg = dmg * Math.pow(0.7, i);
+        const isCrit = Math.random()*100 < player.critChance;
+        const died = e.takeDamage(isCrit?chainDmg*2:chainDmg, {crit:isCrit});
+        if (isCrit) player.onCrit();
+        spawnBurst(e.x,e.y,['#88ddff','#aaeeff','#ffffff'],5);
+        if (died) handleEnemyDeath(e);
+      }
+      player.resource = Math.min(player.maxResource,(player.resource||0)+8);
+      return true;
+    },
+  },
+  tornado: {
+    id: 'tornado', name: 'Tornado', letter: 'O', tier: 3, classOf: 'druid',
+    desc: 'Summon a tornado that drifts across the screen dealing Nature damage.',
+    maxRank: 5, rankDesc: ['Tornado 4s drift', '5s bigger', '5s ★Notable: generates Spirit per enemy hit', '6s seeks enemies', '★Capstone: 6s, collapses for Nature AoE explosion'],
+    cost: 30, cooldown: 12.0, color: '#66cc88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 6 : rank >= 2 ? 5 : 4;
+      const dmg = player.weaponDamage * player.dmgMult * 0.6 * rDmg * rScale;
+      const vx = (Math.random()-0.5)*60, vy = (Math.random()-0.5)*60;
+      groundEffects.push({ type:'tornado', x:mouseX, y:mouseY, r:35, life:dur, maxLife:dur,
+        dmgPerSec:dmg*3, color:'#66cc88', vx, vy, hit:new Set(),
+        seek:rank>=4, spiritPerHit:rank>=3?3:0, explodeOnEnd:rank>=5,
+        player, rScale });
+      return true;
+    },
+  },
+  summonWolves: {
+    id: 'summonWolves', name: 'Summon Wolf Pack', letter: 'K', tier: 2, classOf: 'druid',
+    desc: 'Summon 3 spectral wolves that attack enemies for 12s.',
+    maxRank: 5, rankDesc: ['3 wolves 12s', '3 wolves 14s +25% dmg', '4 wolves ★Notable: Alpha wolf amplifies pack', '5 wolves 14s', '★Capstone: wolves howl on death, summoning ghost wolves'],
+    cost: 25, cooldown: 16.0, color: '#66cc88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank >= 4 ? 5 : rank >= 3 ? 4 : 3;
+      const dur = rank >= 2 ? 14 : 12;
+      if (!player.summons) player.summons = [];
+      for (let i=0; i<count; i++) {
+        player.summons.push({ type:'wolf', x:player.x+(Math.random()-0.5)*40, y:player.y+(Math.random()-0.5)*40,
+          hp:30+rank*10, maxHp:30+rank*10, timer:dur, dmg:player.weaponDamage*player.dmgMult*0.5*rDmg*rScale,
+          speed:110, r:6, color:'#aaffcc', attackRate:1.2, attackTimer:0, rank });
+      }
+      spawnBurst(player.x,player.y,['#66cc88','#aaffcc','#ffffff'],14);
+      return true;
+    },
+  },
+  cataclysm: {
+    id: 'cataclysm', name: 'Cataclysm', letter: 'C', tier: 4, classOf: 'druid',
+    desc: '6s nature storm: lightning strikes + tornadoes + vine eruptions.',
+    maxRank: 5, rankDesc: ['Nature storm 6s', '7s denser strikes', '7s ★Notable: lightning chains', '8s vine eruptions root', '★Capstone: 8s, storm detonates for massive AoE at end'],
+    cost: 50, cooldown: 40.0, color: '#66cc88',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 8 : rank >= 2 ? 7 : 6;
+      player.cataclysmTimer = dur;
+      player.cataclysmDmg = player.weaponDamage * player.dmgMult * 0.5 * rDmg * rScale;
+      player.cataclysmStrikeInterval = rank >= 2 ? 0.3 : 0.4;
+      player.cataclysmNextStrike = 0;
+      player.cataclysmChain = rank >= 3;
+      player.cataclysmRoot = rank >= 4;
+      player.cataclysmExplode = rank >= 5;
+      spawnBurst(player.x,player.y,['#66cc88','#88ddff','#ffee44','#ffffff'],28);
+      return true;
+    },
+  },
+
+  // ── AMAZONIAN stubs ───────────────────────────────────────────
+  javelinVolley: {
+    id: 'javelinVolley', name: 'Javelin Volley', letter: 'J', tier: 1, classOf: 'amazonian',
+    desc: 'Throw 3 javelins in a spread. Crits grant Spirit Charge.',
+    maxRank: 5, rankDesc: ['3 javelins spread', '5 javelins', '5 javelins ★Notable: Marked Volley every 5th cast', '7 javelins crits chain', '★Capstone: Marked Volley doubles spirit gain'],
+    cost: 0, cooldown: 0.9, color: '#ddaa33',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank >= 4 ? 7 : rank >= 2 ? 5 : 3;
+      const target = findNearestEnemy(player.x,player.y,player.weaponRange);
+      const baseAngle = target ? Math.atan2(target.y-player.y,target.x-player.x) : 0;
+      const spread = 0.35;
+      for (let i=0;i<count;i++) {
+        const ang = baseAngle + (count>1?(i/(count-1)-0.5)*spread*2:0);
+        const isCrit = Math.random()*100 < player.critChance;
+        let dmg = player.weaponDamage * player.dmgMult * 1.0 * rDmg * rScale;
+        if (isCrit) { dmg*=2; player.onCrit(); player.resource=Math.min(player.maxResource,(player.resource||0)+8); }
+        const proj = new Projectile(player.x,player.y,Math.cos(ang)*player.weaponProjSpeed,
+          Math.sin(ang)*player.weaponProjSpeed,dmg,0.55,isCrit);
+        proj.r=2.5; proj.theme='arrow';
+        projectiles.push(proj);
+      }
+      return true;
+    },
+  },
+  spiritDash: {
+    id: 'spiritDash', name: 'Spirit Dash', letter: 'D', tier: 1, classOf: 'amazonian',
+    desc: 'Dash leaving a spirit trail. Generates Spirit Charge.',
+    maxRank: 5, rankDesc: ['Dash + trail 1.5s', 'Trail 2× dmg on 2nd dash', '3rd dash burst ★Notable', 'Trail applies bond effect', '★Capstone: trail echoes linger +1.5s after dash'],
+    cost: 0, cooldown: 2.0, color: '#ddaa33',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dx = mouseX-player.x, dy = mouseY-player.y, d=Math.hypot(dx,dy)||1;
+      const dist = 75;
+      const nx = Math.max(player.r,Math.min(W-player.r, player.x+(dx/d)*dist));
+      const ny = Math.max(player.r,Math.min(H-player.r, player.y+(dy/d)*dist));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.2);
+      player.x = nx; player.y = ny;
+      player.resource = Math.min(player.maxResource, (player.resource||0)+15);
+      groundEffects.push({ type:'trail', x:nx, y:ny, r:20, life:1.5+(rank>=5?1.5:0), maxLife:1.5, color:'#ddaa33',
+        dmgPerSec:player.weaponDamage*player.dmgMult*0.4*rDmg*rScale, hit:new Set() });
+      spawnBurst(nx,ny,['#ddaa33','#ffcc66','#ffffff'],8);
+      return true;
+    },
+  },
+  thunderJavelin: {
+    id: 'thunderJavelin', name: 'Thunder Javelin', letter: 'T', tier: 3, classOf: 'amazonian',
+    desc: 'Electrified javelin that chains lightning to all nearby enemies.',
+    maxRank: 5, rankDesc: ['4-chain lightning', '5-chain', '6-chain ★Notable: secondary auto-throw after 1.5s', '8-chain crits add chains', '★Capstone: all chains crit if initial crits'],
+    cost: 25, cooldown: 8.0, color: '#88ccff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const chains = rank >= 4 ? 8 : rank >= 3 ? 6 : rank >= 2 ? 5 : 4;
+      const target = findNearestEnemy(player.x,player.y,player.weaponRange*1.3);
+      if (!target) return false;
+      const isCrit = Math.random()*100 < player.critChance;
+      const baseDmg = player.weaponDamage * player.dmgMult * 2.2 * rDmg * rScale;
+      if (isCrit) player.onCrit();
+      const mainDmg = isCrit ? baseDmg*2 : baseDmg;
+      const died = target.takeDamage(mainDmg, {crit:isCrit});
+      spawnBurst(target.x,target.y,['#88ccff','#ffffff'],12);
+      player.resource = Math.min(player.maxResource,(player.resource||0)+5);
+      // Chain lightning to nearby
+      const chainAllCrit = (rank>=5 && isCrit);
+      const nearby = enemies.filter(e=>e.alive&&e!==target).sort((a,b)=>Math.hypot(a.x-target.x,a.y-target.y)-Math.hypot(b.x-target.x,b.y-target.y)).slice(0,chains);
+      for (const n of nearby) {
+        const cc = chainAllCrit || Math.random()*100 < player.critChance;
+        const cd = baseDmg * 0.6 * (cc?2:1);
+        const nd = n.takeDamage(cd,{crit:cc});
+        if (cc) player.onCrit();
+        spawnBurst(n.x,n.y,['#88ccff','#aaddff'],5);
+        player.resource = Math.min(player.maxResource,(player.resource||0)+5);
+        if (nd) handleEnemyDeath(n);
+      }
+      if (died) handleEnemyDeath(target);
+      return true;
+    },
+  },
+  strafe: {
+    id: 'strafe', name: 'Strafe', letter: 'R', tier: 3, classOf: 'amazonian',
+    desc: '1.8s Strafe stance: auto-fires 12 javelins rapidly.',
+    maxRank: 5, rankDesc: ['12 javelins 1.8s', '16 javelins', '20 javelins ★Notable: javelins home', '22 javelins crits pierce', '★Capstone: Parting Shot guaranteed crit on exit'],
+    cost: 30, cooldown: 9.0, color: '#ffaa44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = [12,16,20,22,22][rank-1];
+      const dur = 1.8;
+      player.strafeTimer = dur;
+      player.strafeCount = count;
+      player.strafeDmg = player.weaponDamage * player.dmgMult * 0.85 * rDmg * rScale;
+      player.strafeInterval = dur / count;
+      player.strafeNext = 0;
+      player.strafeHome = rank >= 3;
+      player.strafePierceCrit = rank >= 4;
+      player.strafePartingShot = rank >= 5;
+      return true;
+    },
+  },
+  stormOfSpears: {
+    id: 'stormOfSpears', name: 'Storm of Spears', letter: 'M', tier: 4, classOf: 'amazonian',
+    desc: 'Rain 40 javelins over entire screen for 4s. Impaled enemies take 200% bonus damage.',
+    maxRank: 5, rankDesc: ['40 spears 4s', '50 spears', '50 spears ★Notable: first 5 are Apex (guaranteed crit)', '55 spears Impaled stun', '★Capstone: Impaled enemies erupt, dealing AoE on death'],
+    cost: 50, cooldown: 40.0, color: '#ddaa33',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const count = rank >= 3 ? 55 : rank >= 2 ? 50 : 40;
+      const dur = 4.0;
+      player.spearStormTimer = dur;
+      player.spearStormCount = count;
+      player.spearStormDmg = player.weaponDamage * player.dmgMult * 0.7 * rDmg * rScale;
+      player.spearStormInterval = dur / count;
+      player.spearStormNext = 0;
+      player.spearStormApex = rank >= 3 ? 5 : 0;
+      player.spearStormStun = rank >= 4;
+      player.spearStormErupt = rank >= 5;
+      player.spearStormHits = {};
+      spawnBurst(player.x,player.y-20,['#ddaa33','#ffcc66','#ffffff'],20);
+      return true;
+    },
+  },
+
 };
 
 // ============================================================
@@ -1720,7 +2525,7 @@ function addAbilityToPlayer(p, abilityId) {
 // Tree nodes: { id, name, row(1-5), col(1-3), type:'passive'|'ability', abilityId, desc, apply(p) }
 // Unlock rule: to spend in row N you need ≥1 spent node in row N-1.
 const TALENT_TREES = {
-  archer: { nodes: [
+  ranger: { nodes: [
     // Row 1 — always available
     { id:'a_keen_eye',       row:1, col:1, type:'passive', name:'Keen Eye',          desc:'+5% Crit Chance',              apply:(p)=>{ p.baseCritChance+=5;          p.recomputeStats(); } },
     { id:'a_swift_quiver',   row:1, col:2, type:'passive', name:'Swift Quiver',      desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
@@ -1740,7 +2545,7 @@ const TALENT_TREES = {
     { id:'a_deadeye',        row:5, col:2, type:'passive', name:'Dead Eye',          desc:'+20% Dmg, +50% Crit Dmg, +5% Crit', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseCritDmg+=0.50; p.baseCritChance+=5; p.recomputeStats(); } },
   ]},
 
-  wizard: { nodes: [
+  sorcerer: { nodes: [
     { id:'w_arcane_mind',    row:1, col:1, type:'passive', name:'Arcane Mind',       desc:'+12% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.12;          p.recomputeStats(); } },
     { id:'w_mana_surge',     row:1, col:2, type:'passive', name:'Mana Surge',        desc:'+40 Max Mana',                 apply:(p)=>{ p.baseMaxResource+=40;        p.recomputeStats(); } },
     { id:'w_glass_cannon',   row:1, col:3, type:'passive', name:'Glass Cannon',      desc:'+20% Dmg, -15 Max HP',         apply:(p)=>{ p.baseDmgMult*=1.20; p.baseMaxHp=Math.max(10,p.baseMaxHp-15); p.recomputeStats(); } },
@@ -1754,7 +2559,7 @@ const TALENT_TREES = {
     { id:'w_archmage',       row:5, col:2, type:'passive', name:'Archmage',          desc:'+25% Dmg, +3 Armor, +30 Mana', apply:(p)=>{ p.baseDmgMult*=1.25; p.baseArmor+=3; p.baseMaxResource+=30; p.recomputeStats(); } },
   ]},
 
-  warrior: { nodes: [
+  berserker: { nodes: [
     { id:'wa_battle_hard',   row:1, col:1, type:'passive', name:'Battle Hardened',   desc:'+25 Max HP',                   apply:(p)=>{ p.baseMaxHp+=25;              p.recomputeStats(); } },
     { id:'wa_iron_skin',     row:1, col:2, type:'passive', name:'Iron Skin',         desc:'+3 Armor',                     apply:(p)=>{ p.baseArmor+=3;               p.recomputeStats(); } },
     { id:'wa_war_vet',       row:1, col:3, type:'passive', name:'War Veteran',       desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
@@ -1769,7 +2574,7 @@ const TALENT_TREES = {
     { id:'wa_ground_slam',   row:5, col:2, type:'ability', abilityId:'groundSlam',    name:'Ground Slam',    desc:'Unlock: Ground Slam',     apply:(p)=>{ addAbilityToPlayer(p,'groundSlam'); } },
   ]},
 
-  rogue: { nodes: [
+  assassin: { nodes: [
     { id:'r_shadow_step',    row:1, col:1, type:'passive', name:'Shadow Step',       desc:'+15 Move Speed',               apply:(p)=>{ p.baseSpeed+=15;              p.recomputeStats(); } },
     { id:'r_deadly_poison',  row:1, col:2, type:'passive', name:'Deadly Poison',     desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
     { id:'r_reflexes',       row:1, col:3, type:'passive', name:'Quick Reflexes',    desc:'+4% Dodge',                    apply:(p)=>{ p.baseDodge+=4;               p.recomputeStats(); } },
@@ -1784,7 +2589,7 @@ const TALENT_TREES = {
     { id:'r_master_assassin',row:5, col:2, type:'passive', name:'Master Assassin',   desc:'+50% Crit Dmg, +8% Crit, +6% Dodge', apply:(p)=>{ p.baseCritDmg+=0.50; p.baseCritChance+=8; p.baseDodge+=6; p.recomputeStats(); } },
   ]},
 
-  monk: { nodes: [
+  templar: { nodes: [
     { id:'m_inner_peace',    row:1, col:1, type:'passive', name:'Inner Peace',       desc:'+2 HP/sec Regen',              apply:(p)=>{ p.baseRegen+=2;               p.recomputeStats(); } },
     { id:'m_swift_strikes',  row:1, col:2, type:'passive', name:'Swift Strikes',     desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
     { id:'m_spirit_focus',   row:1, col:3, type:'passive', name:'Spirit Focus',      desc:'+25 Max Chi',                  apply:(p)=>{ p.baseMaxResource+=25;        p.recomputeStats(); } },
@@ -1799,7 +2604,7 @@ const TALENT_TREES = {
     { id:'m_nirvana',        row:5, col:2, type:'passive', name:'Nirvana',           desc:'+20% Dmg, +3 HP/sec, +10% Atk Speed', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseRegen+=3; p.baseFireRateMult*=1.10; p.recomputeStats(); } },
   ]},
 
-  paladin: { nodes: [
+  crusader: { nodes: [
     { id:'p_holy_fervor',    row:1, col:1, type:'passive', name:'Holy Fervor',       desc:'+10% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.10;          p.recomputeStats(); } },
     { id:'p_blessed_armor',  row:1, col:2, type:'passive', name:'Blessed Armor',     desc:'+3 Armor',                     apply:(p)=>{ p.baseArmor+=3;               p.recomputeStats(); } },
     { id:'p_devotion',       row:1, col:3, type:'passive', name:'Devotion',          desc:'+25 Max HP, +1 HP/sec',        apply:(p)=>{ p.baseMaxHp+=25; p.baseRegen+=1; p.recomputeStats(); } },
@@ -1814,7 +2619,7 @@ const TALENT_TREES = {
     { id:'p_avatar',         row:5, col:2, type:'passive', name:'Avatar of Light',   desc:'+20% Dmg, +5 Armor, +3 HP/sec',apply:(p)=>{ p.baseDmgMult*=1.20; p.baseArmor+=5; p.baseRegen+=3; p.recomputeStats(); } },
   ]},
 
-  witchdoctor: { nodes: [
+  shaman: { nodes: [
     { id:'wd_dark_pact',     row:1, col:1, type:'passive', name:'Dark Pact',         desc:'+12% Damage',                  apply:(p)=>{ p.baseDmgMult*=1.12;          p.recomputeStats(); } },
     { id:'wd_spirit_walk',   row:1, col:2, type:'passive', name:'Spirit Walk',       desc:'+15 Move Speed',               apply:(p)=>{ p.baseSpeed+=15;              p.recomputeStats(); } },
     { id:'wd_fetish_power',  row:1, col:3, type:'passive', name:'Fetish Power',      desc:'+15% Attack Speed',            apply:(p)=>{ p.baseFireRateMult*=1.15;     p.recomputeStats(); } },
@@ -1842,6 +2647,36 @@ const TALENT_TREES = {
     { id:'n_corpse_lance',   row:4, col:1, type:'ability', abilityId:'corpseLance',   name:'Corpse Lance',   desc:'Unlock: Corpse Lance',    apply:(p)=>{ addAbilityToPlayer(p,'corpseLance'); } },
     { id:'n_death_shroud',   row:4, col:3, type:'passive', name:'Death Shroud',      desc:'+4 Armor, +1 HP/sec',         apply:(p)=>{ p.baseArmor+=4; p.baseRegen+=1; p.recomputeStats(); } },
     { id:'n_lich_form',      row:5, col:2, type:'passive', name:'Lich Form',         desc:'+20% Dmg, +5 Essence/sec, +4 Armor', apply:(p)=>{ p.baseDmgMult*=1.20; p.baseResourceRegen+=5; p.baseArmor+=4; p.recomputeStats(); } },
+  ]},
+
+  druid: { nodes: [
+    { id:'dr_primal_bond',   row:1, col:1, type:'passive', name:'Primal Bond',    desc:'+10% Dmg, +8 Max HP',        apply:(p)=>{ p.baseDmgMult*=1.10; p.baseMaxHp+=8; p.recomputeStats(); } },
+    { id:'dr_wild_heart',    row:1, col:2, type:'passive', name:'Wild Heart',     desc:'+12 Move Speed, +1 HP/sec',  apply:(p)=>{ p.baseSpeed+=12; p.baseRegen+=1; p.recomputeStats(); } },
+    { id:'dr_nature_surge',  row:1, col:3, type:'passive', name:'Nature Surge',   desc:'+5 Spirit/sec',              apply:(p)=>{ p.baseResourceRegen+=5; p.recomputeStats(); } },
+    { id:'dr_shred',         row:2, col:1, type:'ability', abilityId:'shred',     name:'Shred',          desc:'Unlock: Shred',          apply:(p)=>{ addAbilityToPlayer(p,'shred'); } },
+    { id:'dr_storm_strike',  row:2, col:2, type:'ability', abilityId:'stormStrike',name:'Storm Strike',  desc:'Unlock: Storm Strike',   apply:(p)=>{ addAbilityToPlayer(p,'stormStrike'); } },
+    { id:'dr_feral_power',   row:2, col:3, type:'passive', name:'Feral Power',    desc:'+15% Dmg in non-human form', apply:(p)=>{ p.baseDmgMult*=1.15; p.recomputeStats(); } },
+    { id:'dr_tornado',       row:3, col:1, type:'ability', abilityId:'tornado',   name:'Tornado',        desc:'Unlock: Tornado',        apply:(p)=>{ addAbilityToPlayer(p,'tornado'); } },
+    { id:'dr_summon_wolves', row:3, col:2, type:'ability', abilityId:'summonWolves',name:'Summon Wolves',desc:'Unlock: Summon Wolves',  apply:(p)=>{ addAbilityToPlayer(p,'summonWolves'); } },
+    { id:'dr_ancient_bark',  row:3, col:3, type:'passive', name:'Ancient Bark',   desc:'+4 Armor, +20 Max HP',       apply:(p)=>{ p.baseArmor+=4; p.baseMaxHp+=20; p.recomputeStats(); } },
+    { id:'dr_cataclysm',     row:4, col:1, type:'ability', abilityId:'cataclysm', name:'Cataclysm',      desc:'Unlock: Cataclysm',      apply:(p)=>{ addAbilityToPlayer(p,'cataclysm'); } },
+    { id:'dr_apex_power',    row:4, col:3, type:'passive', name:'Apex Power',     desc:'+20% Dmg, +5 Spirit/sec',    apply:(p)=>{ p.baseDmgMult*=1.20; p.baseResourceRegen+=5; p.recomputeStats(); } },
+    { id:'dr_primal_fury',   row:5, col:2, type:'passive', name:'Primal Fury',    desc:'+25% Dmg, +6 Armor, +2 HP/sec', apply:(p)=>{ p.baseDmgMult*=1.25; p.baseArmor+=6; p.baseRegen+=2; p.recomputeStats(); } },
+  ]},
+
+  amazonian: { nodes: [
+    { id:'am_hunters_eye',   row:1, col:1, type:'passive', name:"Hunter's Eye",   desc:'+5% Crit Chance, +10% Dmg',  apply:(p)=>{ p.baseCritChance+=5; p.baseDmgMult*=1.10; p.recomputeStats(); } },
+    { id:'am_swift_foot',    row:1, col:2, type:'passive', name:'Swift Foot',     desc:'+18 Move Speed',             apply:(p)=>{ p.baseSpeed+=18; p.recomputeStats(); } },
+    { id:'am_spirit_sense',  row:1, col:3, type:'passive', name:'Spirit Sense',   desc:'+4% Crit Chance',            apply:(p)=>{ p.baseCritChance+=4; p.recomputeStats(); } },
+    { id:'am_javelin',       row:2, col:1, type:'ability', abilityId:'javelinVolley',name:'Javelin Volley',desc:'Unlock: Javelin Volley', apply:(p)=>{ addAbilityToPlayer(p,'javelinVolley'); } },
+    { id:'am_spirit_dash',   row:2, col:2, type:'ability', abilityId:'spiritDash',name:'Spirit Dash',    desc:'Unlock: Spirit Dash',    apply:(p)=>{ addAbilityToPlayer(p,'spiritDash'); } },
+    { id:'am_bond_mastery',  row:2, col:3, type:'passive', name:'Bond Mastery',   desc:'+15% Spirit Bond effect',    apply:(p)=>{ p.baseDmgMult*=1.15; p.recomputeStats(); } },
+    { id:'am_thunder_jav',   row:3, col:1, type:'ability', abilityId:'thunderJavelin',name:'Thunder Javelin',desc:'Unlock: Thunder Javelin', apply:(p)=>{ addAbilityToPlayer(p,'thunderJavelin'); } },
+    { id:'am_strafe',        row:3, col:2, type:'ability', abilityId:'strafe',    name:'Strafe',         desc:'Unlock: Strafe',         apply:(p)=>{ addAbilityToPlayer(p,'strafe'); } },
+    { id:'am_predator',      row:3, col:3, type:'passive', name:'Predator',       desc:'+8% Crit Dmg, +10 Move Speed',apply:(p)=>{ p.baseCritDmg+=0.08; p.baseSpeed+=10; p.recomputeStats(); } },
+    { id:'am_storm_spears',  row:4, col:1, type:'ability', abilityId:'stormOfSpears',name:'Storm of Spears',desc:'Unlock: Storm of Spears', apply:(p)=>{ addAbilityToPlayer(p,'stormOfSpears'); } },
+    { id:'am_apex_hunter',   row:4, col:3, type:'passive', name:'Apex Hunter',    desc:'+20% Dmg, +6% Crit',         apply:(p)=>{ p.baseDmgMult*=1.20; p.baseCritChance+=6; p.recomputeStats(); } },
+    { id:'am_convergence',   row:5, col:2, type:'passive', name:'Primal Convergence',desc:'+25% Dmg, +10% Crit Dmg, +15 Speed', apply:(p)=>{ p.baseDmgMult*=1.25; p.baseCritDmg+=0.10; p.baseSpeed+=15; p.recomputeStats(); } },
   ]},
 };
 
@@ -2003,7 +2838,7 @@ const ELITE_MODS = [
   { id: 'arcane',     name: 'Arcane',     auraColor: '#bb88ff', trailColor: '#8844ff' },
   { id: 'plagued',    name: 'Plagued',    auraColor: '#66ff77', trailColor: '#33aa44' },
   { id: 'shielded',   name: 'Shielded',   auraColor: '#88ccff', trailColor: '#4488cc' },
-  { id: 'teleporter', name: 'Teleporter', auraColor: '#ff88ff', trailColor: '#aa44aa' },
+  { id: 'teleporter', tier: 1, name: 'Teleporter', auraColor: '#ff88ff', trailColor: '#aa44aa' },
 ];
 
 function rollEliteMods(count) {

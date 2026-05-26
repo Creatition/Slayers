@@ -81,11 +81,13 @@
   // ============================================================
   // GAME STATE
   // ============================================================
-  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14 };
+  const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
   let levelUpChoices = [];
   let abilityDraftChoices = [];
+  let tierDraftChoices = []; // T1-T4 ability picks on boss kills
+  let tierDraftTier = 1;    // which tier is being offered
   let intermissionTimer = 0;
   let waveTimer = 0;
   let currentWave = 1;
@@ -114,7 +116,7 @@
   let selectedInvIdx = -1;
   let levelUpRerollCost = 1;
   let currentBiomeId = '';
-  let selectedClassId = 'archer';
+  let selectedClassId = 'ranger';
   // Persistent stash (saved to localStorage across runs)
   let stash = [];
   // STASH_SIZE_INIT moved to src/data.js
@@ -627,6 +629,9 @@
     // Set: kill_heal — 3% max HP restore
     if (player.activeSetEffects && player.activeSetEffects.includes('kill_heal'))
       player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.03));
+    // Blood Tide: kills restore 8% max HP
+    if (player.bloodTideTimer > 0)
+      player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.08));
     // Set: kill_speed_burst + unique: stormrider
     if (player.activeSetEffects && player.activeSetEffects.includes('kill_speed_burst'))
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
@@ -694,8 +699,16 @@
       state = STATE.VICTORY;
     } else {
       Sfx.waveComplete();
-      if (player.pendingLevelUps > 0) enterLevelUp();
-      else enterShop();
+      // Boss kill unlocks next ability tier — offer tier-pick if player doesn't already have a T(n) ability
+      const bossNum = runBossesKilled; // 1=wave5, 2=wave10, 3=wave15
+      const unlockedTier = Math.min(bossNum + 1, 4); // boss 1 → tier 2, boss 2 → tier 3, boss 3 → tier 4
+      if (unlockedTier <= 4) {
+        enterTierDraft(unlockedTier);
+      } else if (player.pendingLevelUps > 0) {
+        enterLevelUp();
+      } else {
+        enterShop();
+      }
     }
   }
 
@@ -754,8 +767,9 @@
     const newProj = new Projectile(shooter.x, shooter.y, (dx / d) * sp, (dy / d) * sp, dmg, life, isCrit);
     // Assign class-specific visual theme
     const _CLASS_THEME_MAP = {
-      archer: 'arrow', wizard: 'arcane', rogue: 'shadow',
-      monk: 'chi', paladin: 'holy', witchdoctor: 'poison', necromancer: 'bone',
+      ranger: 'arrow', sorcerer: 'arcane', assassin: 'shadow',
+      templar: 'chi', crusader: 'holy', shaman: 'poison', necromancer: 'bone',
+      berserker: 'melee', druid: 'nature', amazonian: 'javelin',
     };
     if (shooter.class && _CLASS_THEME_MAP[shooter.class.id]) {
       newProj.theme = _CLASS_THEME_MAP[shooter.class.id];
@@ -1176,6 +1190,81 @@
     abilityDraftChoices = out;
     state = STATE.ABILITYDRAFT;
   }
+  // ── TIER DRAFT: boss-kill ability unlock ─────────────────────
+  function enterTierDraft(tier) {
+    tierDraftTier = tier;
+    const classId = player.class.id;
+    // Get all tier-N abilities for this class
+    const pool = ABILITY_LIST.filter(a => a.classOf === classId && a.tier === tier);
+    // Shuffle and pick up to 3
+    const shuffled = pool.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+    // Filter out ones player already has equipped in that tier slot
+    const ownedIds = new Set(player.abilities.filter(Boolean).map(a => a.id));
+    const choices = shuffled.filter(a => !ownedIds.has(a.id));
+    if (choices.length === 0) {
+      // All tier abilities owned — give a rank-up or go to shop
+      if (player.pendingLevelUps > 0) enterLevelUp(); else enterShop();
+      return;
+    }
+    tierDraftChoices = choices.slice(0, 3);
+    state = STATE.TIERDRAFT;
+  }
+
+  function pickTierDraft(idx) {
+    if (idx < 0 || idx >= tierDraftChoices.length) return;
+    const def = tierDraftChoices[idx];
+    // Place in the tier slot (tier 1→slot 0, tier 2→slot 1, tier 3→slot 2, tier 4→slot 3)
+    const slot = def.tier - 1;
+    player.abilities[slot] = { id: def.id, def, rarity: RARITY.WHITE, rank: 1 };
+    spawnDamageNumber(player.x, player.y - 28, `${def.name} UNLOCKED!`, { color: def.color || '#ffdd44', size: 12, vy: -60, life: 2.2 });
+    Sfx.uiConfirm();
+    if (player.pendingLevelUps > 0) enterLevelUp(); else enterShop();
+  }
+
+  function drawTierDraftScreen() {
+    const tierNames = ['', 'FOUNDATION', 'MASTERY', 'POWER', 'ULTIMATE'];
+    const tierColors = ['', '#aaaaaa', '#44dd44', '#4499ff', '#ffaa00'];
+    const tier = tierDraftTier;
+    ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = tierColors[tier] || '#ffdd44';
+    ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(`TIER ${tier} — ${tierNames[tier] || 'ABILITY'} UNLOCKED`, W/2, 22);
+    ctx.fillStyle = '#aaaaaa'; ctx.font = '8px monospace';
+    ctx.fillText('Choose your Tier ' + tier + ' ability — one slot, permanent for this run', W/2, 34);
+    const count = tierDraftChoices.length;
+    const cardW = 120, cardH = 90, gap = 14;
+    const totalW = count * cardW + (count - 1) * gap;
+    const sx = (W - totalW) / 2;
+    const cy = H / 2 - 20;
+    for (let i = 0; i < count; i++) {
+      const def = tierDraftChoices[i];
+      const cx = sx + i * (cardW + gap);
+      const hovered = mouseX >= cx && mouseX <= cx+cardW && mouseY >= cy && mouseY <= cy+cardH;
+      ctx.fillStyle = hovered ? '#1a1a2e' : '#111118';
+      ctx.strokeStyle = tierColors[tier] || '#ffdd44';
+      ctx.lineWidth = hovered ? 3 : 1.5;
+      roundRect(ctx, cx, cy, cardW, cardH, 4); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = def.color || '#ffffff';
+      ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(def.letter || '?', cx + cardW/2, cy + 18);
+      ctx.font = 'bold 8px monospace';
+      ctx.fillText(def.name, cx + cardW/2, cy + 30);
+      ctx.fillStyle = tierColors[tier] || '#ffdd44';
+      ctx.font = '7px monospace';
+      ctx.fillText('TIER ' + tier, cx + cardW/2, cy + 42);
+      ctx.fillStyle = '#cccccc'; ctx.font = '7px monospace';
+      const words = (def.desc || '').split(' ');
+      let line = '', lineY = cy + 54;
+      for (const w of words) {
+        const test = line + w + ' ';
+        if (ctx.measureText(test).width > cardW - 8 && line) {
+          ctx.fillText(line.trim(), cx+cardW/2, lineY); line = w+' '; lineY += 10;
+        } else { line = test; }
+      }
+      if (line.trim()) ctx.fillText(line.trim(), cx+cardW/2, lineY);
+    }
+  }
+
   function pickAbilityDraft(idx) {
     if (idx < 0 || idx >= abilityDraftChoices.length) return;
     const choice = abilityDraftChoices[idx];
@@ -1200,7 +1289,7 @@
     state = STATE.SHOP;
     shopRefreshCost = 5;
     shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'archer'));
+    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'ranger'));
     selectedInvIdx = -1;
   }
   // Returns act info for the act the given wave belongs to.
@@ -1606,7 +1695,7 @@
     player.gold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
     for (let i = 0; i < 4; i++) {
-      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'archer');
+      if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'ranger');
     }
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();
@@ -2407,8 +2496,9 @@
     };
 
     // 4×2 grid layout — row 0: Archer/Wizard/Warrior/Rogue, row 1: Monk/Paladin/Witch Doctor/Necromancer
-    const allClasses = [CLASS.ARCHER, CLASS.WIZARD, CLASS.WARRIOR, CLASS.ROGUE,
-                        CLASS.MONK, CLASS.PALADIN, CLASS.WITCH_DOCTOR, CLASS.NECROMANCER];
+    const allClasses = [CLASS.RANGER, CLASS.SORCERER, CLASS.BERSERKER, CLASS.ASSASSIN,
+                        CLASS.TEMPLAR, CLASS.CRUSADER, CLASS.SHAMAN, CLASS.NECROMANCER,
+                        CLASS.DRUID, CLASS.AMAZONIAN];
     const cardW = 148, cardH = 145, gap = 6;
     const cols = 4;
     const totalW = cardW * cols + gap * (cols - 1);
@@ -2526,7 +2616,7 @@
     ctx.lineWidth = 1;
 
     // ── Class tabs ─────────────────────────────────────────────
-    const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
+    const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
     const tabW = Math.floor((W - 16) / allClasses.length), tabH = 14, tabY = 63;
     for (let i = 0; i < allClasses.length; i++) {
       const cid = allClasses[i]; const tx = 8 + i * tabW;
@@ -3325,6 +3415,104 @@
     }
   }
 
+  // ── Class-specific mechanic ticks (Rage decay, Overpower, buff timers) ────
+  function updateClassMechanics(dt) {
+    if (!player) return;
+    const cls = player.class.id;
+
+    // ─ BERSERKER ─────────────────────────────────────────────────────────────
+    if (cls === 'berserker') {
+      // Rage decay: 3/sec when not recently hitting & not in Rage frenzy
+      if (player.lastHitTimer > 0) {
+        player.lastHitTimer -= dt;
+      } else if (player.rageTimer <= 0) {
+        player.resource = Math.max(0, player.resource - 3 * dt);
+      }
+
+      // Overpower: announce when Rage hits cap
+      if (player.resource >= player.maxResource && !player.overpowerReady) {
+        player.overpowerReady = true;
+        spawnDamageNumber(player.x, player.y - 24, 'OVERPOWER!', { color: '#ff4400', size: 13, vy: -55, life: 1.5 });
+        spawnBurst(player.x, player.y, ['#ff4400','#ff8844','#ffcc00'], 12);
+      }
+      if (player.resource < player.maxResource * 0.9) player.overpowerReady = false;
+
+      // Whirlwind tick: AoE hit every 0.15s during spin
+      if (player.whirlwindTimer > 0) {
+        player.whirlwindTimer -= dt;
+        player.whirlwindHitTimer = (player.whirlwindHitTimer || 0) - dt;
+        // Pull enemies inward (rank 3+)
+        if (player.whirlwindPull) {
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            const dist = Math.hypot(e.x - player.x, e.y - player.y);
+            if (dist > player.whirlwindRadius && dist < player.whirlwindRadius * 2.5) {
+              const ang = Math.atan2(player.y - e.y, player.x - e.x);
+              e.x += Math.cos(ang) * 55 * dt;
+              e.y += Math.sin(ang) * 55 * dt;
+            }
+          }
+        }
+        // Damage tick
+        if (player.whirlwindHitTimer <= 0) {
+          player.whirlwindHitTimer = 0.15;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x - player.x, e.y - player.y) < player.whirlwindRadius) {
+              const isCrit = Math.random() * 100 < player.critChance;
+              const dmg = player.whirlwindDmg * (isCrit ? 2 : 1);
+              const died = e.takeDamage(dmg, { crit: isCrit });
+              if (isCrit) player.onCrit();
+              if (died) { if (player.whirlwindExtend) player.whirlwindTimer += 0.3; handleEnemyDeath(e); }
+            }
+          }
+          player.resource = Math.min(player.maxResource, player.resource + 4);
+          player.lastHitTimer = 1.5;
+        }
+        if (player.whirlwindTimer <= 0) player.whirlwindTimer = 0;
+      }
+
+      // Berserker Rage frenzy timer
+      if (player.rageTimer > 0) {
+        player.rageTimer -= dt;
+        if (player.rageTimer <= 0) {
+          player.rageTimer = 0;
+          player.rageMoveBonus = 0; player.rageSpeedBonus = 0;
+          player.rageDmgBonus = 0; player.rageOverpowerEvery3 = false;
+          player.rageHitCount = 0;
+        }
+      }
+
+      // Blood Tide timer (Rage builds 3x faster, kills restore HP)
+      if (player.bloodTideTimer > 0) {
+        player.bloodTideTimer -= dt;
+        player.resource = Math.min(player.maxResource, player.resource + player.class.rageOnHit * 2 * dt);
+        if (player.bloodTideTimer <= 0) {
+          player.bloodTideTimer = 0;
+          player.bloodTideDmgBonus = 0; player.bloodTideLifesteal = 0;
+          player.bloodTideHitCount = 0; player.deathShield = false;
+        }
+      }
+
+      // Battle Shout damage buff timer
+      if (player.shoutTimer > 0) {
+        player.shoutTimer -= dt;
+        if (player.shoutTimer <= 0) { player.shoutTimer = 0; player.shoutDmgBonus = 0; player.shoutSpeedBonus = 0; }
+      }
+    }
+
+    // ─ DRUID: extra Spirit regen when summons are active ─────────────────────
+    if (cls === 'druid') {
+      const hasSummon = (player.summons || []).some(s => s && s.alive);
+      if (hasSummon) player.resource = Math.min(player.maxResource, player.resource + 3 * dt);
+    }
+
+    // ─ AMAZONIAN: Spirit Charge slow bleed (builds via kills/crits) ──────────
+    if (cls === 'amazonian') {
+      player.resource = Math.max(0, player.resource - 1.5 * dt);
+    }
+  }
+
 
 
   // ============================================================
@@ -3684,6 +3872,7 @@
         }
       }
       player.update(wdt);
+      updateClassMechanics(wdt);
       for (const e of enemies) if (e.alive) e.update(wdt, player);
       for (const p of projectiles) if (!p.dead) p.update(wdt);
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(wdt);
@@ -3750,6 +3939,16 @@
         }
       }
       if (picked >= 0) pickAbilityDraft(picked);
+    } else if (state === STATE.TIERDRAFT) {
+      const count = tierDraftChoices.length;
+      const cardW = 120, cardH = 90, gap = 14;
+      const totalW = count * cardW + (count - 1) * gap;
+      const sx = (W - totalW) / 2;
+      const cy = H / 2 - 20;
+      for (let i = 0; i < count; i++) {
+        const cx = sx + i * (cardW + gap);
+        if (mx >= cx && mx <= cx+cardW && my >= cy && my <= cy+cardH) { pickTierDraft(i); break; }
+      }
     }
     else if (state === STATE.ACT_TRANSITION) {
       // Tick the cinematic timer; auto-advance to next wave when it expires.
@@ -3871,7 +4070,7 @@
         if (isHovering(W/2 - 82, 46, 78, 14)) { charTreeTab = 'talents'; }
         if (isHovering(W/2 + 4,  46, 78, 14)) { charTreeTab = 'abilities'; }
         // Class tabs
-        const allClasses = ['archer','wizard','warrior','rogue','monk','paladin','witchdoctor','necromancer'];
+        const allClasses = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
         const tabW = Math.floor((W - 16) / allClasses.length);
         for (let i = 0; i < allClasses.length; i++) {
           if (isHovering(8 + i * tabW, 63, tabW - 2, 14)) { charTreeClass = allClasses[i]; break; }
@@ -4298,6 +4497,7 @@
     if (state === STATE.PLAYING) drawAbilityBar();
     if (state === STATE.LEVELUP) drawLevelUpScreen();
     else if (state === STATE.ABILITYDRAFT) drawAbilityDraftScreen();
+    else if (state === STATE.TIERDRAFT) drawTierDraftScreen();
     else if (state === STATE.DEAD) drawDeathScreen();
     else if (state === STATE.VICTORY) drawVictoryScreen();
     else if (state === STATE.INVENTORY) drawInventoryScreen();
@@ -4312,7 +4512,7 @@
 
     // Virtual cursor on top of all UI
     if (state === STATE.INVENTORY || state === STATE.SHOP || state === STATE.LEVELUP ||
-        state === STATE.ABILITYDRAFT || state === STATE.CLASS_SELECT ||
+        state === STATE.ABILITYDRAFT || state === STATE.TIERDRAFT || state === STATE.CLASS_SELECT ||
         state === STATE.STASH_BANKING || state === STATE.TRIAL_LOADOUT ||
         state === STATE.CHAR_SCREEN || state === STATE.HUB) {
       drawVirtualCursor();

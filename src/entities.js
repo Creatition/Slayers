@@ -184,16 +184,43 @@ class MeleeSwing {
       while (delta < -Math.PI) delta += Math.PI * 2;
       if (Math.abs(delta) > this.arcSpread) continue;
       const isCrit = this.isCrit || (Math.random() * 100 < (owner ? owner.effectiveCritChance() : 0));
-      const finalDmg = isCrit ? this.damage * 2 : this.damage;
+      // Overpower: consume full Rage for 2x damage bonus
+      let overpowerMult = 1;
+      if (owner && owner.overpowerReady) {
+        overpowerMult = 2.0;
+        owner.resource = 0;
+        owner.overpowerReady = false;
+        if (typeof spawnDamageNumber === 'function')
+          spawnDamageNumber(owner.x, owner.y - 28, 'OVERPOWER!', { color: '#ff4400', size: 14, vy: -70, life: 1.2 });
+        if (typeof spawnBurst === 'function')
+          spawnBurst(owner.x, owner.y, ['#ff4400','#ff8844','#ffcc00','#ffffff'], 18);
+      }
+      // Rage frenzy Overpower every 3rd hit
+      if (owner && owner.rageOverpowerEvery3 && owner.rageTimer > 0) {
+        owner.rageHitCount = (owner.rageHitCount || 0) + 1;
+        if (owner.rageHitCount % 3 === 0) overpowerMult = Math.max(overpowerMult, 2.0);
+      }
+      // Blood Tide Overpower every Nth hit
+      if (owner && owner.bloodTideTimer > 0 && owner.bloodTideOverpowerRate) {
+        owner.bloodTideHitCount = (owner.bloodTideHitCount || 0) + 1;
+        if (owner.bloodTideHitCount % owner.bloodTideOverpowerRate === 0) overpowerMult = Math.max(overpowerMult, 2.0);
+      }
+      const finalDmg = (isCrit ? this.damage * 2 : this.damage) * overpowerMult;
       const died = e.takeDamage(finalDmg);
       if (typeof spawnDamageNumber === 'function') {
-        spawnDamageNumber(e.x, e.y - e.r, finalDmg, { color: isCrit ? '#ff8800' : '#ffe080', crit: isCrit });
+        spawnDamageNumber(e.x, e.y - e.r, finalDmg, { color: overpowerMult > 1 ? '#ff4400' : (isCrit ? '#ff8800' : '#ffe080'), crit: isCrit || overpowerMult > 1 });
       }
       spawnBurst(e.x, e.y, isCrit ? ['#ff8800', '#ffd040', '#ffffff'] : ['#ffaa40', '#ffd040'], isCrit ? 6 : 3);
       if (owner) {
         if (isCrit) owner.onCrit();
         if (owner.class.rageOnHit) {
           owner.resource = Math.min(owner.maxResource, owner.resource + owner.class.rageOnHit);
+          owner.lastHitTimer = 1.5; // rage decay pauses for 1.5s after last hit
+        }
+        // Blood Tide lifesteal
+        if (owner.bloodTideTimer > 0 && owner.bloodTideLifesteal) {
+          const heal = Math.ceil(finalDmg * owner.bloodTideLifesteal);
+          owner.hp = Math.min(owner.maxHp, owner.hp + heal);
         }
       }
       if (died) {
@@ -492,6 +519,16 @@ class Player {
     this.mantraTimer = 0;
     this.bigBadVoodooTimer = 0;
     this.boneArmorCharges = 0;
+    // Class-specific mechanic timers
+    this.whirlwindTimer = 0; this.whirlwindDmg = 0; this.whirlwindRadius = 65;
+    this.whirlwindPull = false; this.whirlwindExtend = false; this.whirlwindHitTimer = 0;
+    this.rageTimer = 0; this.rageMoveBonus = 0; this.rageSpeedBonus = 0;
+    this.rageDmgBonus = 0; this.rageOverpowerEvery3 = false; this.rageHitCount = 0;
+    this.bloodTideTimer = 0; this.bloodTideDmgBonus = 0; this.bloodTideLifesteal = 0;
+    this.bloodTideOverpowerRate = 3; this.bloodTideHitCount = 0; this.deathShield = false;
+    this.shoutTimer = 0; this.shoutDmgBonus = 0; this.shoutSpeedBonus = 0;
+    this.lastHitTimer = 0;
+    this.overpowerReady = false; this.overpowerHits = 0;
     this.level = 1; this.xp = 0; this.xpToNext = 5;
     this.pendingLevelUps = 0; this.kills = 0;
     this.weaponDamage = this.class.weaponDamage;
@@ -526,17 +563,26 @@ class Player {
     }
   }
   effectiveCritChance() { return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0); }
-  effectiveFireRateMult() { return this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0); }
+  effectiveFireRateMult() {
+    let r = this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0);
+    if (this.shoutTimer > 0 && this.shoutSpeedBonus) r *= (1 + this.shoutSpeedBonus);
+    if (this.rageTimer > 0 && this.rageSpeedBonus) r *= (1 + this.rageSpeedBonus);
+    return r;
+  }
   effectiveSpeed() {
     let s = this.speed;
     if (this.smokeBombTimer > 0) s *= 1.4;
     if (this.bigBadVoodooTimer > 0) s *= 1.15;
+    if (this.rageTimer > 0) s *= (1 + (this.rageMoveBonus || 0));
     if ((this.stormriderSpeedTimer || 0) > 0) s += 60; // stormrider / kill_speed_burst
     return s;
   }
   effectiveDmgMult() {
     let d = this.dmgMult;
     if (this.bigBadVoodooTimer > 0) d *= 1.35;
+    if (this.rageTimer > 0 && this.rageDmgBonus) d *= (1 + this.rageDmgBonus);
+    if (this.bloodTideTimer > 0 && this.bloodTideDmgBonus) d *= (1 + this.bloodTideDmgBonus);
+    if (this.shoutTimer > 0 && this.shoutDmgBonus) d *= (1 + this.shoutDmgBonus);
     return d;
   }
   recomputeStats() {
