@@ -2892,19 +2892,44 @@
         ctx.fillStyle = isSpent ? '#000' : canBuy ? '#fff' : '#555';
         ctx.fillText(icon, cx, cy);
         ctx.textBaseline = 'alphabetic';
-        // Hover tooltip — name above, desc below
+        // Hover tooltip — name + real desc (ability nodes pull from ABILITIES)
         if (hovered) {
-          const tipY = cy - r - 18;
+          let tipDesc = node.desc;
+          if (node.type === 'ability') {
+            try {
+              const _fnSrc = node.apply.toString();
+              const _aidM = _fnSrc.match(/addAbilityToPlayer\(p,'([^']+)'\)/);
+              if (_aidM && ABILITIES[_aidM[1]]) tipDesc = ABILITIES[_aidM[1]].desc || node.desc;
+            } catch(_e) {}
+          }
+          // Tooltip panel
           ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
-          ctx.fillStyle = isSpent ? cl.color : canBuy ? '#fff' : '#777';
-          ctx.fillText(node.name, cx, tipY);
-          ctx.font = '6px monospace';
-          ctx.fillStyle = '#aaa';
-          ctx.fillText(node.desc, cx, tipY + 9);
+          const _tw = Math.max(
+            ctx.measureText(node.name).width,
+            ctx.measureText(tipDesc).width,
+            canBuy ? ctx.measureText('CLICK TO UNLOCK').width : 0
+          ) + 20;
+          const _tx = Math.max(2, Math.min(W - _tw - 2, cx - _tw / 2));
+          const _lineCount = 2 + (node.type === 'ability' ? 1 : 0) + (canBuy ? 1 : 0);
+          const _th = 12 + _lineCount * 9;
+          const _ty = Math.max(treeOY + 4, cy - r - _th - 4);
+          ctx.fillStyle = 'rgba(0,0,0,0.88)'; ctx.fillRect(_tx, _ty, _tw, _th);
+          ctx.strokeStyle = node.type === 'keystone' ? '#ffd040' : node.type === 'ability' ? '#44aaff' : cl.color;
+          ctx.lineWidth = 1; ctx.strokeRect(_tx, _ty, _tw, _th); ctx.lineWidth = 1;
+          let _ly = _ty + 10;
+          ctx.fillStyle = isSpent ? cl.color : canBuy ? '#fff' : '#888';
+          ctx.fillText(node.name, cx, _ly); _ly += 10;
+          ctx.font = '6px monospace'; ctx.fillStyle = '#bbb';
+          ctx.fillText(tipDesc, cx, _ly); _ly += 9;
+          if (node.type === 'ability') {
+            ctx.fillStyle = '#44aaff'; ctx.font = 'bold 6px monospace';
+            ctx.fillText('◆ ABILITY UNLOCK', cx, _ly); _ly += 9;
+          }
           if (canBuy) {
             ctx.fillStyle = '#44dd44'; ctx.font = 'bold 6px monospace';
-            ctx.fillText('CLICK TO UNLOCK', cx, tipY + 18);
+            ctx.fillText('CLICK TO UNLOCK', cx, _ly);
           }
+          ctx.textAlign = 'center';
         }
         // Spent checkmark badge on keystone
         if (isSpent && node.type === 'keystone') {
