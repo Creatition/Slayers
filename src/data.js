@@ -466,24 +466,65 @@ const GEM_QUALITIES = [
 ];
 const GEM_TYPES = [
   {
-    id: 'ruby', tier: 1, name: 'Ruby', color: '#ff3333',
-    bonuses: [ '+3 HP, +1 Armor', '+6 HP, +2 Armor', '+10 HP, +3 Armor', '+16 HP, +5 Armor', '+25 HP, +8 Armor' ],
-    apply: (p, q) => { const hp=[3,6,10,16,25][q]; const ar=[1,2,3,5,8][q]; p.bonusMaxHp+=hp; p.bonusArmor+=ar; },
+    // Ruby — STR gem (fire element): weapon damage, HP, fire resistance
+    id: 'ruby', tier: 1, name: 'Ruby', color: '#ff3333', primaryStat: 'str', element: 'fire',
+    bonuses: [
+      '+4% Dmg, +20 HP, +5% Fire Resist',
+      '+7% Dmg, +38 HP, +9% Fire Resist',
+      '+11% Dmg, +60 HP, +14% Fire Resist',
+      '+17% Dmg, +90 HP, +20% Fire Resist',
+      '+25% Dmg, +130 HP, +28% Fire Resist',
+    ],
+    apply: (p, q) => {
+      const dm=[4,7,11,17,25][q], hp=[20,38,60,90,130][q], fr=[5,9,14,20,28][q];
+      p.bonusDmgPct+=dm; p.bonusMaxHp+=hp; p.bonusFireResist=(p.bonusFireResist||0)+fr;
+    },
   },
   {
-    id: 'sapphire', tier: 1, name: 'Sapphire', color: '#3366ff',
-    bonuses: [ '+5 Resource, +1 Regen', '+10 Resource, +1.5 Regen', '+18 Resource, +2 Regen', '+28 Resource, +3 Regen', '+40 Resource, +5 Regen' ],
-    apply: (p, q) => { const rs=[5,10,18,28,40][q]; const rr=[1,1.5,2,3,5][q]; p.bonusMaxResource+=rs; p.bonusResourceRegen+=rr; },
+    // Sapphire — INT gem (cold element): max resource, ability cost reduction, cold resistance
+    id: 'sapphire', tier: 1, name: 'Sapphire', color: '#3366ff', primaryStat: 'int', element: 'cold',
+    bonuses: [
+      '+15 Resource, −5% Cost, +5% Cold Resist',
+      '+28 Resource, −9% Cost, +9% Cold Resist',
+      '+44 Resource, −14% Cost, +14% Cold Resist',
+      '+65 Resource, −20% Cost, +20% Cold Resist',
+      '+90 Resource, −28% Cost, +28% Cold Resist',
+    ],
+    apply: (p, q) => {
+      const rs=[15,28,44,65,90][q], ac=[0.05,0.09,0.14,0.20,0.28][q], cr=[5,9,14,20,28][q];
+      p.bonusMaxResource+=rs; p.abilityCostMult=Math.max(0.5, (p.abilityCostMult||1)-ac);
+      p.bonusColdResist=(p.bonusColdResist||0)+cr;
+    },
   },
   {
-    id: 'topaz', tier: 1, name: 'Topaz', color: '#ffcc00',
-    bonuses: [ '+3% Dmg, +2% Atk Spd', '+5% Dmg, +4% Atk Spd', '+8% Dmg, +6% Atk Spd', '+13% Dmg, +10% Atk Spd', '+20% Dmg, +15% Atk Spd' ],
-    apply: (p, q) => { const dm=[3,5,8,13,20][q]; const fs=[2,4,6,10,15][q]; p.bonusDmgPct+=dm; p.bonusFireRatePct+=fs; },
+    // Topaz — DEX gem (lightning element): crit chance, attack speed, lightning resistance
+    id: 'topaz', tier: 1, name: 'Topaz', color: '#ffcc00', primaryStat: 'dex', element: 'lightning',
+    bonuses: [
+      '+2% Crit, +3% Aspd, +5% Lightning Resist',
+      '+3% Crit, +5% Aspd, +9% Lightning Resist',
+      '+5% Crit, +8% Aspd, +14% Lightning Resist',
+      '+8% Crit, +13% Aspd, +20% Lightning Resist',
+      '+12% Crit, +18% Aspd, +28% Lightning Resist',
+    ],
+    apply: (p, q) => {
+      const cc=[2,3,5,8,12][q], as=[3,5,8,13,18][q], lr=[5,9,14,20,28][q];
+      p.bonusCritChance+=cc; p.bonusFireRatePct+=as; p.bonusLightResist=(p.bonusLightResist||0)+lr;
+    },
   },
   {
-    id: 'emerald', tier: 1, name: 'Emerald', color: '#22cc55',
-    bonuses: [ '+1% Crit, +1% Dodge', '+2% Crit, +2% Dodge', '+4% Crit, +3% Dodge', '+6% Crit, +5% Dodge', '+10% Crit, +8% Dodge' ],
-    apply: (p, q) => { const cc=[1,2,4,6,10][q]; const dg=[1,2,3,5,8][q]; p.bonusCritChance+=cc; p.bonusDodge+=dg; },
+    // Emerald — SPI gem (poison element): resource regen, dodge, poison resistance
+    id: 'emerald', tier: 1, name: 'Emerald', color: '#22cc55', primaryStat: 'spi', element: 'poison',
+    bonuses: [
+      '+1.5 Rsc Regen, +1.5% Dodge, +5% Poison Resist',
+      '+2.5 Rsc Regen, +2.5% Dodge, +9% Poison Resist',
+      '+4 Rsc Regen, +4% Dodge, +14% Poison Resist',
+      '+6 Rsc Regen, +6% Dodge, +20% Poison Resist',
+      '+9 Rsc Regen, +9% Dodge, +28% Poison Resist',
+    ],
+    apply: (p, q) => {
+      const rr=[1.5,2.5,4,6,9][q], dg=[1.5,2.5,4,6,9][q], pr=[5,9,14,20,28][q];
+      p.bonusResourceRegen+=rr; p.bonusDodge+=dg; p.bonusPoisonResist=(p.bonusPoisonResist||0)+pr;
+    },
   },
 ];
 function getGemType(id) { return GEM_TYPES.find(g => g.id === id) || null; }
@@ -529,7 +570,7 @@ function salvageGold(item) { return Math.floor(itemPrice(item) * 0.5); }
 // ============================================================
 const CLASS = {
   RANGER: {
-    id: 'ranger', tier: 1, name: 'Ranger', color: '#7ad96b',
+    id: 'ranger', tier: 1, name: 'Ranger', color: '#7ad96b', mainStat: 'dex', secondaryStat: 'spi',
     desc: 'Fast and crit-heavy. Auto-fires arrows. Crits refund Focus.',
     baseMaxHp: 80, baseSpeed: 105, baseCritChance: 5,
     weaponDamage: 4, weaponFireRate: 2.2, weaponRange: 210, weaponProjSpeed: 290,
@@ -539,7 +580,7 @@ const CLASS = {
     signature: 'multishot',
   },
   SORCERER: {
-    id: 'sorcerer', tier: 1, name: 'Sorcerer', color: '#5599ff',
+    id: 'sorcerer', tier: 1, name: 'Sorcerer', color: '#5599ff', mainStat: 'int', secondaryStat: 'spi',
     desc: 'Glass cannon. Slow heavy spells. Bigger Mana pool, slower regen.',
     baseMaxHp: 60, baseSpeed: 95, baseCritChance: 3,
     weaponDamage: 7, weaponFireRate: 1.4, weaponRange: 240, weaponProjSpeed: 240,
@@ -549,7 +590,7 @@ const CLASS = {
     signature: 'fireball',
   },
   BERSERKER: {
-    id: 'berserker', tier: 1, name: 'Berserker', color: '#cc4040',
+    id: 'berserker', tier: 1, name: 'Berserker', color: '#cc4040', mainStat: 'str', secondaryStat: 'vit',
     desc: 'Tanky melee cleaver. Rage builds from dealing and taking hits.',
     baseMaxHp: 140, baseSpeed: 90, baseCritChance: 4,
     weaponDamage: 11, weaponFireRate: 1.6, weaponRange: 52, weaponProjSpeed: 1,
@@ -561,7 +602,7 @@ const CLASS = {
     signature: 'whirlwind',
   },
   ASSASSIN: {
-    id: 'assassin', tier: 1, name: 'Assassin', color: '#cc88ff',
+    id: 'assassin', tier: 1, name: 'Assassin', color: '#cc88ff', mainStat: 'dex', secondaryStat: 'str',
     desc: 'Fastest attacks, highest crit. ENERGY refills quickly.',
     baseMaxHp: 70, baseSpeed: 125, baseCritChance: 10,
     weaponDamage: 3, weaponFireRate: 3.0, weaponRange: 130, weaponProjSpeed: 340,
@@ -571,7 +612,7 @@ const CLASS = {
     signature: 'shadowStrike',
   },
   TEMPLAR: {
-    id: 'templar', tier: 1, name: 'Templar', color: '#ffaa44',
+    id: 'templar', tier: 1, name: 'Templar', color: '#ffaa44', mainStat: 'vit', secondaryStat: 'str',
     desc: 'Close-range brawler. Chi flows steadily. Heals through combat.',
     baseMaxHp: 90, baseSpeed: 115, baseCritChance: 5,
     weaponDamage: 5, weaponFireRate: 2.2, weaponRange: 110, weaponProjSpeed: 260,
@@ -581,7 +622,7 @@ const CLASS = {
     signature: 'fistsOfThunder',
   },
   CRUSADER: {
-    id: 'crusader', tier: 1, name: 'Crusader', color: '#ffe866',
+    id: 'crusader', tier: 1, name: 'Crusader', color: '#ffe866', mainStat: 'str', secondaryStat: 'vit',
     desc: 'Holy tank. Hits heal. Consecrated ground burns the wicked.',
     baseMaxHp: 110, baseSpeed: 85, baseCritChance: 4,
     weaponDamage: 7, weaponFireRate: 1.5, weaponRange: 170, weaponProjSpeed: 230,
@@ -591,7 +632,7 @@ const CLASS = {
     signature: 'holyNova',
   },
   SHAMAN: {
-    id: 'shaman', tier: 1, name: 'Shaman', color: '#55dd66',
+    id: 'shaman', tier: 1, name: 'Shaman', color: '#55dd66', mainStat: 'spi', secondaryStat: 'int',
     desc: 'Long-range hex caster. MOJO fuels devastating curses.',
     baseMaxHp: 75, baseSpeed: 88, baseCritChance: 3,
     weaponDamage: 4, weaponFireRate: 1.2, weaponRange: 260, weaponProjSpeed: 185,
@@ -601,7 +642,7 @@ const CLASS = {
     signature: 'plagueFrogs',
   },
   NECROMANCER: {
-    id: 'necromancer', tier: 1, name: 'Necromancer', color: '#9988cc',
+    id: 'necromancer', tier: 1, name: 'Necromancer', color: '#9988cc', mainStat: 'int', secondaryStat: 'vit',
     desc: 'Master of death. Bone spells pierce. Corpses fuel the army.',
     baseMaxHp: 65, baseSpeed: 88, baseCritChance: 4,
     weaponDamage: 5, weaponFireRate: 1.1, weaponRange: 230, weaponProjSpeed: 200,
@@ -611,7 +652,7 @@ const CLASS = {
     signature: 'boneSpear',
   },
   DRUID: {
-    id: 'druid', tier: 1, name: 'Druid', color: '#66cc88',
+    id: 'druid', tier: 1, name: 'Druid', color: '#66cc88', mainStat: 'spi', secondaryStat: 'int',
     desc: 'Shapeshifter and summoner. Cycle between Human, Dragon and Panther forms.',
     baseMaxHp: 95, baseSpeed: 98, baseCritChance: 4,
     weaponDamage: 6, weaponFireRate: 1.6, weaponRange: 160, weaponProjSpeed: 220,
@@ -622,7 +663,7 @@ const CLASS = {
     signature: 'shred',
   },
   AMAZONIAN: {
-    id: 'amazonian', tier: 1, name: 'Amazonian', color: '#ddaa33',
+    id: 'amazonian', tier: 1, name: 'Amazonian', color: '#ddaa33', mainStat: 'dex', secondaryStat: 'spi',
     desc: 'Spirit-bonded javelin hunter. Bond with Eagle, Serpent, Wolf or Bear.',
     baseMaxHp: 75, baseSpeed: 118, baseCritChance: 8,
     weaponDamage: 5, weaponFireRate: 2.0, weaponRange: 220, weaponProjSpeed: 310,
