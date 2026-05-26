@@ -985,6 +985,7 @@ class Enemy {
     this.eliteMods = mods;
     this.eliteTier = tierCfg ? tierCfg.tier : 'rare';
     this.eliteName = tierCfg && tierCfg.eliteName ? tierCfg.eliteName : null;
+    this.prismaticAura = this.eliteTier === 'unique';
     const hpMult    = tierCfg ? tierCfg.hpMult    : 3.0;
     const spdMult   = tierCfg ? tierCfg.spdMult   : 1.25;
     const dmgMult   = tierCfg ? tierCfg.dmgMult   : 1.30;
@@ -1124,15 +1125,29 @@ class Enemy {
 
     // ── Elite aura (drawn behind sprite) ────────────────────
     if (this.elite) {
-      const primaryMod = this.eliteMods[0];
-      const auraColor = primaryMod ? primaryMod.auraColor : '#ffffff';
-      const pulse = 0.28 + 0.18 * Math.sin(this.auraPhase);
-      ctx.globalAlpha = pulse;
-      ctx.fillStyle = auraColor;
       const ar = Math.round(this.r * sc) + 5;
-      ctx.fillRect(px - ar, py - ar, ar * 2, ar * 2);
-      ctx.globalAlpha = 1;
-      // Enraged: extra red halo when below 30%
+      if (this.prismaticAura) {
+        // Unique: multi-layer rainbow aura cycling through hues
+        const _PRISM = ['#ff4444','#ff8800','#ffdd00','#44ff88','#44ccff','#aa44ff','#ff44cc'];
+        for (let _pi = 0; _pi < _PRISM.length; _pi++) {
+          const _ang = this.auraPhase + (_pi / _PRISM.length) * Math.PI * 2;
+          const _pulse = 0.22 + 0.14 * Math.sin(_ang);
+          ctx.globalAlpha = _pulse;
+          ctx.fillStyle = _PRISM[_pi];
+          const _off = Math.round(Math.sin(_ang) * 3);
+          ctx.fillRect(px - ar + _off, py - ar + _off, ar * 2, ar * 2);
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        const primaryMod = this.eliteMods[0];
+        const auraColor = primaryMod ? primaryMod.auraColor : '#ffffff';
+        const pulse = 0.28 + 0.18 * Math.sin(this.auraPhase);
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = auraColor;
+        ctx.fillRect(px - ar, py - ar, ar * 2, ar * 2);
+        ctx.globalAlpha = 1;
+      }
+      // Enraged: extra red halo when below 30% (all tiers)
       if (this.hasMod('enraged') && this.hp < this.maxHp * 0.3) {
         const rage = 0.4 + 0.3 * Math.sin(this.auraPhase * 2.5);
         ctx.globalAlpha = rage;
@@ -1197,13 +1212,15 @@ class Enemy {
       ctx.save();
       ctx.textAlign = 'center';
       // Tier-coloured name
-      const _tierColor = this.eliteTier === 'legendary' ? '#ff8800'
+      const _PRISM_NAME = ['#ff44cc','#ff8800','#ffdd00','#44ccff','#aa44ff'];
+      const _tierColor = this.eliteTier === 'unique'    ? _PRISM_NAME[Math.floor(this.auraPhase * 1.5) % _PRISM_NAME.length]
+                       : this.eliteTier === 'legendary' ? '#ff8800'
                        : this.eliteTier === 'rare'      ? '#ffdd00'
-                       :                                  '#88ccff';
+                       :                                   '#88ccff';
       const _displayName = this.eliteName
         ? this.eliteName
         : (ENEMY_TYPES[this.type] ? ENEMY_TYPES[this.type].name : this.type);
-      ctx.font = this.eliteTier === 'legendary' ? 'bold 7px monospace' : '7px monospace';
+      ctx.font = (this.eliteTier === 'legendary' || this.eliteTier === 'unique') ? 'bold 7px monospace' : '7px monospace';
       ctx.fillStyle = _tierColor;
       ctx.fillText(_displayName, px, by - 5);
       // Mod names (smaller, coloured)
