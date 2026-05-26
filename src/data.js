@@ -612,7 +612,7 @@ const CLASS = {
   },
   DRUID: {
     id: 'druid', tier: 1, name: 'Druid', color: '#66cc88',
-    desc: 'Shapeshifter and summoner. Shift between Human, Dragon and Panther forms.',
+    desc: 'Shapeshifter and summoner. Cycle between Human, Dragon and Panther forms.',
     baseMaxHp: 95, baseSpeed: 98, baseCritChance: 4,
     weaponDamage: 6, weaponFireRate: 1.6, weaponRange: 160, weaponProjSpeed: 220,
     defaultWeapon: 'staff', defaultWeaponKind: 'ranged',
@@ -629,7 +629,7 @@ const CLASS = {
     defaultWeapon: 'bow', defaultWeaponKind: 'ranged',
     resourceName: 'SPIRIT CHARGE', resourceColor: '#ddaa33',
     baseMaxResource: 100, baseResourceRegen: 0, critResourceGain: 8,
-    spiritBond: 'eagle',
+    spiritBond: 'piranha',
     signature: 'javelinVolley',
   },
 };
@@ -3661,7 +3661,7 @@ const ABILITIES = {
   // ── DRUID T1 ─────────────────────────────────────────────────
   wildShift: {
     id: 'wildShift', name: 'Wild Shift', letter: 'F', tier: 1, classOf: 'druid',
-    desc: 'Cycle Wild Shape: Human → Dragon → Panther → Human. Dragon: fire on hit. Panther: speed + bleed crits.',
+    desc: 'Cycle Wild Shape: Human → Dragon → Panther → Human. Dragon: fire on hit, +35% dmg. Panther: bleed crits, +30% speed. Spirit drains while shifted.',
     maxRank: 5, rankDesc: ['Shift forms, 15 Spirit cost', 'Spirit cost -5', 'Spirit cost -5 ★Notable: Shift restores 10% HP', 'Form bonuses +20%', '★Capstone: free shifts, forms last until re-cast'],
     cost: 15, cooldown: 0.5, color: '#cc8844',
     cast: (player, slot) => {
@@ -3669,7 +3669,7 @@ const ABILITIES = {
       const cost = Math.max(0, 15 - (rank - 1) * 5);
       if (rank < 5 && (player.resource || 0) < cost && (player.class.wildShape || 'human') !== 'human') return false;
       const cur = player.class.wildShape || 'human';
-      let next = cur === 'human' ? 'dragon' : cur === 'dragon' ? 'panther' : 'human';
+      const next = cur === 'human' ? 'dragon' : cur === 'dragon' ? 'panther' : 'human';
       if (next !== 'human') player.resource = Math.max(0, (player.resource || 0) - cost);
       player.class = Object.assign({}, player.class, { wildShape: next });
       if (rank >= 3) player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.10);
@@ -3855,7 +3855,7 @@ const ABILITIES = {
 
   // ── AMAZONIAN T1 ─────────────────────────────────────────────
   eagleMark: {
-    id: 'eagleMark', name: 'Eagle Mark', letter: 'E', tier: 1, classOf: 'amazonian',
+    id: 'eagleMark', name: "Predator's Mark", letter: 'E', tier: 1, classOf: 'amazonian',
     desc: 'Mark nearest enemy. All attacks deal +40% bonus damage to the Marked target.',
     maxRank: 5, rankDesc: ['+40% dmg to marked', '+50%, spread to nearest on kill', '+50% ★Notable: crits on Marked give +15 Spirit Charge', '+60%, mark 2 targets', '★Capstone: marked enemies take 2× crit damage'],
     cost: 0, cooldown: 8.0, color: '#ffcc44',
@@ -3883,7 +3883,7 @@ const ABILITIES = {
   // ── AMAZONIAN T2 ─────────────────────────────────────────────
   spiritBond: {
     id: 'spiritBond', name: 'Spirit Bond', letter: 'B', tier: 2, classOf: 'amazonian',
-    desc: 'Cycle Spirit Bond: Eagle → Serpent → Wolf → Bear. Costs 20 Spirit Charge. Each bond modifies combat.',
+    desc: 'Cycle Spirit Bond: Piranha → Anaconda → Panther → Tarantula. Each bond transforms your combat style.',
     maxRank: 5, rankDesc: ['Bond cycle, 20 cost', 'Cost -5', '★Notable: Bond switch restores 10 Spirit Charge', 'Bond bonuses +25%', '★Capstone: all bonds active simultaneously for 8s (Apex Union)'],
     cost: 20, cooldown: 1.0, color: '#ddaa33',
     cast: (player, slot) => {
@@ -3891,12 +3891,12 @@ const ABILITIES = {
       const cost = Math.max(5, 20 - (rank - 1) * 5);
       if ((player.resource || 0) < cost) return false;
       player.resource = Math.max(0, (player.resource || 0) - cost);
-      const bonds = ['eagle','serpent','wolf','bear'];
-      const cur = player.class.spiritBond || 'eagle';
+      const bonds = ['piranha','anaconda','panther','tarantula'];
+      const cur = player.class.spiritBond || 'piranha';
       const next = bonds[(bonds.indexOf(cur) + 1) % bonds.length];
       player.class = Object.assign({}, player.class, { spiritBond: next });
       if (rank >= 3) player.resource = Math.min(player.maxResource, (player.resource || 0) + 10);
-      const bondColors = { eagle:['#88aaff','#aaccff','#ffffff'], serpent:['#44cc44','#aaffaa','#ffffff'], wolf:['#cc8833','#ffcc66','#ffffff'], bear:['#884422','#cc9966','#ffffff'] };
+      const bondColors = { piranha:['#ff5555','#ffaaaa','#ffffff'], anaconda:['#44cc44','#aaffaa','#ffffff'], panther:['#cc88ff','#eeccff','#ffffff'], tarantula:['#ddaa33','#ffdd88','#ffffff'] };
       spawnBurst(player.x, player.y, bondColors[next], 14);
       spawnDamageNumber(player.x, player.y - 22, next.toUpperCase() + ' BOND', { color: bondColors[next][0], size: 12, vy: -50, life: 1.2 });
       return true;
@@ -3904,8 +3904,8 @@ const ABILITIES = {
   },
   venomTip: {
     id: 'venomTip', name: 'Venom Tip', letter: 'V', tier: 2, classOf: 'amazonian',
-    desc: 'Coat javelins with venom. Next 5-15 attacks apply Venom stacks. 5 stacks = Serpent Burst AoE.',
-    maxRank: 5, rankDesc: ['5 venom attacks', '8 attacks', '10 attacks ★Notable: Serpent Burst radius +50%', '12 attacks stack 2× faster', '★Capstone: 15 attacks, Serpent Burst chains to 3 nearby enemies'],
+    desc: 'Coat javelins with venom. Next 5-15 attacks apply Venom stacks. 5 stacks = Anaconda Burst AoE.',
+    maxRank: 5, rankDesc: ['5 venom attacks', '8 attacks', '10 attacks ★Notable: Anaconda Burst radius +50%', '12 attacks stack 2× faster', '★Capstone: 15 attacks, Anaconda Burst chains to 3 nearby enemies'],
     cost: 15, cooldown: 10.0, color: '#44cc44',
     cast: (player, slot) => {
       const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
