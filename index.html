@@ -84,6 +84,37 @@
   const STATE = { PLAYING: 0, LEVELUP: 1, INTERMISSION: 2, DEAD: 3, INVENTORY: 4, ABILITYDRAFT: 5, SHOP: 6, VICTORY: 7, CLASS_SELECT: 8, STASH_BANKING: 9, TRIAL_LOADOUT: 10, ACT_TRANSITION: 11, CHAR_SCREEN: 12, TRIALS_SELECT: 13, HUB: 14, TIERDRAFT: 15, PAUSED: 16, CHAR_MENU: 17 };
   let state = STATE.PLAYING;
   let prevState = STATE.PLAYING;
+
+  // ── MULTIPLAYER ────────────────────────────────────────────────────────────
+  let multiMode = 'solo';          // 'solo' | 'local' | 'online'
+  let extraPlayers   = [];         // P2-P4 local Player instances
+  let extraPlayerCfg = [];         // [{classId, inputScheme}] per extra player
+  let netPlayerStates = {};        // online: {playerId:{x,y,hp,maxHp,classId,dead,facing}}
+  let netSocket    = null;
+  let netIsHost    = false;
+  let netRoomCode  = '';
+  let netPlayerId  = null;
+  let netServerUrl = 'ws://localhost:8765';
+  let netBroadcastTimer = 0;
+  // Per-player input state (P2 arrow keys, P3/P4 gamepad)
+  const EXTRA_INPUT_SCHEMES = [
+    { keys: { up:'arrowup', down:'arrowdown', left:'arrowleft', right:'arrowright' }, gpIdx: 1 },
+    { gpIdx: 2 },
+    { gpIdx: 3 },
+  ];
+  // Helper: all alive human-controlled players (local)
+  function allActivePlayers() {
+    const all = [player, ...extraPlayers];
+    return all.filter(p => p && p.hp > 0);
+  }
+  function nearestPlayerTo(x, y) {
+    let best = player, bestD = Infinity;
+    for (const p of allActivePlayers()) {
+      const d = Math.hypot(p.x - x, p.y - y);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
   let pauseMenuSel = 0;     // 0=Continue 1=Settings 2=Quit
   let pauseInSettings = false;
   const gameSettings = { soundMuted: false, screenShake: true };
@@ -460,10 +491,17 @@
   }
   function pollKeyboard() {
     let kx = 0, ky = 0;
-    if (keys.has('a') || keys.has('arrowleft'))  kx -= 1;
-    if (keys.has('d') || keys.has('arrowright')) kx += 1;
-    if (keys.has('w') || keys.has('arrowup'))    ky -= 1;
-    if (keys.has('s') || keys.has('arrowdown'))  ky += 1;
+    if (keys.has('a')) kx -= 1;
+    if (keys.has('d')) kx += 1;
+    if (keys.has('w')) ky -= 1;
+    if (keys.has('s')) ky += 1;
+    // Arrow keys drive P1 only in solo mode; in local multi they drive P2
+    if (multiMode === 'solo') {
+      if (keys.has('arrowleft'))  kx -= 1;
+      if (keys.has('arrowright')) kx += 1;
+      if (keys.has('arrowup'))    ky -= 1;
+      if (keys.has('arrowdown'))  ky += 1;
+    }
     if (kx !== 0 || ky !== 0) {
       const len = Math.hypot(kx, ky);
       Actions.moveX = kx / len; Actions.moveY = ky / len;
@@ -471,6 +509,40 @@
       return true;
     }
     return false;
+  }
+  // P2 arrow-key movement vector (only used in local multi)
+  function pollKeyboardP2() {
+    let kx = 0, ky = 0;
+    if (keys.has('arrowleft'))  kx -= 1;
+    if (keys.has('arrowright')) kx += 1;
+    if (keys.has('arrowup'))    ky -= 1;
+    if (keys.has('arrowdown'))  ky += 1;
+    if (kx !== 0 || ky !== 0) { const l = Math.hypot(kx, ky); return { x: kx/l, y: ky/l }; }
+    return null;
+  }
+  // Poll a specific gamepad index → {x, y} or null
+  function pollGamepadIdx(idx) {
+    const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+    const gp = gps[idx];
+    if (!gp) return null;
+    const dz = 0.18;
+    let gx = gp.axes[0] || 0, gy = gp.axes[1] || 0;
+    const btn = (i) => gp.buttons[i] && gp.buttons[i].pressed;
+    if (btn(14)) gx = -1; if (btn(15)) gx = 1;
+    if (btn(12)) gy = -1; if (btn(13)) gy = 1;
+    const mag = Math.hypot(gx, gy);
+    if (mag < dz) return null;
+    const s = (mag - dz) / (1 - dz);
+    return { x: (gx / mag) * s, y: (gy / mag) * s };
+  }
+  // Get move vector for an extra player slot (0-based = P2 is slot 0)
+  function getExtraPlayerMove(slotIdx) {
+    const scheme = EXTRA_INPUT_SCHEMES[slotIdx] || {};
+    // Keyboard (P2 slot 0 uses arrows)
+    if (slotIdx === 0) { const kb = pollKeyboardP2(); if (kb) return kb; }
+    // Gamepad
+    if (scheme.gpIdx != null) { const gm = pollGamepadIdx(scheme.gpIdx); if (gm) return gm; }
+    return { x: 0, y: 0 };
   }
   function pollGamepad() {
     gpJustPressed.clear();
@@ -746,6 +818,7 @@
   // KILL HANDLERS — centralised so ALL kill paths get the same rewards
   // ============================================================
   function handleEnemyDeath(e) {
+    if (netIsHost && e._netId) netBroadcastEnemyDeath(e._netId);
     player.kills++;
     // Legendary on-kill procs
     if (player.legendaryEffects) {
@@ -1018,6 +1091,7 @@
         spawnDamageNumber(e.x, e.y - 20, '★ UNIQUE ELITE ★', { color: '#ff44cc', size: 12, vy: -55, life: 2.5 });
       }
     }
+    e._netId = Date.now().toString(36) + Math.random().toString(36).substr(2,4);
     enemies.push(e);
   }
   function spawnBoss(cfg) {
@@ -1069,6 +1143,7 @@
       (player.activeSetEffects && player.activeSetEffects.includes('pierce_one')) ||
       (player.uniqueEffects && player.uniqueEffects.includes('soulreaper_pierce'))
     )) { newProj.piercing = true; newProj.hitSet = new Set(); }
+    newProj.owner = shooter; // multiplayer: only collide with owner's stats
     projectiles.push(newProj);
     Sfx.shoot();
   }
@@ -1236,6 +1311,7 @@
   function checkCollisions() {
     for (const proj of projectiles) {
       if (proj.dead) continue;
+      if (proj.owner && proj.owner !== player) continue; // skip other players' projectiles
       for (const enemy of enemies) {
         if (!enemy.alive) continue;
         if (proj.piercing) {
@@ -2035,6 +2111,15 @@
     xpVacuumTimer = 0; xpVacuumDone = false; xpVacuumAmount = 0;
     legendaryEliteSpawned = false; uniqueEliteSpawned = false;
     uniqueEliteAvailable  = Math.random() < 0.20; // ~1 in 5 runs gets a unique elite
+    // Spawn extra local players at staggered positions
+    extraPlayers = [];
+    for (let _ei = 0; _ei < extraPlayerCfg.length; _ei++) {
+      const _cfg = extraPlayerCfg[_ei];
+      const _ep = new Player(W / 2 + (_ei + 1) * 28, H / 2, _cfg.classId);
+      applyPrimaryStatsToPlayer(_ep);
+      applySkillTreeToPlayer(_ep);
+      extraPlayers.push(_ep);
+    }
     player.attackCount = 0;           // razorwind_4th_crit tracker
     player.shadowcloakReady = true;   // shadowcloak_first_dodge per wave
     player.stormriderSpeedTimer = 0;  // stormrider kill-speed buff timer
@@ -3400,68 +3485,154 @@
 
   // ── CHAR MENU — post-class-select hub ───────────────────────────────────────
   function drawCharMenuScreen() {
-    ctx.fillStyle = '#0a0a14'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#08080f'; ctx.fillRect(0, 0, W, H);
     const cl = getClassById(selectedClassId);
     const cp = ensureCP(selectedClassId);
 
-    // Background accent — vertical class-color stripe
-    ctx.fillStyle = cl.color + '18';
-    ctx.fillRect(0, 0, W, H);
+    // Class-colour tint
+    ctx.fillStyle = cl.color + '12'; ctx.fillRect(0, 0, W, H);
 
-    // ── Class name + level ─────────────────────────────────────
-    ctx.textAlign = 'center';
-    ctx.fillStyle = cl.color; ctx.font = 'bold 28px monospace';
-    ctx.fillText(cl.name.toUpperCase(), W / 2, 52);
-    ctx.fillStyle = '#888'; ctx.font = '10px monospace';
-    ctx.fillText(`LEVEL ${cp.level}  ·  ${cp.xp} XP`, W / 2, 68);
+    // ── LEFT: Class info + main buttons (col 0..W*0.55) ──────────────────────
+    const lW = Math.floor(W * 0.56);
 
-    // XP bar
+    // Class name
+    ctx.textAlign = 'center'; ctx.fillStyle = cl.color;
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText(cl.name.toUpperCase(), lW / 2, 44);
+
+    // Level + XP bar
+    ctx.fillStyle = '#aaa'; ctx.font = '9px monospace';
+    ctx.fillText(`LEVEL ${cp.level}`, lW / 2, 58);
     const xpPct = cp.level < CHAR_LEVEL_CAP ? cp.xp / charXpToNext(cp.level) : 1;
-    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(W/2 - 140, 74, 280, 8);
-    ctx.fillStyle = cl.color;  ctx.fillRect(W/2 - 140, 74, Math.floor(280 * xpPct), 8);
-    ctx.strokeStyle = '#333';  ctx.lineWidth = 1; ctx.strokeRect(W/2 - 140, 74, 280, 8); ctx.lineWidth = 1;
+    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(lW/2 - 100, 63, 200, 7);
+    ctx.fillStyle = cl.color;  ctx.fillRect(lW/2 - 100, 63, Math.floor(200 * xpPct), 7);
+    ctx.strokeStyle = '#333'; ctx.lineWidth=1; ctx.strokeRect(lW/2-100,63,200,7); ctx.lineWidth=1;
 
-    // Unspent points hint
-    const utp = cp.treePts, usp = player ? (player.skillPoints || 0) : 0;
-    const hints = [];
-    if (utp > 0) hints.push(`${utp} Skill Pt${utp > 1 ? 's' : ''}`);
-    if (usp > 0) hints.push(`${usp} Ability Pt${usp > 1 ? 's' : ''}`);
-    if (hints.length > 0) {
-      ctx.fillStyle = '#ffd040'; ctx.font = 'bold 8px monospace';
-      ctx.fillText(`✦ ${hints.join('  ·  ')} unspent`, W / 2, 92);
-    }
+    // Unspent hints
+    const _utp = cp.treePts, _usp = player ? (player.skillPoints||0) : 0;
+    const _uh = [];
+    if (_utp > 0) _uh.push(`${_utp} Skill Pt${_utp>1?'s':''}`);
+    if (_usp > 0) _uh.push(`${_usp} Ability Pt${_usp>1?'s':''}`);
+    ctx.fillStyle = _uh.length ? '#ffd040' : '#444'; ctx.font = 'bold 7px monospace';
+    ctx.fillText(_uh.length ? `✦ ${_uh.join('  ·  ')} unspent` : '', lW/2, 80);
 
-    // ── Menu buttons ───────────────────────────────────────────
-    const btnW = 200, btnH = 36, gap = 12;
-    const totalH = 4 * btnH + 3 * gap;
-    const btnX = W / 2 - btnW / 2;
-    const btnY0 = H / 2 - totalH / 2 + 10;
-
-    const buttons = [
-      { label: '▶  START RUN',   color: cl.color,  desc: `Begin a ${runMode === 'trial' ? 'Trial' : 'Standard'} run` },
-      { label: '⚙  MODE',        color: '#6688cc', desc: runMode === 'trial' ? `Trial Mode (Tier ${trialTier})` : 'Standard Mode' },
-      { label: '◈  UPGRADES',    color: '#aa88ff', desc: 'Skill tree · Abilities · Stats' },
-      { label: '⌂  HUB',         color: '#44cc88', desc: 'Blacksmith · Stash · Gems' },
+    // Main action buttons
+    const btnW = 180, btnH = 34, gap = 10;
+    const bx = lW / 2 - btnW / 2, by0 = 95;
+    const mainBtns = [
+      { label: '▶  START RUN',  color: cl.color,  sub: runMode==='trial'?`Trial Tier ${trialTier}`:'Standard run' },
+      { label: '⚙  MODE',       color: '#6688cc', sub: runMode==='trial'?'Trial Mode':'Standard Mode' },
+      { label: '◈  UPGRADES',   color: '#aa88ff', sub: 'Skills · Abilities · Stats' },
+      { label: '⌂  HUB',        color: '#44cc88', sub: 'Blacksmith · Stash · Gems' },
     ];
-
-    for (let i = 0; i < buttons.length; i++) {
-      const bx = btnX, by = btnY0 + i * (btnH + gap);
+    for (let i = 0; i < mainBtns.length; i++) {
+      const by = by0 + i * (btnH + gap);
       const hov = isHovering(bx, by, btnW, btnH);
-      ctx.fillStyle = hov ? buttons[i].color + '44' : '#0e0e1a';
+      ctx.fillStyle = hov ? mainBtns[i].color + '33' : '#0d0d1a';
       ctx.fillRect(bx, by, btnW, btnH);
-      ctx.strokeStyle = hov ? buttons[i].color : buttons[i].color + '66';
-      ctx.lineWidth = hov ? 2 : 1;
-      ctx.strokeRect(bx, by, btnW, btnH); ctx.lineWidth = 1;
-      ctx.fillStyle = hov ? buttons[i].color : buttons[i].color + 'bb';
-      ctx.font = `bold 11px monospace`; ctx.textAlign = 'center';
-      ctx.fillText(buttons[i].label, bx + btnW / 2, by + 15);
+      ctx.strokeStyle = hov ? mainBtns[i].color : mainBtns[i].color + '55';
+      ctx.lineWidth = hov ? 2 : 1; ctx.strokeRect(bx, by, btnW, btnH); ctx.lineWidth = 1;
+      ctx.fillStyle = hov ? mainBtns[i].color : mainBtns[i].color + 'bb';
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(mainBtns[i].label, bx + btnW/2, by + 14);
       ctx.fillStyle = '#555'; ctx.font = '7px monospace';
-      ctx.fillText(buttons[i].desc, bx + btnW / 2, by + 28);
+      ctx.fillText(mainBtns[i].sub, bx + btnW/2, by + 26);
     }
 
-    // ← Back to class select
-    ctx.fillStyle = '#333'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('◄ ESC  back to class select', 10, H - 10);
+    // ── DIVIDER ───────────────────────────────────────────────
+    ctx.strokeStyle = '#1e1e30'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(lW, 10); ctx.lineTo(lW, H - 10); ctx.stroke();
+
+    // ── RIGHT: Player slots ───────────────────────────────────
+    const rx = lW + 8, rW = W - lW - 8;
+    const slotH = 44, slotGap = 6;
+    const SLOT_LABELS = ['P1','P2','P3','P4'];
+    const SLOT_KEY_HINTS = ['(you)','Arrows + GP1','Gamepad 2','Gamepad 3'];
+    ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('PLAYERS', rx + rW/2, 22);
+
+    for (let si = 0; si < 4; si++) {
+      const sy = 28 + si * (slotH + slotGap);
+      const isP1 = si === 0;
+      const hasExtra = si > 0 && si - 1 < extraPlayerCfg.length;
+      const hov = !isP1 && isHovering(rx, sy, rW, slotH);
+      const slotCl = isP1 ? cl : (hasExtra ? getClassById(extraPlayerCfg[si-1].classId) : null);
+      ctx.fillStyle = isP1 ? cl.color+'22' : (hasExtra ? slotCl.color+'18' : (hov ? '#1a1a2e' : '#0d0d18'));
+      ctx.fillRect(rx, sy, rW, slotH);
+      ctx.strokeStyle = isP1 ? cl.color : (hasExtra ? slotCl.color : (hov ? '#3a3a5a' : '#1a1a30'));
+      ctx.lineWidth = isP1 ? 2 : 1; ctx.strokeRect(rx, sy, rW, slotH); ctx.lineWidth = 1;
+      // Slot number badge
+      ctx.fillStyle = isP1 ? cl.color : (hasExtra ? slotCl.color : '#3a3a5a');
+      ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(SLOT_LABELS[si], rx + 6, sy + 14);
+      // Content
+      if (isP1) {
+        ctx.fillStyle = cl.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(cl.name.toUpperCase(), rx + rW/2, sy + 14);
+        ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+        ctx.fillText(SLOT_KEY_HINTS[0], rx + rW/2, sy + 26);
+        ctx.fillStyle = '#444'; ctx.font = '6px monospace';
+        ctx.fillText(`LV ${cp.level}`, rx + rW/2, sy + 36);
+      } else if (hasExtra) {
+        ctx.fillStyle = slotCl.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(slotCl.name.toUpperCase(), rx + rW/2, sy + 14);
+        ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+        ctx.fillText(SLOT_KEY_HINTS[si], rx + rW/2, sy + 26);
+        // Remove button
+        const rmX = rx + rW - 22, rmY = sy + 4;
+        const rmHov = isHovering(rmX, rmY, 16, 12);
+        ctx.fillStyle = rmHov ? '#ff4444' : '#2a1111'; ctx.fillRect(rmX, rmY, 16, 12);
+        ctx.strokeStyle = '#ff4444'; ctx.lineWidth=1; ctx.strokeRect(rmX, rmY, 16, 12); ctx.lineWidth=1;
+        ctx.fillStyle = rmHov ? '#fff' : '#ff8888'; ctx.font = 'bold 7px monospace'; ctx.textAlign='center';
+        ctx.fillText('✕', rmX + 8, rmY + 9);
+      } else {
+        ctx.fillStyle = hov ? '#5588ff' : '#2a2a44'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('+ ADD PLAYER', rx + rW/2, sy + 16);
+        ctx.fillStyle = '#444'; ctx.font = '6px monospace';
+        ctx.fillText(SLOT_KEY_HINTS[si], rx + rW/2, sy + 28);
+      }
+    }
+
+    // ── Online section ─────────────────────────────────────────
+    const onlineY = 28 + 4 * (slotH + slotGap) + 10;
+    ctx.strokeStyle = '#1e1e30'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(rx, onlineY - 4); ctx.lineTo(rx + rW, onlineY - 4); ctx.stroke();
+    ctx.fillStyle = '#886644'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('ONLINE CO-OP', rx + rW/2, onlineY + 8);
+
+    const oBtnW = (rW - 8) / 2, oBtnH = 22;
+    // HOST button
+    const hBtnX = rx, hBtnY = onlineY + 14;
+    const hHov = isHovering(hBtnX, hBtnY, oBtnW, oBtnH);
+    ctx.fillStyle = hHov ? '#334' : '#111'; ctx.fillRect(hBtnX, hBtnY, oBtnW, oBtnH);
+    ctx.strokeStyle = netIsHost && netSocket ? '#44ff88' : (hHov ? '#88aaff' : '#2a2a44');
+    ctx.lineWidth=1; ctx.strokeRect(hBtnX, hBtnY, oBtnW, oBtnH); ctx.lineWidth=1;
+    ctx.fillStyle = netIsHost && netSocket ? '#44ff88' : (hHov ? '#88aaff' : '#556');
+    ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(netIsHost && netSocket ? `HOST: ${netRoomCode}` : '⬆ HOST', hBtnX + oBtnW/2, hBtnY + 14);
+
+    // JOIN button
+    const jBtnX = rx + oBtnW + 8, jBtnY = onlineY + 14;
+    const jHov = isHovering(jBtnX, jBtnY, oBtnW, oBtnH);
+    ctx.fillStyle = jHov ? '#334' : '#111'; ctx.fillRect(jBtnX, jBtnY, oBtnW, oBtnH);
+    ctx.strokeStyle = (!netIsHost && netSocket) ? '#44ff88' : (jHov ? '#ffaa44' : '#2a2a44');
+    ctx.lineWidth=1; ctx.strokeRect(jBtnX, jBtnY, oBtnW, oBtnH); ctx.lineWidth=1;
+    ctx.fillStyle = (!netIsHost && netSocket) ? '#44ff88' : (jHov ? '#ffaa44' : '#556');
+    ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText(!netIsHost && netSocket ? 'CONNECTED' : '⬇ JOIN', jBtnX + oBtnW/2, jBtnY + 14);
+
+    // Status line
+    if (netSocket) {
+      ctx.fillStyle = '#44ff88'; ctx.font = '6px monospace'; ctx.textAlign='center';
+      ctx.fillText(netIsHost ? `Room: ${netRoomCode} — share this code` : `Connected to room: ${netRoomCode}`, rx+rW/2, jBtnY + oBtnH + 10);
+    } else {
+      ctx.fillStyle = '#444'; ctx.font = '6px monospace'; ctx.textAlign='center';
+      ctx.fillText('Requires server.js running', rx+rW/2, jBtnY + oBtnH + 10);
+    }
+
+    // ESC hint
+    ctx.fillStyle = '#333'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
+    ctx.fillText('◄ ESC  class select', 8, H - 8);
     ctx.textAlign = 'left';
   }
 
@@ -5652,6 +5823,64 @@
     treeViewY = (vH/2 + treeOY2) - treeOY2 - cy * treeViewZoom;
   }
   // ── Shared char-tree click handler ───────────────────────────────────────
+  // ── ONLINE CO-OP — WebSocket client ─────────────────────────────────────────
+  function netStartHost() {
+    try {
+      netSocket = new WebSocket(netServerUrl);
+      netIsHost = true;
+      netSocket.onopen  = () => netSocket.send(JSON.stringify({ type: 'host' }));
+      netSocket.onmessage = (e) => handleNetMessage(JSON.parse(e.data));
+      netSocket.onclose = () => { netSocket = null; netIsHost = false; netRoomCode = ''; netPlayerStates = {}; };
+      netSocket.onerror = () => { alert('Server not reachable. Run:\n  cd Slayers && npm install && npm start'); netSocket = null; netIsHost = false; };
+    } catch(e) { console.warn('net host failed', e); }
+  }
+  function netStartJoin(code) {
+    try {
+      netSocket = new WebSocket(netServerUrl);
+      netIsHost = false; netRoomCode = code;
+      netSocket.onopen  = () => netSocket.send(JSON.stringify({ type: 'join', roomId: code }));
+      netSocket.onmessage = (e) => handleNetMessage(JSON.parse(e.data));
+      netSocket.onclose = () => { netSocket = null; netRoomCode = ''; netPlayerStates = {}; };
+      netSocket.onerror = () => { alert('Could not connect. Check the room code and server IP.'); netSocket = null; };
+    } catch(e) { console.warn('net join failed', e); }
+  }
+  function handleNetMessage(msg) {
+    if (msg.type === 'hosted') {
+      netRoomCode = msg.roomId; netPlayerId = msg.playerId;
+      Sfx.uiConfirm && Sfx.uiConfirm();
+    } else if (msg.type === 'joined') {
+      netPlayerId = msg.playerId;
+      Sfx.uiConfirm && Sfx.uiConfirm();
+    } else if (msg.type === 'playerState') {
+      if (msg.playerId !== netPlayerId) netPlayerStates[msg.playerId] = msg;
+    } else if (msg.type === 'netEvent') {
+      if (msg.event === 'enemyDied') {
+        const e = enemies.find(en => en._netId === msg.enemyId && en.alive);
+        if (e) { e.hp = 0; handleEnemyDeath(e); }
+      } else if (msg.event === 'startRun') {
+        // Sync run start with host's seed
+        if (!netIsHost) { selectedClassId = selectedClassId; resetWorld(); }
+      }
+    } else if (msg.type === 'playerLeft') {
+      delete netPlayerStates[msg.playerId];
+    }
+  }
+  function netBroadcastState(dt) {
+    if (!netSocket || netSocket.readyState !== 1) return;
+    netBroadcastTimer += dt;
+    if (netBroadcastTimer < 0.05) return; // 20 Hz
+    netBroadcastTimer = 0;
+    netSocket.send(JSON.stringify({
+      type: 'playerState', playerId: netPlayerId,
+      x: player.x, y: player.y, hp: player.hp, maxHp: player.maxHp,
+      classId: selectedClassId, dead: player.hp <= 0, facing: player.facing,
+    }));
+  }
+  function netBroadcastEnemyDeath(enemyId) {
+    if (!netSocket || netSocket.readyState !== 1) return;
+    netSocket.send(JSON.stringify({ type: 'netEvent', event: 'enemyDied', enemyId }));
+  }
+
   function resetClassProgress(cid) {
     // Refund all skill tree nodes for this class
     const spentNodes = spentSkillNodes[cid] || {};
@@ -6054,14 +6283,38 @@
       }
       player.update(wdt);
       updateClassMechanics(wdt);
-      for (const e of enemies) if (e.alive) e.update(wdt, player);
+      if (multiMode === 'online') netBroadcastState(dt);
+      // ── Extra players (local co-op) ────────────────────────
+      for (let _ei = 0; _ei < extraPlayers.length; _ei++) {
+        const _ep = extraPlayers[_ei];
+        if (_ep.hp <= 0) continue;
+        const _mv = getExtraPlayerMove(_ei);
+        // Context-swap: temporarily make _ep the active player
+        const _savedPlayer = player;
+        const _savedMX = Actions.moveX, _savedMY = Actions.moveY;
+        player = _ep; Actions.moveX = _mv.x; Actions.moveY = _mv.y;
+        _ep.update(wdt);
+        player = _savedPlayer; Actions.moveX = _savedMX; Actions.moveY = _savedMY;
+      }
+      // Enemy + gem target = nearest alive player
+      for (const e of enemies) if (e.alive) e.update(wdt, nearestPlayerTo(e.x, e.y));
       for (const p of projectiles) if (!p.dead) p.update(wdt);
       for (const ep of enemyProjectiles) if (!ep.dead) ep.update(wdt);
-      for (const g of xpGems) if (!g.dead) g.update(wdt, player);
-      for (const d of itemDrops) if (!d.dead) d.update(wdt, player);
+      for (const g of xpGems) if (!g.dead) g.update(wdt, nearestPlayerTo(g.x, g.y));
+      for (const d of itemDrops) if (!d.dead) d.update(wdt, nearestPlayerTo(d.x, d.y));
       for (const sw of meleeSwings) if (!sw.dead) sw.update(wdt);
       updateGroundEffects(wdt);
-      if (!frozen) checkCollisions();
+      if (!frozen) {
+        checkCollisions(); // P1 (player is already set)
+        // Extra local players — context-swap
+        for (let _ei = 0; _ei < extraPlayers.length; _ei++) {
+          const _ep = extraPlayers[_ei];
+          if (_ep.hp <= 0) continue;
+          const _saved = player; player = _ep;
+          checkCollisions();
+          player = _saved;
+        }
+      }
       enemies = enemies.filter(e => e.alive);
       projectiles = projectiles.filter(p => !p.dead);
       enemyProjectiles = enemyProjectiles.filter(p => !p.dead);
@@ -6195,39 +6448,75 @@
     else if (state === STATE.CHAR_MENU) {
       updateVirtualCursor(dt);
       if (gpJustPressed.has(0)) mouseClicked = true;
-      // ESC / B → back to class select
-      if (keyJustPressed.has('escape') || gpJustPressed.has(1)) {
-        state = STATE.CLASS_SELECT; return;
-      }
+      if (keyJustPressed.has('escape') || gpJustPressed.has(1)) { state = STATE.CLASS_SELECT; return; }
       if (mouseClicked) {
-        const btnW = 200, btnH = 36, gap = 12;
-        const totalH = 4 * btnH + 3 * gap;
-        const btnX = W / 2 - btnW / 2;
-        const btnY0 = H / 2 - totalH / 2 + 10;
-        if (isHovering(btnX, btnY0,               btnW, btnH)) { startRunFromMenu(); Sfx.uiConfirm && Sfx.uiConfirm(); }
-        else if (isHovering(btnX, btnY0 + (btnH + gap),     btnW, btnH)) { cycleMode(); Sfx.uiClick && Sfx.uiClick(); }
-        else if (isHovering(btnX, btnY0 + (btnH + gap) * 2, btnW, btnH)) {
+        const lW = Math.floor(W * 0.56);
+        const btnW = 180, btnH = 34, gap = 10;
+        const bx = lW / 2 - btnW / 2, by0 = 95;
+        // Main left buttons
+        if      (isHovering(bx, by0,                   btnW, btnH)) { startRunFromMenu(); Sfx.uiConfirm && Sfx.uiConfirm(); }
+        else if (isHovering(bx, by0 + (btnH+gap),      btnW, btnH)) { cycleMode(); Sfx.uiClick && Sfx.uiClick(); }
+        else if (isHovering(bx, by0 + (btnH+gap)*2,    btnW, btnH)) {
           charTreeClass = selectedClassId; charTreeTab = 'tree'; charScreenTab = 0;
           prevState = STATE.CHAR_MENU; state = STATE.CHAR_SCREEN; Sfx.uiClick && Sfx.uiClick();
         }
-        else if (isHovering(btnX, btnY0 + (btnH + gap) * 3, btnW, btnH)) {
-          // Need a player shell for HUB — create one if not already present
-          if (!player) { resetWorld(); state = STATE.HUB; }
-          else state = STATE.HUB;
-          Sfx.uiClick && Sfx.uiClick();
+        else if (isHovering(bx, by0 + (btnH+gap)*3,    btnW, btnH)) {
+          if (!player) resetWorld(); state = STATE.HUB; Sfx.uiClick && Sfx.uiClick();
+        }
+        // Player slots (right panel)
+        const rx = lW + 8, rW = W - lW - 8;
+        const slotH = 44, slotGap = 6;
+        for (let si = 1; si < 4; si++) {
+          const sy = 28 + si * (slotH + slotGap);
+          const hasExtra = si - 1 < extraPlayerCfg.length;
+          if (hasExtra) {
+            // Remove button
+            const rmX = rx + rW - 22, rmY = sy + 4;
+            if (isHovering(rmX, rmY, 16, 12)) {
+              extraPlayerCfg.splice(si - 1, 1); Sfx.uiClick && Sfx.uiClick(); break;
+            }
+          } else if (isHovering(rx, sy, rW, slotH) && extraPlayerCfg.length < 3) {
+            // Pick class for new player — simple cycling picker
+            const allCls = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
+            const nextCls = allCls[(extraPlayerCfg.length) % allCls.length];
+            extraPlayerCfg.push({ classId: nextCls });
+            multiMode = 'local'; Sfx.uiConfirm && Sfx.uiConfirm(); break;
+          }
+        }
+        // Cycle extra player class on right-click (handled as regular click on slot when already filled)
+        for (let si = 1; si < 4; si++) {
+          const sy = 28 + si * (slotH + slotGap);
+          const hasExtra = si - 1 < extraPlayerCfg.length;
+          if (hasExtra && isHovering(rx, sy, rW - 24, slotH)) {
+            const allCls = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
+            const cur = allCls.indexOf(extraPlayerCfg[si-1].classId);
+            extraPlayerCfg[si-1].classId = allCls[(cur + 1) % allCls.length];
+            Sfx.uiClick && Sfx.uiClick(); break;
+          }
+        }
+        // Online buttons
+        const onlineY = 28 + 4 * (slotH + slotGap) + 10;
+        const oBtnW = (rW - 8) / 2, oBtnH = 22;
+        if (isHovering(rx, onlineY + 14, oBtnW, oBtnH)) {
+          // HOST
+          if (netSocket) { netSocket.close(); netSocket = null; netIsHost = false; netRoomCode = ''; }
+          else netStartHost();
+        } else if (isHovering(rx + oBtnW + 8, onlineY + 14, oBtnW, oBtnH)) {
+          // JOIN
+          if (netSocket) { netSocket.close(); netSocket = null; }
+          else {
+            const code = prompt('Enter room code:');
+            if (code) netStartJoin(code.trim().toUpperCase());
+          }
         }
       }
-      // Keyboard shortcuts
       if (keyJustPressed.has('enter') || keyJustPressed.has(' ')) startRunFromMenu();
       if (keyJustPressed.has('m')) { cycleMode(); Sfx.uiClick && Sfx.uiClick(); }
       if (keyJustPressed.has('u') || keyJustPressed.has('c')) {
         charTreeClass = selectedClassId; charTreeTab = 'tree'; charScreenTab = 0;
-        state = STATE.CHAR_SCREEN;
+        prevState = STATE.CHAR_MENU; state = STATE.CHAR_SCREEN;
       }
-      if (keyJustPressed.has('h')) {
-        if (!player) { resetWorld(); }
-        state = STATE.HUB;
-      }
+      if (keyJustPressed.has('h')) { if (!player) resetWorld(); state = STATE.HUB; }
     }
     else if (state === STATE.CLASS_SELECT) {
       // Tab or T key cycles mode
@@ -6690,6 +6979,38 @@
     for (const p of projectiles) p.draw(ctx);
     for (const ep of enemyProjectiles) ep.draw(ctx);
     if (state !== STATE.DEAD) player.draw(ctx);
+    // Draw extra local players
+    for (const _ep of extraPlayers) {
+      if (_ep.hp > 0) _ep.draw(ctx);
+      else {
+        // Dead local player: grey ghost outline
+        ctx.save(); ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = '#aaa'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(Math.floor(_ep.x), Math.floor(_ep.y), _ep.r, 0, Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+    }
+    // Draw online remote players
+    for (const [_pid, _rp] of Object.entries(netPlayerStates)) {
+      if (_pid === netPlayerId) continue; // skip self
+      const _rcl = getClassById(_rp.classId || 'ranger');
+      ctx.save();
+      ctx.globalAlpha = _rp.dead ? 0.3 : 0.85;
+      // Body
+      ctx.fillStyle = _rcl.color;
+      ctx.beginPath(); ctx.arc(Math.floor(_rp.x||0), Math.floor(_rp.y||0), 8, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(Math.floor(_rp.x||0), Math.floor(_rp.y||0), 8, 0, Math.PI*2); ctx.stroke();
+      // HP bar
+      const _rhpPct = Math.max(0, (_rp.hp||0) / (_rp.maxHp||100));
+      ctx.fillStyle = '#300'; ctx.fillRect(_rp.x - 12, _rp.y - 14, 24, 3);
+      ctx.fillStyle = _rhpPct > 0.5 ? '#4f4' : _rhpPct > 0.25 ? '#fa4' : '#f44';
+      ctx.fillRect(_rp.x - 12, _rp.y - 14, Math.floor(24 * _rhpPct), 3);
+      // Name tag
+      ctx.fillStyle = _rcl.color; ctx.font = '5px monospace'; ctx.textAlign = 'center';
+      ctx.fillText(_pid.toUpperCase(), _rp.x, _rp.y - 16);
+      ctx.restore();
+    }
     drawDamageNumbers(ctx);
     ctx.restore();
 
