@@ -2552,7 +2552,7 @@
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
     ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 28);
     ctx.fillStyle = '#cccccc'; ctx.font = 'bold 9px monospace';
-    ctx.fillText('Click a card or press 1-8.  Click MODE to toggle Trial.', W / 2, 42);
+    ctx.fillText('Click a card or press 1-9, 0=10th.  MODE toggles Trial.', W / 2, 42);
     // Mode toggle button (top-left)
     const modeLabel = runMode === 'standard' ? 'MODE: STANDARD' : `MODE: ORDEAL ${["I","II","III","IV","V"][trialTier-1]||trialTier}`;
     const modeColor = runMode === 'standard' ? '#7ad96b' : '#ff4080';
@@ -2586,12 +2586,11 @@
       ctx.fillText(text, x, y);
     };
 
-    // 4×2 grid layout — row 0: Archer/Wizard/Warrior/Rogue, row 1: Monk/Paladin/Witch Doctor/Necromancer
-    const allClasses = [CLASS.RANGER, CLASS.SORCERER, CLASS.BERSERKER, CLASS.ASSASSIN,
-                        CLASS.TEMPLAR, CLASS.CRUSADER, CLASS.SHAMAN, CLASS.NECROMANCER,
-                        CLASS.DRUID, CLASS.AMAZONIAN];
-    const cardW = 148, cardH = 145, gap = 6;
-    const cols = 4;
+    // 5×2 grid layout — 5 cols × 2 rows, all 10 classes visible
+    const allClasses = [CLASS.RANGER, CLASS.SORCERER, CLASS.BERSERKER, CLASS.ASSASSIN, CLASS.TEMPLAR,
+                        CLASS.CRUSADER, CLASS.SHAMAN, CLASS.NECROMANCER, CLASS.DRUID, CLASS.AMAZONIAN];
+    const cardW = 120, cardH = 145, gap = 5;
+    const cols = 5;
     const totalW = cardW * cols + gap * (cols - 1);
     const startX = Math.floor((W - totalW) / 2);
     const startY = 52;
@@ -2621,13 +2620,13 @@
       ctx.lineWidth = 1;
 
       // Key hint
-      ctx.fillStyle = '#aaa'; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(`[${i + 1}]`, cx + 6, cy + 13);
+      ctx.fillStyle = '#aaa'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(`[${i < 9 ? i+1 : 0}]`, cx + 5, cy + 12);
 
       // Name (with shadow for emphasis)
-      ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
-      ctx.fillStyle = '#000'; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2 + 1, cy + 24);
-      ctx.fillStyle = c.color; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 23);
+      ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = '#000'; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2 + 1, cy + 22);
+      ctx.fillStyle = c.color; ctx.fillText(c.name.toUpperCase(), cx + cardW / 2, cy + 21);
 
       // Sprite icon — actual in-game character at 3x scale
       const sx = Math.floor(cx + cardW / 2), sy = Math.floor(cy + 48);
@@ -2645,13 +2644,13 @@
         ctx.fillRect(sx - 4, sy + 6, 2, 3); ctx.fillRect(sx + 2, sy + 6, 2, 3);
       }
 
-      // Stats block — bigger, brighter, with shadow
-      ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      // Stats block — two compact lines to fit 120px cards
+      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
       const sy2 = cy + 72;
-      ctx.fillStyle = '#e8e8e8'; shadowText(`HP ${c.baseMaxHp}  SPD ${c.baseSpeed}  CRIT ${c.baseCritChance}%`, cx + 8, sy2);
-      ctx.fillStyle = '#e8e8e8'; shadowText(`WPN ${c.weaponDamage}dmg @ ${c.weaponFireRate}/s`, cx + 8, sy2 + 11);
+      ctx.fillStyle = '#e8e8e8'; shadowText(`HP:${c.baseMaxHp} SPD:${c.baseSpeed} CR:${c.baseCritChance}%`, cx + 6, sy2);
+      ctx.fillStyle = '#e8e8e8'; shadowText(`WPN:${c.weaponDamage}dmg  ${c.weaponFireRate}/s`, cx + 6, sy2 + 10);
       ctx.fillStyle = c.resourceColor || c.color;
-      shadowText(`${c.resourceName}: ${c.baseMaxResource} (+${c.baseResourceRegen}/s)`, cx + 8, sy2 + 22);
+      shadowText(`${c.resourceName}:${c.baseMaxResource}(+${c.baseResourceRegen}/s)`, cx + 6, sy2 + 20);
 
       // Desc (wrapped to ~24 chars) — brighter
       ctx.fillStyle = '#c8c8c8'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
@@ -2659,7 +2658,7 @@
       const dlines = []; let dline = '';
       for (const w of words) {
         const test = dline ? dline + ' ' + w : w;
-        if (test.length > 24) { dlines.push(dline); dline = w; } else dline = test;
+        if (test.length > 18) { dlines.push(dline); dline = w; } else dline = test;
       }
       if (dline) dlines.push(dline);
       for (let li = 0; li < Math.min(dlines.length, 2); li++) {
@@ -5337,13 +5336,14 @@
     else if (state === STATE.CLASS_SELECT) {
       // Tab or T key cycles mode
       if (keyJustPressed.has('t') || gpJustPressed.has(3)) cycleMode();
-      const classIds = ['archer', 'wizard', 'warrior', 'rogue', 'monk', 'paladin', 'witchdoctor', 'necromancer'];
-      const COLS = 4;
+      const classIds = ['ranger','sorcerer','berserker','assassin','templar','crusader','shaman','necromancer','druid','amazonian'];
+      const COLS = 5;
       let picked = null;
 
-      // Keyboard 1-8
+      // Keyboard 1-9, 0=10th class
+      const _csKeys = ['1','2','3','4','5','6','7','8','9','0'];
       for (let ki = 0; ki < classIds.length; ki++) {
-        if (keyJustPressed.has(String(ki + 1))) { picked = classIds[ki]; break; }
+        if (keyJustPressed.has(_csKeys[ki])) { picked = classIds[ki]; break; }
       }
 
       // Gamepad d-pad grid navigation
@@ -5365,10 +5365,10 @@
         } else if (isHovering(W - 170, 8, 160, 20)) {
           state = STATE.CHAR_SCREEN;
         } else {
-          const cardW = 148, cardH = 138, gap = 6;
+          const cardW = 120, cardH = 145, gap = 5;
           const totalW = cardW * COLS + gap * (COLS - 1);
           const startX = Math.floor((W - totalW) / 2);
-          const startY = 48;
+          const startY = 52;
           for (let i = 0; i < classIds.length; i++) {
             const col = i % COLS, row = Math.floor(i / COLS);
             const cx = startX + col * (cardW + gap);
