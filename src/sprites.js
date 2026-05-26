@@ -1206,7 +1206,7 @@ const BOSS_SPRITES = {
 // 8-direction: direction chosen from player velocity each frame.
 // Attack has no NE/NW dirs — NE falls back to E, NW to W.
 // ============================================================
-const BERSERKER_DRAW_SIZE = 56; // logical px (tune to taste)
+const BERSERKER_DRAW_SIZE = 80; // logical px (tune to taste)
 
 const _BERK_BASE = 'Assets/Berserker_Berserker_warrior_in_heavy_full/animations/';
 const _BERK_IDLE_MAIN = 'Heavy_armored_berserker_standing_still_with_subtle-519bbda5';

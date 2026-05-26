@@ -912,7 +912,7 @@ class Player {
     if (!drewPng) {
       if (sprite && typeof drawSprite === 'function') {
         // Scale 3 for Berserker so the ASCII fallback matches the PNG size; 2 for all others
-        const sprScale = this.class.id === 'berserker' ? 3 : 2;
+        const sprScale = this.class.id === 'berserker' ? 4 : 2;
         drawSprite(ctx, sprite, px, py, this.facing === -1, flash, sprScale);
       } else {
         // Fallback: primitive draw if sprites failed to load
