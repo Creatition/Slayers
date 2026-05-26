@@ -1198,117 +1198,172 @@ const BOSS_SPRITES = {
   SlayerKiller: SPRITE_SLAYERKILLER,
 };
 
-// ============================================================
-// BERSERKER ANIMATED SPRITE — PixelLab PNG frames
-// 248×248px source, drawn at BERSERKER_DRAW_SIZE logical px.
-// Only east direction loaded — flipped for west (facing left).
-// ============================================================
-const BERSERKER_DRAW_SIZE = 40; // tune this to taste
 
-const _BERK_CDN = 'https://backblaze.pixellab.ai/file/pixellab-characters/' +
-  'e24e58b2-a3f5-431f-9a72-1decbe56c99c/' +
-  '077c2ac9-77c2-4aac-9595-269166c29ba2/animations/';
+// ============================================================
+// BERSERKER ANIMATED SPRITE — Local PixelLab PNG frames
+// Assets/Berserker_Berserker_warrior_in_heavy_full/animations/
+//   {animFolder}/{direction}/frame_NNN.png
+// 8-direction: direction chosen from player velocity each frame.
+// Attack has no NE/NW dirs — NE falls back to E, NW to W.
+// ============================================================
+const BERSERKER_DRAW_SIZE = 40; // logical px (tune to taste)
 
-const BERSERKER_ANIM_CFG = {
-  idle:   { id: '30439036-5547-4980-8405-718a58fe2e6b', count: 4, fps: 2,  loop: true  },
-  run:    { id: '64784ee9-fce5-4468-b640-9a014474e96f', count: 4, fps: 8,  loop: true  },
-  attack: { id: '6d7da304-028c-45bd-8737-ec8d6708760c', count: 5, fps: 12, loop: false },
+const _BERK_BASE = 'Assets/Berserker_Berserker_warrior_in_heavy_full/animations/';
+const _BERK_IDLE_MAIN = 'Heavy_armored_berserker_standing_still_with_subtle-519bbda5';
+const _BERK_IDLE_NE   = 'Heavy_armored_berserker_standing_still_with_subtle-92f9a4a2';
+const _BERK_RUN_MAIN  = 'Heavy_armored_berserker_running_with_massive_axe_b-cbf68ed2';
+const _BERK_RUN_NE    = 'Heavy_armored_berserker_running_with_massive_axe_b-1f72a7ea';
+const _BERK_ATK       = 'Berserker_axe_attack_frame_1_wind-up_with_axe_pull-458fd81a';
+
+// { animState: { fps, loop, dirs: { dirName: { folder, count, useDir? } } } }
+const BERSERKER_ANIM_DEF = {
+  idle: {
+    fps: 4, loop: true,
+    dirs: {
+      'east':       { folder: _BERK_IDLE_MAIN, count: 4 },
+      'north-east': { folder: _BERK_IDLE_NE,   count: 4 },
+      'north':      { folder: _BERK_IDLE_MAIN, count: 4 },
+      'north-west': { folder: _BERK_IDLE_MAIN, count: 4 },
+      'west':       { folder: _BERK_IDLE_MAIN, count: 4 },
+      'south-west': { folder: _BERK_IDLE_MAIN, count: 4 },
+      'south':      { folder: _BERK_IDLE_MAIN, count: 4 },
+      'south-east': { folder: _BERK_IDLE_MAIN, count: 4 },
+    },
+  },
+  run: {
+    fps: 8, loop: true,
+    dirs: {
+      'east':       { folder: _BERK_RUN_MAIN, count: 4 },
+      'north-east': { folder: _BERK_RUN_NE,   count: 4 },
+      'north':      { folder: _BERK_RUN_MAIN, count: 4 },
+      'north-west': { folder: _BERK_RUN_MAIN, count: 4 },
+      'west':       { folder: _BERK_RUN_MAIN, count: 4 },
+      'south-west': { folder: _BERK_RUN_MAIN, count: 4 },
+      'south':      { folder: _BERK_RUN_MAIN, count: 4 },
+      'south-east': { folder: _BERK_RUN_MAIN, count: 4 },
+    },
+  },
+  attack: {
+    fps: 12, loop: false,
+    // NE not in source → use east frames; NW not in source → use west frames
+    dirs: {
+      'east':       { folder: _BERK_ATK, count: 5 },
+      'north-east': { folder: _BERK_ATK, count: 5, useDir: 'east' },
+      'north':      { folder: _BERK_ATK, count: 5 },
+      'north-west': { folder: _BERK_ATK, count: 5, useDir: 'west' },
+      'west':       { folder: _BERK_ATK, count: 5 },
+      'south-west': { folder: _BERK_ATK, count: 5 },
+      'south':      { folder: _BERK_ATK, count: 5 },
+      'south-east': { folder: _BERK_ATK, count: 5 },
+    },
+  },
 };
 
-// Shared preloaded frames — loaded once, reused by all Berserker Player instances.
-const _berkFrames = { idle: [], run: [], attack: [] };
+
+// _berkFrames[animState][dirName][frameIdx] = HTMLImageElement
+// Images are deduplicated by path — fallback dirs reuse the same Image objects.
+const _berkFrames = {};
+let _berkTotalFrames = 0, _berkLoadedFrames = 0;
 let _berkReady = false;
 
-function _loadBerserkerFrames() {
-  let total = 0, done = 0;
-  for (const [state, cfg] of Object.entries(BERSERKER_ANIM_CFG)) {
-    for (let i = 0; i < cfg.count; i++) {
-      total++;
-      const img = new Image();
-      img.src = `${_BERK_CDN}${cfg.id}/east/${i}.png`;
-      img.onload  = () => { if (++done >= total) _berkReady = true; };
-      img.onerror = () => { ++done; };  // individual frame failure is non-fatal
-      _berkFrames[state].push(img);
+(function _loadBerserkerFrames() {
+  const cache = new Map(); // path -> Image, prevents loading the same PNG twice
+  for (const [animName, animDef] of Object.entries(BERSERKER_ANIM_DEF)) {
+    _berkFrames[animName] = {};
+    for (const [dirName, dirCfg] of Object.entries(animDef.dirs)) {
+      const realDir = dirCfg.useDir || dirName;
+      const frames  = [];
+      for (let i = 0; i < dirCfg.count; i++) {
+        const pad  = String(i).padStart(3, '0');
+        const src  = _BERK_BASE + dirCfg.folder + '/' + realDir + '/frame_' + pad + '.png';
+        let img = cache.get(src);
+        if (!img) {
+          img = new Image();
+          _berkTotalFrames++;
+          img.onload  = () => { if (++_berkLoadedFrames >= _berkTotalFrames) _berkReady = true; };
+          img.onerror = () => { _berkLoadedFrames++; };
+          img.src = src;
+          cache.set(src, img);
+        }
+        frames.push(img);
+      }
+      _berkFrames[animName][dirName] = frames;
     }
   }
+})();
+
+// Convert velocity vector to 8-way compass direction string.
+// Returns null when stationary.
+function _velToDir8(vx, vy) {
+  if (Math.abs(vx) < 0.5 && Math.abs(vy) < 0.5) return null;
+  const deg = ((Math.atan2(vy, vx) * 180 / Math.PI) + 360) % 360;
+  const DIR8 = ['east','south-east','south','south-west','west','north-west','north','north-east'];
+  return DIR8[Math.round(deg / 45) % 8];
 }
-_loadBerserkerFrames();
 
 class BerserkerAnimator {
   constructor() {
-    this.state  = 'idle';
-    this.frame  = 0;
-    this.timer  = 0;
-    this._attackLocked = false; // true while non-looping attack plays out
+    this.state         = 'idle';
+    this.frame         = 0;
+    this.timer         = 0;
+    this.dir           = 'south';
+    this._attackLocked = false;
   }
 
-  update(dt, isMoving, isAttacking) {
-    // Trigger attack anim on swing start
+  update(dt, isMoving, isAttacking, vx, vy) {
+    const newDir = _velToDir8(vx || 0, vy || 0);
+    if (newDir) this.dir = newDir;
+
     if (isAttacking && !this._attackLocked) {
-      this.state = 'attack';
-      this.frame = 0;
-      this.timer = 0;
+      this.state = 'attack'; this.frame = 0; this.timer = 0;
       this._attackLocked = true;
     }
 
-    // Advance frame
-    const cfg = BERSERKER_ANIM_CFG[this.state];
+    const animDef    = BERSERKER_ANIM_DEF[this.state];
+    const dirCfg     = animDef.dirs[this.dir];
+    const frameCount = dirCfg ? dirCfg.count : 4;
     this.timer += dt;
-    const frameDur = 1 / cfg.fps;
+    const frameDur = 1 / animDef.fps;
     while (this.timer >= frameDur) {
       this.timer -= frameDur;
       this.frame++;
-      if (this.frame >= cfg.count) {
-        if (cfg.loop) {
+      if (this.frame >= frameCount) {
+        if (animDef.loop) {
           this.frame = 0;
         } else {
-          this.frame = cfg.count - 1; // hold last frame
-          this._attackLocked = false; // unlock so next swing can retrigger
+          this.frame = frameCount - 1;
+          this._attackLocked = false;
         }
       }
     }
 
-    // Return from completed attack to movement state
-    if (!this._attackLocked && this.state === 'attack' && this.frame === cfg.count - 1) {
-      const next = isMoving ? 'run' : 'idle';
-      this.state = next;
-      this.frame = 0;
-      this.timer = 0;
+    if (this.state === 'attack' && !this._attackLocked) {
+      this.state = isMoving ? 'run' : 'idle';
+      this.frame = 0; this.timer = 0;
     }
 
-    // Switch between idle / run when not attacking
     if (this.state !== 'attack') {
       const want = isMoving ? 'run' : 'idle';
       if (want !== this.state) {
-        this.state = want;
-        this.frame = 0;
-        this.timer = 0;
+        this.state = want; this.frame = 0; this.timer = 0;
       }
     }
   }
 
-  // Returns true if it drew, false to signal fallback to ASCII sprite.
-  draw(ctx, cx, cy, flip, flash) {
+  draw(ctx, cx, cy, flash) {
     if (!_berkReady) return false;
-    const imgs = _berkFrames[this.state];
-    const img  = imgs[Math.min(this.frame, imgs.length - 1)];
+    const dirFrames = _berkFrames[this.state] && _berkFrames[this.state][this.dir];
+    if (!dirFrames) return false;
+    const img = dirFrames[Math.min(this.frame, dirFrames.length - 1)];
     if (!img || !img.complete || img.naturalWidth === 0) return false;
-
-    const s  = BERSERKER_DRAW_SIZE;
-    const dx = flip ? cx + s / 2 : cx - s / 2; // negative dw handles mirror
-    const dw = flip ? -s : s;
-
+    const s = BERSERKER_DRAW_SIZE;
     ctx.save();
+    ctx.drawImage(img, cx - s / 2, cy - s / 2, s, s);
     if (flash) {
-      // White-flash: draw normal then overlay
-      ctx.drawImage(img, dx, cy - s / 2, dw, s);
       ctx.filter = 'brightness(10) saturate(0)';
       ctx.globalAlpha = 0.75;
-      ctx.drawImage(img, dx, cy - s / 2, dw, s);
-      ctx.filter = 'none';
-      ctx.globalAlpha = 1;
-    } else {
-      ctx.drawImage(img, dx, cy - s / 2, dw, s);
+      ctx.drawImage(img, cx - s / 2, cy - s / 2, s, s);
+      ctx.filter = 'none'; ctx.globalAlpha = 1;
     }
     ctx.restore();
     return true;

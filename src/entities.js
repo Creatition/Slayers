@@ -796,7 +796,7 @@ class Player {
     // Decay weapon-overlay animation timer
     if (this.swingTimer > 0) this.swingTimer -= dt;
     // Tick PixelLab animator (berserker only)
-    if (this.animator) this.animator.update(dt, this.isMoving, this.swingTimer > 0);
+    if (this.animator) this.animator.update(dt, this.isMoving, this.swingTimer > 0, this.vx, this.vy);
   }
   // Returns 'melee' or 'ranged' based on currently equipped weapon, falling back to class default.
   weaponKind() {
@@ -908,7 +908,7 @@ class Player {
     const sprite = (typeof PLAYER_SPRITES !== 'undefined')
       ? PLAYER_SPRITES[this.class.id]
       : null;
-    const drewPng = this.animator ? this.animator.draw(ctx, px, py, this.facing === -1, flash) : false;
+    const drewPng = this.animator ? this.animator.draw(ctx, px, py, flash) : false;
     if (!drewPng) {
       if (sprite && typeof drawSprite === 'function') {
         drawSprite(ctx, sprite, px, py, this.facing === -1, flash, 2);
@@ -1677,24 +1677,4 @@ function handleBossDeath(enemy) {
   itemDrops.push(new ItemDrop(enemy.x, enemy.y, it));
   itemDrops.push(new ItemDrop(enemy.x - 12, enemy.y, generateItem()));
   shake = Math.min(shake + 8, 12);
-  Sfx.bossDie();
-  bossRef = null;
-  bossDefeatedBannerTimer = 2.0;
-  lastBossName = enemy.name || 'BOSS';
-  if (isFinalWave(currentWave)) {
-    state = STATE.VICTORY;
-    setTimeout(() => Sfx.victory(), 600);
-  } else enterAbilityDraft();
-}
-function explodeAt(x, y, radius, damage) {
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const dx = e.x - x, dy = e.y - y;
-    if (dx*dx + dy*dy < radius*radius) {
-      const died = e.takeDamage(damage);
-      if (died) handleEnemyDeath(e);
-    }
   }
-  spawnBurst(x, y, ['#ff5520', '#ffaa00', '#ffdd00', '#ffffff'], 18);
-  shake = Math.min(shake + 3, 6);
-}
