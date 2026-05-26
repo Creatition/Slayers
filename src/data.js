@@ -3302,6 +3302,7 @@ const ABILITIES = {
       proj.r=2; proj.theme='arrow'; proj.preHit=true; proj.dmg=dmg;
       projectiles.push(proj);
       if (died) handleEnemyDeath(target);
+      spawnBurst(player.x, player.y, ['#7ad96b', '#aaffaa', '#ffffff'], isCrit ? 10 : 6);
       return true;
     },
   },
@@ -3376,6 +3377,8 @@ const ABILITIES = {
         projectiles.push(proj);
       }
       if (rank>=5) player.resource = Math.min(player.maxResource, (player.resource||0)+30);
+      spawnBurst(player.x, player.y, ['#55dd88', '#aaffcc', '#ffffff'], 10);
+      shake = Math.min(shake + 1.5, 5);
       return true;
     },
   },
@@ -3396,6 +3399,8 @@ const ABILITIES = {
         arrows:arrowCount, interval:dur/arrowCount,
         nextArrow:0, dmg: player.weaponDamage*player.dmgMult*0.8*rDmg*rScale,
         seek: rank>=3, bleed: rank>=4, focusPerHit: rank>=5, player };
+      spawnBurst(tx, ty, ['#44bb44', '#88ff88', '#aaffaa', '#ffffff'], 20);
+      shake = Math.min(shake + 3, 6);
       return true;
     },
   },
@@ -3615,6 +3620,8 @@ const ABILITIES = {
         proj.r=2.5; proj.theme='arrow';
         projectiles.push(proj);
       }
+      spawnBurst(player.x, player.y, ['#ddaa33', '#ffcc66', '#ffffff'], 8);
+      shake = Math.min(shake + 1.5, 4);
       return true;
     },
   },
@@ -3691,6 +3698,8 @@ const ABILITIES = {
       player.strafeHome = rank >= 3;
       player.strafePierceCrit = rank >= 4;
       player.strafePartingShot = rank >= 5;
+      spawnBurst(player.x, player.y, ['#ffaa44', '#ffcc88', '#ff6622', '#ffffff'], 14);
+      shake = Math.min(shake + 2, 5);
       return true;
     },
   },
