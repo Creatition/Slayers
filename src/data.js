@@ -660,6 +660,7 @@ const ABILITIES = {
       const rank = getAbilityRank(slot);
       const rScale = getRankScale(slot);
       const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const isLegend = slot && slot.rarity && slot.rarity.id === 'orange';
       const target = findNearestEnemy(player.x, player.y, player.weaponRange * 1.5);
       if (!target) return false;
       const baseAngle = Math.atan2(target.y - player.y, target.x - player.x);
