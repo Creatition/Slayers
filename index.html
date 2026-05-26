@@ -727,9 +727,12 @@
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
     if (player.uniqueEffects && player.uniqueEffects.includes('stormrider_kill_speed'))
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 1.5);
-    // Spirit Bond: Wolf — kill grants 2s speed burst
-    if (player.bondWolf)
+    // Spirit Bond: Panther — kill grants 2s speed burst
+    if (player.bondPanther)
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
+    // Spirit Bond: Piranha — feeding frenzy kill stack (cap 20)
+    if (player.bondPiranha)
+      player.piranhaKillStacks = Math.min((player.piranhaKillStacks || 0) + 1, 20);
     const isElite = e.elite === true;
     const eliteTier = e.eliteTier || 'rare';
     const auraCol = (isElite && e.eliteMods && e.eliteMods[0]) ? e.eliteMods[0].auraColor : '#ffd040';
@@ -983,8 +986,7 @@
     const dx = target.x - shooter.x, dy = target.y - shooter.y;
     const d = Math.hypot(dx, dy);
     if (d < 0.01) return;
-    let sp = shooter.weaponProjSpeed;
-    if (shooter === player && player.bondEagle) sp *= 1.30; // Eagle bond
+    const sp = shooter.weaponProjSpeed;
     const life = shooter.weaponRange / sp + 0.05;
     let dmg = shooter.weaponDamage * (shooter.effectiveDmgMult ? shooter.effectiveDmgMult() : shooter.dmgMult);
     const crit = shooter.effectiveCritChance ? shooter.effectiveCritChance() : shooter.critChance;
@@ -1192,8 +1194,8 @@
             if (player.eagleMarkSpiritCrit && proj.isCrit)
               player.resource = Math.min(player.maxResource, (player.resource||0) + player.eagleMarkSpiritCrit);
           }
-          // Venom Tip: apply venom stack on hit (Serpent bond adds venom too)
-          if ((player.venomCharges || 0) > 0 || player.bondSerpent) {
+          // Venom Tip: apply venom stack on hit (Anaconda bond adds venom too)
+          if ((player.venomCharges || 0) > 0 || player.bondAnaconda) {
             if (player.venomCharges > 0) player.venomCharges--;
             enemy.venomStacks = (enemy.venomStacks || 0) + (player.venomDoubleStack ? 2 : 1);
             if (enemy.venomStacks >= 5) {
@@ -1208,15 +1210,45 @@
                   if (nd) handleEnemyDeath(nearby);
                 }
               }
-              spawnDamageNumber(enemy.x, enemy.y-enemy.r-12, 'SERPENT BURST!', { color:'#44cc44', size:11, vy:-55, life:1.2 });
+              spawnDamageNumber(enemy.x, enemy.y-enemy.r-12, 'ANACONDA BURST!', { color:'#44cc44', size:11, vy:-55, life:1.2 });
               if (player.venomChain) {
                 const chainTargets = enemies.filter(e=>e.alive&&e!==enemy).sort((a,b)=>Math.hypot(a.x-enemy.x,a.y-enemy.y)-Math.hypot(b.x-enemy.x,b.y-enemy.y)).slice(0,player.venomChain);
                 for (const ct of chainTargets) { ct.venomStacks = (ct.venomStacks||0)+3; }
               }
             }
           }
+          // Tarantula bond: +40% dmg to CC'd (stunned/rooted) enemies
+          if (player.bondTarantula && (enemy.stunTimer || 0) > 0) projDmg *= 1.40;
           const died = enemy.takeDamage(projDmg, { crit: proj.isCrit });
           if (proj.onHit) proj.onHit(enemy);
+          // ── Spirit Bond on-hit procs ─────────────────────────
+          // Piranha: life steal (6% base + 0.5%/kill stack, cap 20%)
+          if (player.bondPiranha && projDmg > 0) {
+            const _stealPct = Math.min(0.20, 0.06 + (player.piranhaKillStacks || 0) * 0.005);
+            const _steal = Math.max(1, Math.ceil(projDmg * _stealPct));
+            player.hp = Math.min(player.maxHp, player.hp + _steal);
+            if (_steal >= 4) spawnDamageNumber(player.x, player.y - player.r - 6,
+              '+' + _steal + ' HP', { color: '#ff4466', size: 8, vy: -32, life: 0.7 });
+          }
+          // Panther bond: bleed on crit (3s, ~18% wpn dmg/sec)
+          if (proj.isCrit && enemy.alive && player.bondPanther) {
+            const _bleedDmg = Math.max(1, Math.ceil(player.weaponDamage * player.effectiveDmgMult() * 0.09));
+            enemy.bleedTimer   = Math.max(enemy.bleedTimer   || 0, 3.0);
+            enemy.bleedDmg     = Math.max(enemy.bleedDmg     || 0, _bleedDmg);
+            enemy.bleedElapsed = enemy.bleedElapsed || 0;
+            spawnDamageNumber(enemy.x, enemy.y - enemy.r - 6, 'SHRED',
+              { color: '#cc2266', size: 9, vy: -38, life: 0.8 });
+          }
+          // Anaconda bond: constrict — slow 45% for 1.5s
+          if (enemy.alive && player.bondAnaconda) {
+            slowTimers.set(enemy, { mult: 0.45, timer: 1.5 });
+          }
+          // Tarantula bond: 25% chance web root (0.8s)
+          if (enemy.alive && player.bondTarantula && Math.random() < 0.25) {
+            enemy.stunTimer = Math.max(enemy.stunTimer || 0, 0.8);
+            spawnDamageNumber(enemy.x, enemy.y - enemy.r - 6, 'WEB!',
+              { color: '#ddaa44', size: 9, vy: -38, life: 0.8 });
+          }
           // Wild Shape: Dragon — 40% chance on-hit fire spawn
           if (enemy.alive && player.class && player.class.wildShape === 'dragon' && Math.random() < 0.40) {
             const fireDmg = Math.max(1, Math.ceil(projDmg * 0.25));
@@ -1232,10 +1264,6 @@
             enemy.bleedElapsed = enemy.bleedElapsed || 0;
             spawnDamageNumber(enemy.x, enemy.y - enemy.r - 6, 'BLEED',
               { color: '#cc2244', size: 9, vy: -38, life: 0.8 });
-          }
-          // Spirit Bond: Serpent — slow on every hit (45% speed, 1.5s)
-          if (enemy.alive && player.bondSerpent) {
-            slowTimers.set(enemy, { mult: 0.45, timer: 1.5 });
           }
           // Legendary on-hit procs
           if (player.legendaryEffects && enemy.alive) {
@@ -2343,7 +2371,7 @@
         ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
         ctx.fillText('◆ ' + _wsForm.toUpperCase() + ' FORM', 8, 54);
       } else if (_sbBond) {
-        const _bondCol = { eagle: '#ffcc22', serpent: '#44cc44', wolf: '#44aadd', bear: '#cc7733' };
+        const _bondCol = { piranha: '#ff4444', anaconda: '#44cc44', panther: '#cc88ff', tarantula: '#ddaa44' };
         ctx.fillStyle = _bondCol[_sbBond] || '#aaaaaa';
         ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
         ctx.fillText('◆ ' + _sbBond.toUpperCase() + ' BOND', 8, 54);
@@ -4181,21 +4209,6 @@
         }
       }
 
-      // Bleed ticks on enemies (Shred / Panther form)
-      for (const e of enemies) {
-        if (!e.alive) continue;
-        if ((e.bleedTimer||0) > 0) {
-          e.bleedTimer -= dt;
-          e.bleedElapsed = (e.bleedElapsed||0) + dt;
-          while (e.bleedElapsed >= 0.5) {
-            e.bleedElapsed -= 0.5;
-            const died = e.takeDamage(e.bleedDmg||1);
-            spawnDamageNumber(e.x, e.y-e.r, e.bleedDmg||1, { color:'#cc2222', size:8 });
-            if (died) { handleEnemyDeath(e); break; }
-          }
-          if (e.bleedTimer <= 0) { e.bleedTimer=0; e.bleedElapsed=0; }
-        }
-      }
     }
 
     // ─ AMAZONIAN ─────────────────────────────────────────────────────────────
@@ -4206,25 +4219,32 @@
       }
 
       // Spirit Bond passive bonuses (applied each frame as player flags)
-      const bond = player.class.spiritBond || 'eagle';
+      const bond = player.class.spiritBond || 'piranha';
       const unionActive = player.spiritUnionTimer > 0;
       const ubMult = (unionActive && player.spiritUnionBonus) ? player.spiritUnionBonus : 1.0;
-      player.bondEagle   = (bond === 'eagle'   || unionActive);
-      player.bondSerpent = (bond === 'serpent'  || unionActive);
-      player.bondWolf    = (bond === 'wolf'     || unionActive);
-      player.bondBear    = (bond === 'bear'     || unionActive);
-      // Eagle: proj speed +30% aspd +20% — handled in effectiveFireRateMult
-      // Wolf: +35% speed — handled in effectiveSpeed
-      // Bear: +30% armor — handled in recomputeStats (too expensive here; use flag)
-      // Serpent: venom on all attacks — handled in projectile hit path
+      player.bondPiranha   = (bond === 'piranha'   || unionActive);
+      player.bondAnaconda  = (bond === 'anaconda'  || unionActive);
+      player.bondPanther   = (bond === 'panther'   || unionActive);
+      player.bondTarantula = (bond === 'tarantula' || unionActive);
+      // Piranha:   life steal + kill-stack aspd ramp — checkCollisions + updateClassMechanics
+      // Anaconda:  venom on all attacks + constrict slow — projectile hit path
+      // Panther:   +35% speed + +10 crit + bleed-on-crit + kill burst — effectiveSpeed/recomputeStats
+      // Tarantula: 25% web root + burst dmg to CC'd — checkCollisions
 
+      // Piranha: kill-stack aspd ramp (stacks added in handleEnemyDeath)
+      if (player.bondPiranha) {
+        player.piranhaAspdBonus = Math.min((player.piranhaKillStacks || 0) * 0.04, 0.40);
+      } else {
+        player.piranhaAspdBonus = 0;
+        if (bond !== 'piranha') player.piranhaKillStacks = 0;
+      }
       // Spirit Union timer
       if (player.spiritUnionTimer > 0) {
         player.spiritUnionTimer -= dt;
         if (player.spiritUnionTimer <= 0) {
           player.spiritUnionTimer = 0;
-          player.class = Object.assign({}, player.class, { spiritBond: 'eagle' });
-          player.bondEagle=true; player.bondSerpent=false; player.bondWolf=false; player.bondBear=false;
+          player.class = Object.assign({}, player.class, { spiritBond: 'piranha' });
+          player.bondPiranha=true; player.bondAnaconda=false; player.bondPanther=false; player.bondTarantula=false;
         }
       }
 
@@ -4969,6 +4989,22 @@
     }
 
   } // end Necromancer
+
+  // ── Shared bleed tick — runs for ALL classes (Druid Panther form + Amazonian Panther bond) ──
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if ((e.bleedTimer||0) > 0) {
+      e.bleedTimer -= dt;
+      e.bleedElapsed = (e.bleedElapsed||0) + dt;
+      while (e.bleedElapsed >= 0.5) {
+        e.bleedElapsed -= 0.5;
+        const died = e.takeDamage(e.bleedDmg||1);
+        spawnDamageNumber(e.x, e.y-e.r, e.bleedDmg||1, { color:'#cc2222', size:8 });
+        if (died) { handleEnemyDeath(e); break; }
+      }
+      if (e.bleedTimer <= 0) { e.bleedTimer=0; e.bleedElapsed=0; }
+    }
+  }
 
   } // end updateClassMechanics
 

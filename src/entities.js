@@ -572,7 +572,7 @@ class Player {
     let r = this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0);
     if (this.shoutTimer > 0 && this.shoutSpeedBonus) r *= (1 + this.shoutSpeedBonus);
     if (this.rageTimer > 0 && this.rageSpeedBonus) r *= (1 + this.rageSpeedBonus);
-    if (this.bondEagle) r *= 1.20;
+    if (this.piranhaAspdBonus) r *= (1 + this.piranhaAspdBonus); // Piranha kill-stack aspd
     if ((this.packHuntTimer > 0 || this.packHuntPersist) && this.packHuntStacks)
       r *= (1 + this.packHuntStacks * (this.packHuntPerKill || 0.05));
     if (this.blessingTimer > 0 && this.blessingAspdBonus) r *= (1 + this.blessingAspdBonus);
@@ -586,7 +586,7 @@ class Player {
     if ((this.stormriderSpeedTimer || 0) > 0) s += 60; // stormrider / kill_speed_burst
     if (this.wildShapePantherSpd) s *= (1 + this.wildShapePantherSpd);
     if (this.wildShapeDragonSlowSpd) s *= (1 + this.wildShapeDragonSlowSpd);
-    if (this.bondWolf) s *= 1.35;
+    if (this.bondPanther) s *= 1.35;
     if (this.epiphanyTimer > 0 && this.epiphanySpeedBonus) s *= (1 + this.epiphanySpeedBonus);
     if ((this.spiritWalkTimer || 0) > 0 && this.spiritWalkSpeedBonus) s *= (1 + this.spiritWalkSpeedBonus);
     return s;
@@ -666,8 +666,9 @@ class Player {
     if (_pVit) { this.bonusMaxHp += _pVit * 12; this.bonusRegen += _pVit * 0.4; this.bonusArmor += _pVit * 1.5; }
     if (_pSpi) { this.bonusMaxResource += _pSpi * 3; this.bonusResourceRegen += _pSpi * 0.3; this.bonusDodge += _pSpi * 0.4; }
     // ─────────────────────────────────────────────────────────
-    // Spirit Bond: Bear — +30% of accumulated armor
-    if (this.bondBear) this.bonusArmor += (this.baseArmor + this.bonusArmor) * 0.30;
+    // Spirit Bond: Panther — +10 crit chance
+    if (this.bondPanther) this.bonusCritChance += 10;
+    // Tarantula bond: web proc in checkCollisions, no passive stat
     const oldMax = this.maxHp;
     const ratio = oldMax > 0 ? this.hp / oldMax : 1;
     const oldMaxR = this.maxResource;
