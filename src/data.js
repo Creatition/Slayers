@@ -3376,8 +3376,8 @@ const ABILITIES = {
       return true;
     },
   },
-  deathMark: {
-    id: 'deathMark', name: 'Death Mark', tier: 4, letter: 'K', classOf: 'ranger',
+  markedForDeath: {
+    id: 'markedForDeath', name: 'Marked for Death', tier: 4, letter: 'K', classOf: 'ranger',
     desc: '10s: +60% dmg, attack speed +30%, kills chain arrows to nearby.',
     maxRank: 5, rankDesc: ['Death Mark 10s', '12s +70% dmg', '12s ★Notable: chain arrows pierce', '14s +80% dmg speed +50%', '★Capstone: 14s, guaranteed Overpower on every 5th shot'],
     cost: 50, cooldown: 40.0, color: '#00cc44',
