@@ -2473,6 +2473,384 @@ const ABILITIES = {
     },
   },
 
+  // ── DRUID T1 ─────────────────────────────────────────────────
+  wildShift: {
+    id: 'wildShift', name: 'Wild Shift', letter: 'F', tier: 1, classOf: 'druid',
+    desc: 'Cycle Wild Shape: Human → Dragon → Panther → Human. Dragon: fire on hit. Panther: speed + bleed crits.',
+    maxRank: 5, rankDesc: ['Shift forms, 15 Spirit cost', 'Spirit cost -5', 'Spirit cost -5 ★Notable: Shift restores 10% HP', 'Form bonuses +20%', '★Capstone: free shifts, forms last until re-cast'],
+    cost: 15, cooldown: 0.5, color: '#cc8844',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const cost = Math.max(0, 15 - (rank - 1) * 5);
+      if (rank < 5 && (player.resource || 0) < cost && (player.class.wildShape || 'human') !== 'human') return false;
+      const cur = player.class.wildShape || 'human';
+      let next = cur === 'human' ? 'dragon' : cur === 'dragon' ? 'panther' : 'human';
+      if (next !== 'human') player.resource = Math.max(0, (player.resource || 0) - cost);
+      player.class = Object.assign({}, player.class, { wildShape: next });
+      if (rank >= 3) player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.10);
+      const colors = { human: ['#66cc88','#aaffcc','#ffffff'], dragon: ['#ff6622','#ffaa44','#ffee88'], panther: ['#882288','#cc66cc','#ffffff'] };
+      spawnBurst(player.x, player.y, colors[next], 16);
+      spawnDamageNumber(player.x, player.y - 24, next.toUpperCase() + ' FORM', { color: colors[next][0], size: 13, vy: -55, life: 1.5 });
+      return true;
+    },
+  },
+
+  // ── DRUID T2 ─────────────────────────────────────────────────
+  thornWall: {
+    id: 'thornWall', name: 'Thorn Wall', letter: 'H', tier: 2, classOf: 'druid',
+    desc: 'Summon a wall of thorns at cursor. Damages and slows all enemies that touch it.',
+    maxRank: 5, rankDesc: ['Thorn wall 6s', '8s +bleed on hit', '8s ★Notable: wall pulses 1× per sec in AoE', '10s wall fires thorn bolts', '★Capstone: wall shatters on end, dealing 4× damage AoE'],
+    cost: 20, cooldown: 12.0, color: '#448833',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 10 : rank >= 2 ? 8 : 6;
+      const dmg = player.weaponDamage * player.dmgMult * 0.5 * rDmg * rScale;
+      groundEffects.push({
+        type: 'thornwall', x: mouseX, y: mouseY, r: 50, life: dur, maxLife: dur,
+        dmgPerSec: dmg * 2, color: '#448833', hit: new Set(),
+        bleed: rank >= 2, pulse: rank >= 3, pulseTimer: 0,
+        shatter: rank >= 5, player, rScale,
+        bleedDmg: player.weaponDamage * player.dmgMult * 0.12 * rScale
+      });
+      spawnBurst(mouseX, mouseY, ['#448833','#66cc44','#aaffaa'], 14);
+      return true;
+    },
+  },
+  entangle: {
+    id: 'entangle', name: 'Entangle', letter: 'N', tier: 2, classOf: 'druid',
+    desc: 'Vines erupt around player, rooting nearby enemies. Deals Nature damage.',
+    maxRank: 5, rankDesc: ['Root 2s r=70', 'Root 3s bigger', '3s ★Notable: rooted enemies take +30% damage', 'Root 4s', '★Capstone: root + Nature explosion at rank end'],
+    cost: 20, cooldown: 9.0, color: '#66cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const rootDur = rank >= 4 ? 4 : rank >= 2 ? 3 : 2;
+      const radius = rank >= 2 ? 90 : 70;
+      const dmg = player.weaponDamage * player.dmgMult * 1.2 * rDmg * rScale;
+      let count = 0;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        if (Math.hypot(e.x - player.x, e.y - player.y) < radius) {
+          const isCrit = Math.random() * 100 < player.critChance;
+          const died = e.takeDamage(isCrit ? dmg * 2 : dmg, { crit: isCrit });
+          if (isCrit) player.onCrit();
+          e.stunTimer = Math.max(e.stunTimer || 0, rootDur);
+          if (rank >= 3) e.entangled = true;
+          spawnBurst(e.x, e.y, ['#66cc44','#aaffaa'], 4);
+          if (died) handleEnemyDeath(e);
+          else count++;
+        }
+      }
+      if (rank >= 5 && count === 0) {
+        // Detonate even with no roots for the AoE
+        for (const e of enemies) {
+          if (!e.alive) continue;
+          if (Math.hypot(e.x - player.x, e.y - player.y) < radius * 1.4) {
+            const died = e.takeDamage(dmg * 2);
+            if (died) handleEnemyDeath(e);
+          }
+        }
+      }
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 10);
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: radius, damage: 0, life: 0.4, maxLife: 0.4, color: '#66cc44', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#66cc44','#448833','#aaffaa','#ffffff'], 20);
+      return true;
+    },
+  },
+
+  // ── DRUID T3 ─────────────────────────────────────────────────
+  earthShock: {
+    id: 'earthShock', name: 'Earth Shock', letter: 'Q', tier: 3, classOf: 'druid',
+    desc: 'Slam fist down, sending an earthquake line toward cursor.',
+    maxRank: 5, rankDesc: ['Quake line 2× dmg', '3× wider', '3.5× ★Notable: launches enemies struck', '4× leaves rubble zone', '★Capstone: 5× + aftershock strikes 1.5s later'],
+    cost: 30, cooldown: 10.0, color: '#aa8833',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const mult = rank >= 5 ? 5 : rank >= 4 ? 4 : rank >= 3 ? 3.5 : rank >= 2 ? 3 : 2;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      // Line from player to cursor
+      const dx = mouseX - player.x, dy = mouseY - player.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const steps = Math.ceil(len / 12);
+      const hitSet = new Set();
+      for (let s = 0; s <= steps; s++) {
+        const px = player.x + (dx / len) * s * 12;
+        const py = player.y + (dy / len) * s * 12;
+        for (const e of enemies) {
+          if (!e.alive || hitSet.has(e)) continue;
+          if (Math.hypot(e.x - px, e.y - py) < (rank >= 2 ? 28 : 20)) {
+            hitSet.add(e);
+            const isCrit = Math.random() * 100 < player.critChance;
+            const died = e.takeDamage(isCrit ? dmg * 2 : dmg, { crit: isCrit });
+            if (isCrit) player.onCrit();
+            if (rank >= 3) { const ang = Math.atan2(e.y - player.y, e.x - player.x); e.x += Math.cos(ang)*40; e.y += Math.sin(ang)*40; }
+            if (died) handleEnemyDeath(e);
+          }
+        }
+      }
+      if (rank >= 4) groundEffects.push({ type: 'slow', x: mouseX, y: mouseY, r: 55, life: 3.0, maxLife: 3.0, color: '#aa8833', slowAmt: 0.5, hit: new Set() });
+      groundEffects.push({ type: 'shockwave', x: player.x, y: player.y, r: 10, maxR: len, damage: 0, life: 0.5, maxLife: 0.5, color: '#aa8833', hit: new Set(), target: 'none' });
+      spawnBurst(player.x, player.y, ['#aa8833','#cc9944','#ffffff'], 16);
+      shake = Math.min(shake + 5, 9); hitPauseTimer = Math.max(hitPauseTimer, 0.08);
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 12);
+      return true;
+    },
+  },
+  solarBeam: {
+    id: 'solarBeam', name: 'Solar Beam', letter: 'L', tier: 3, classOf: 'druid',
+    desc: 'Channel a concentrated sunbeam for 2s, Burning all enemies in the line.',
+    maxRank: 5, rankDesc: ['Beam 2s Burn', '2.5s wider', '2.5s ★Notable: Superheats at 1.5s (+100% dmg, 2× wide)', '3s beam scorches ground', '★Capstone: beam splits at end into 3 rays'],
+    cost: 30, cooldown: 11.0, color: '#ffee44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 3 : rank >= 2 ? 2.5 : 2;
+      player.solarBeamTimer = dur;
+      player.solarBeamDmg = player.weaponDamage * player.dmgMult * 0.8 * rDmg * rScale;
+      player.solarBeamWidth = rank >= 2 ? 18 : 14;
+      player.solarBeamSuperheat = rank >= 3;
+      player.solarBeamScorch = rank >= 4;
+      player.solarBeamSplit = rank >= 5;
+      player.solarBeamHitTimer = 0;
+      spawnBurst(player.x, player.y, ['#ffee44','#ffcc22','#ffffff'], 14);
+      return true;
+    },
+  },
+
+  // ── DRUID T4 ─────────────────────────────────────────────────
+  primalRage: {
+    id: 'primalRage', name: 'Primal Rage', letter: 'P', tier: 4, classOf: 'druid',
+    desc: '12s Hybrid Form: Dragon + Panther simultaneously. Fire on every hit, crits Bleed.',
+    maxRank: 5, rankDesc: ['Hybrid Form 10s', '12s Fury dmg+30%', '12s ★Notable: kills restore 5% HP', '14s all attacks chain fire', '★Capstone: 14s + immune to death once'],
+    cost: 50, cooldown: 45.0, color: '#ff6622',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 4 ? 14 : rank >= 2 ? 12 : 10;
+      player.primalRageTimer = dur;
+      player.primalRageDmgBonus = rank >= 2 ? 0.30 : 0;
+      player.primalRageKillHeal = rank >= 3;
+      player.primalRageChainFire = rank >= 4;
+      if (rank >= 5) player.deathShield = true;
+      player.class = Object.assign({}, player.class, { wildShape: 'hybrid' });
+      spawnBurst(player.x, player.y, ['#ff6622','#66cc88','#ffaa44','#cc66cc','#ffffff'], 32);
+      spawnDamageNumber(player.x, player.y - 28, 'PRIMAL RAGE!', { color: '#ff6622', size: 15, vy: -60, life: 2.0 });
+      return true;
+    },
+  },
+  worldTree: {
+    id: 'worldTree', name: 'World Tree', letter: 'W', tier: 4, classOf: 'druid',
+    desc: 'Summon the World Tree for 8s. It roots all enemies, rains homing acorns, heals you.',
+    maxRank: 5, rankDesc: ['World Tree 8s, 3 acorns/s', '10s 4 acorns/s', '10s ★Notable: acorns chain-heal you on hit', '12s root refreshes', '★Capstone: Tree erupts on death, massive AoE + seed summons 3 wolves'],
+    cost: 50, cooldown: 40.0, color: '#66cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dur = rank >= 4 ? 12 : rank >= 2 ? 10 : 8;
+      const acornRate = rank >= 2 ? 4 : 3;
+      // Root all current enemies
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        e.stunTimer = Math.max(e.stunTimer || 0, 3.0);
+      }
+      player.worldTreeTimer = dur;
+      player.worldTreeAcornDmg = player.weaponDamage * player.dmgMult * 0.9 * rDmg * rScale;
+      player.worldTreeAcornRate = acornRate;
+      player.worldTreeHealTick = 0;
+      player.worldTreeChainHeal = rank >= 3;
+      player.worldTreeErupt = rank >= 5;
+      player.worldTreeAcornTimer = 0;
+      player.worldTreeX = player.x; player.worldTreeY = player.y;
+      spawnBurst(player.x, player.y, ['#66cc44','#448833','#aaffaa','#ffffff'], 30);
+      spawnDamageNumber(player.x, player.y - 28, 'WORLD TREE!', { color: '#66cc44', size: 15, vy: -60, life: 2.0 });
+      return true;
+    },
+  },
+
+  // ── AMAZONIAN T1 ─────────────────────────────────────────────
+  eagleMark: {
+    id: 'eagleMark', name: 'Eagle Mark', letter: 'E', tier: 1, classOf: 'amazonian',
+    desc: 'Mark nearest enemy. All attacks deal +40% bonus damage to the Marked target.',
+    maxRank: 5, rankDesc: ['+40% dmg to marked', '+50%, spread to nearest on kill', '+50% ★Notable: crits on Marked give +15 Spirit Charge', '+60%, mark 2 targets', '★Capstone: marked enemies take 2× crit damage'],
+    cost: 0, cooldown: 8.0, color: '#ffcc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const count = rank >= 4 ? 2 : 1;
+      const sorted = enemies.filter(e => e.alive).sort((a,b) => Math.hypot(a.x-player.x,a.y-player.y) - Math.hypot(b.x-player.x,b.y-player.y));
+      if (!sorted.length) return false;
+      if (!player.markedEnemies) player.markedEnemies = new Set();
+      player.markedEnemies.clear();
+      for (let i = 0; i < Math.min(count, sorted.length); i++) {
+        player.markedEnemies.add(sorted[i]);
+        spawnBurst(sorted[i].x, sorted[i].y, ['#ffcc44','#ffaa22','#ffffff'], 10);
+        spawnDamageNumber(sorted[i].x, sorted[i].y - 14, 'MARKED!', { color: '#ffcc44', size: 10, vy: -45, life: 1.0 });
+      }
+      player.eagleMarkBonus = rank >= 4 ? 0.60 : rank >= 2 ? 0.50 : 0.40;
+      player.eagleMarkSpread = rank >= 2;
+      player.eagleMarkSpiritCrit = rank >= 3 ? 15 : 0;
+      player.eagleMarkDoubleCrit = rank >= 5;
+      player.resource = Math.min(player.maxResource, (player.resource || 0) + 10);
+      return true;
+    },
+  },
+
+  // ── AMAZONIAN T2 ─────────────────────────────────────────────
+  spiritBond: {
+    id: 'spiritBond', name: 'Spirit Bond', letter: 'B', tier: 2, classOf: 'amazonian',
+    desc: 'Cycle Spirit Bond: Eagle → Serpent → Wolf → Bear. Costs 20 Spirit Charge. Each bond modifies combat.',
+    maxRank: 5, rankDesc: ['Bond cycle, 20 cost', 'Cost -5', '★Notable: Bond switch restores 10 Spirit Charge', 'Bond bonuses +25%', '★Capstone: all bonds active simultaneously for 8s (Apex Union)'],
+    cost: 20, cooldown: 1.0, color: '#ddaa33',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const cost = Math.max(5, 20 - (rank - 1) * 5);
+      if ((player.resource || 0) < cost) return false;
+      player.resource = Math.max(0, (player.resource || 0) - cost);
+      const bonds = ['eagle','serpent','wolf','bear'];
+      const cur = player.class.spiritBond || 'eagle';
+      const next = bonds[(bonds.indexOf(cur) + 1) % bonds.length];
+      player.class = Object.assign({}, player.class, { spiritBond: next });
+      if (rank >= 3) player.resource = Math.min(player.maxResource, (player.resource || 0) + 10);
+      const bondColors = { eagle:['#88aaff','#aaccff','#ffffff'], serpent:['#44cc44','#aaffaa','#ffffff'], wolf:['#cc8833','#ffcc66','#ffffff'], bear:['#884422','#cc9966','#ffffff'] };
+      spawnBurst(player.x, player.y, bondColors[next], 14);
+      spawnDamageNumber(player.x, player.y - 22, next.toUpperCase() + ' BOND', { color: bondColors[next][0], size: 12, vy: -50, life: 1.2 });
+      return true;
+    },
+  },
+  venomTip: {
+    id: 'venomTip', name: 'Venom Tip', letter: 'V', tier: 2, classOf: 'amazonian',
+    desc: 'Coat javelins with venom. Next 5-15 attacks apply Venom stacks. 5 stacks = Serpent Burst AoE.',
+    maxRank: 5, rankDesc: ['5 venom attacks', '8 attacks', '10 attacks ★Notable: Serpent Burst radius +50%', '12 attacks stack 2× faster', '★Capstone: 15 attacks, Serpent Burst chains to 3 nearby enemies'],
+    cost: 15, cooldown: 10.0, color: '#44cc44',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const charges = [5,8,10,12,15][rank-1];
+      player.venomCharges = charges;
+      player.venomDmg = player.weaponDamage * player.dmgMult * 0.25 * rDmg * rScale;
+      player.venomBurstRadius = rank >= 3 ? 55 : 36;
+      player.venomDoubleStack = rank >= 4;
+      player.venomChain = rank >= 5 ? 3 : 0;
+      spawnBurst(player.x, player.y, ['#44cc44','#aaffaa','#ffffff'], 10);
+      return true;
+    },
+  },
+  packHunt: {
+    id: 'packHunt', name: 'Pack Hunt', letter: 'U', tier: 2, classOf: 'amazonian',
+    desc: '8s hunt: kills grant +5% attack speed (stacks up to 10×). Spirit Charge on each stack.',
+    maxRank: 5, rankDesc: ['Hunt 8s, +5% aspd/kill max 10', '10s stacks +7%', '10s ★Notable: stacks persist until end of wave', '12s +8% and give Spirit Charge', '★Capstone: final stack grants Apex Predator for 3s'],
+    cost: 15, cooldown: 12.0, color: '#cc8833',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 4 ? 12 : rank >= 2 ? 10 : 8;
+      const perKill = rank >= 4 ? 0.08 : rank >= 2 ? 0.07 : 0.05;
+      player.packHuntTimer = dur;
+      player.packHuntStacks = 0;
+      player.packHuntPerKill = perKill;
+      player.packHuntMaxStacks = 10;
+      player.packHuntPersist = rank >= 3;
+      player.packHuntSpiritKill = rank >= 4 ? 5 : 0;
+      player.packHuntApexFinal = rank >= 5;
+      spawnBurst(player.x, player.y, ['#cc8833','#ffcc66','#ffffff'], 12);
+      return true;
+    },
+  },
+
+  // ── AMAZONIAN T3 ─────────────────────────────────────────────
+  galeForce: {
+    id: 'galeForce', name: 'Gale Force', letter: 'G', tier: 3, classOf: 'amazonian',
+    desc: 'Sprint through enemy ranks. Damages all enemies passed through. Gain Spirit Charge per hit.',
+    maxRank: 5, rankDesc: ['Sprint 200px 1.2× per hit', '250px 1.5×', '250px ★Notable: each hit applies Eagle Mark', '280px crits launch enemies', '★Capstone: Gale Force auto-re-casts at end if Spirit Charge >= 50'],
+    cost: 25, cooldown: 7.0, color: '#88aaff',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const dist = rank >= 4 ? 280 : rank >= 2 ? 250 : 200;
+      const mult = rank >= 3 ? 1.5 : rank >= 2 ? 1.5 : 1.2;
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      const dx = mouseX - player.x, dy = mouseY - player.y, d = Math.hypot(dx,dy)||1;
+      const tx = Math.max(player.r, Math.min(W-player.r, player.x + (dx/d)*dist));
+      const ty = Math.max(player.r, Math.min(H-player.r, player.y + (dy/d)*dist));
+      player.iframeTimer = Math.max(player.iframeTimer, 0.25);
+      // Step along path and hit enemies
+      const steps = Math.ceil(dist / 10);
+      const hitSet = new Set();
+      for (let s = 0; s <= steps; s++) {
+        const px = player.x + (dx/d) * (dist/steps) * s;
+        const py = player.y + (dy/d) * (dist/steps) * s;
+        for (const e of enemies) {
+          if (!e.alive || hitSet.has(e)) continue;
+          if (Math.hypot(e.x-px, e.y-py) < 22) {
+            hitSet.add(e);
+            const isCrit = Math.random()*100 < player.critChance;
+            const died = e.takeDamage(isCrit?dmg*2:dmg, {crit:isCrit});
+            if (isCrit) player.onCrit();
+            player.resource = Math.min(player.maxResource, (player.resource||0)+8);
+            if (rank>=3 && player.markedEnemies) { player.markedEnemies.clear(); player.markedEnemies.add(e); }
+            if (rank>=4 && isCrit) { const ang=Math.atan2(e.y-py,e.x-px); e.x+=Math.cos(ang)*45; e.y+=Math.sin(ang)*45; }
+            spawnBurst(e.x, e.y, ['#88aaff','#ffffff'], 4);
+            if (died) handleEnemyDeath(e);
+          }
+        }
+      }
+      player.x = tx; player.y = ty;
+      spawnBurst(tx, ty, ['#88aaff','#aaccff','#ffffff'], 12);
+      if (rank>=5 && (player.resource||0)>=50) {
+        // Auto recast — just reposition back and fire again (simplified: grant bonus Spirit Charge)
+        player.resource = Math.min(player.maxResource, (player.resource||0)+15);
+      }
+      return true;
+    },
+  },
+
+  // ── AMAZONIAN T4 ─────────────────────────────────────────────
+  apexPredator: {
+    id: 'apexPredator', name: 'Apex Predator', letter: 'A', tier: 4, classOf: 'amazonian',
+    desc: 'Consume ALL Spirit Charge. Fire a titanic javelin: (Charge/5)× weapon damage. Pierces all.',
+    maxRank: 5, rankDesc: ['(Charge/5)× piercing', '+20% per rank bonus dmg', '★Notable: Apex shot Mark-spreads', 'Double pierce bounces', '★Capstone: Apex detonates at wall for 3× AoE explosion'],
+    cost: 0, cooldown: 20.0, color: '#ffaa00',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot); const rScale = getRankScale(slot);
+      const rDmg = slot && slot.rarity ? slot.rarity.dmgMult : 1.0;
+      const charge = player.resource || 0;
+      if (charge < 10) return false;
+      const mult = (charge / 5) * (1 + (rank-1) * 0.20);
+      const dmg = player.weaponDamage * player.dmgMult * mult * rDmg * rScale;
+      player.resource = 0;
+      const target = findNearestEnemy(player.x, player.y, 999);
+      const angle = target ? Math.atan2(target.y-player.y, target.x-player.x) : 0;
+      const proj = new Projectile(player.x, player.y,
+        Math.cos(angle)*player.weaponProjSpeed*1.5, Math.sin(angle)*player.weaponProjSpeed*1.5,
+        dmg, 99, true);
+      proj.pierce = 99; proj.theme = 'arrow'; proj.r = 5; proj.color = '#ffaa00';
+      proj.apexBounce = rank >= 4; proj.apexExplode = rank >= 5; proj.apexExplodeDmg = dmg * 3;
+      if (rank >= 3 && player.markedEnemies) proj.markSpread = player.markedEnemies;
+      projectiles.push(proj);
+      spawnBurst(player.x, player.y, ['#ffaa00','#ffdd44','#ffffff'], 24);
+      spawnDamageNumber(player.x, player.y-28, 'APEX!', { color:'#ffaa00', size:16, vy:-65, life:1.5 });
+      return true;
+    },
+  },
+  spiritUnion: {
+    id: 'spiritUnion', name: 'Spirit Union', letter: 'U', tier: 4, classOf: 'amazonian',
+    desc: '12s: ALL 4 Spirit Bonds active at once. Every attack has all bond effects. Kills restore Spirit Charge.',
+    maxRank: 5, rankDesc: ['Union 10s', '12s', '12s ★Notable: Spirit drain stops, kills give +15 Charge', '14s all bonds +30% stronger', '★Capstone: 14s, death during Union instead triggers Apex Predator automatically'],
+    cost: 50, cooldown: 45.0, color: '#ddaa33',
+    cast: (player, slot) => {
+      const rank = getAbilityRank(slot);
+      const dur = rank >= 4 ? 14 : rank >= 2 ? 12 : 10;
+      player.spiritUnionTimer = dur;
+      player.spiritUnionDrainStop = rank >= 3;
+      player.spiritUnionKillCharge = rank >= 3 ? 15 : 8;
+      player.spiritUnionBonus = rank >= 4 ? 1.30 : 1.0;
+      player.spiritUnionDeathApex = rank >= 5;
+      player.class = Object.assign({}, player.class, { spiritBond: 'union' });
+      spawnBurst(player.x, player.y, ['#88aaff','#44cc44','#cc8833','#884422','#ffffff'], 36);
+      spawnDamageNumber(player.x, player.y-30, 'SPIRIT UNION!', { color:'#ddaa33', size:16, vy:-65, life:2.0 });
+      return true;
+    },
+  },
+
 };
 
 // ============================================================

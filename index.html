@@ -632,6 +632,29 @@
     // Blood Tide: kills restore 8% max HP
     if (player.bloodTideTimer > 0)
       player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.08));
+    // Primal Rage: kills restore 5% max HP
+    if (player.primalRageTimer > 0 && player.primalRageKillHeal)
+      player.hp = Math.min(player.maxHp, player.hp + Math.ceil(player.maxHp * 0.05));
+    // Eagle Mark: spread to nearest alive on kill
+    if (player.eagleMarkSpread && player.markedEnemies && player.markedEnemies.has(e)) {
+      player.markedEnemies.delete(e);
+      const next = enemies.filter(en=>en.alive&&!player.markedEnemies.has(en)).sort((a,b)=>Math.hypot(a.x-e.x,a.y-e.y)-Math.hypot(b.x-e.x,b.y-e.y))[0];
+      if (next) { player.markedEnemies.add(next); spawnBurst(next.x,next.y,['#ffcc44','#ffaa22','#ffffff'],8); }
+    }
+    // Pack Hunt: gain attack speed stack on kill
+    if (player.packHuntTimer > 0 || player.packHuntPersist) {
+      if ((player.packHuntStacks||0) < (player.packHuntMaxStacks||10)) {
+        player.packHuntStacks = (player.packHuntStacks||0) + 1;
+        if (player.packHuntSpiritKill) player.resource = Math.min(player.maxResource,(player.resource||0)+player.packHuntSpiritKill);
+        if (player.packHuntApexFinal && player.packHuntStacks >= player.packHuntMaxStacks) {
+          spawnDamageNumber(player.x,player.y-24,'APEX PREDATOR!',{color:'#ffaa00',size:13,vy:-55,life:1.5});
+          player.resource = Math.min(player.maxResource,(player.resource||0)+30);
+        }
+      }
+    }
+    // Spirit Union: kills grant Spirit Charge
+    if (player.spiritUnionTimer > 0 && player.spiritUnionKillCharge)
+      player.resource = Math.min(player.maxResource,(player.resource||0)+player.spiritUnionKillCharge);
     // Set: kill_speed_burst + unique: stormrider
     if (player.activeSetEffects && player.activeSetEffects.includes('kill_speed_burst'))
       player.stormriderSpeedTimer = Math.max(player.stormriderSpeedTimer || 0, 2.0);
@@ -957,7 +980,38 @@
         if (dx * dx + dy * dy < rr * rr) {
           // Overpower check — fires before damage so enemy is still alive for the bonus hit
           const isOverpower = player.overpowerChance > 0 && Math.random() * 100 < player.overpowerChance;
-          const died = enemy.takeDamage(proj.damage, { crit: proj.isCrit });
+          // Eagle Mark: bonus damage to Marked enemies
+          let projDmg = proj.damage;
+          if (player.markedEnemies && player.markedEnemies.has(enemy)) {
+            projDmg *= (1 + (player.eagleMarkBonus || 0.40));
+            if (player.eagleMarkDoubleCrit && proj.isCrit) projDmg *= 2;
+            if (player.eagleMarkSpiritCrit && proj.isCrit)
+              player.resource = Math.min(player.maxResource, (player.resource||0) + player.eagleMarkSpiritCrit);
+          }
+          // Venom Tip: apply venom stack on hit (Serpent bond adds venom too)
+          if ((player.venomCharges || 0) > 0 || player.bondSerpent) {
+            if (player.venomCharges > 0) player.venomCharges--;
+            enemy.venomStacks = (enemy.venomStacks || 0) + (player.venomDoubleStack ? 2 : 1);
+            if (enemy.venomStacks >= 5) {
+              enemy.venomStacks = 0;
+              const burstDmg = projDmg * 2.5;
+              const burstR = player.venomBurstRadius || 36;
+              for (const nearby of enemies) {
+                if (!nearby.alive) continue;
+                if (Math.hypot(nearby.x-enemy.x,nearby.y-enemy.y) < burstR) {
+                  const nd = nearby.takeDamage(burstDmg);
+                  spawnBurst(nearby.x, nearby.y, ['#44cc44','#aaffaa','#ffffff'], 8);
+                  if (nd) handleEnemyDeath(nearby);
+                }
+              }
+              spawnDamageNumber(enemy.x, enemy.y-enemy.r-12, 'SERPENT BURST!', { color:'#44cc44', size:11, vy:-55, life:1.2 });
+              if (player.venomChain) {
+                const chainTargets = enemies.filter(e=>e.alive&&e!==enemy).sort((a,b)=>Math.hypot(a.x-enemy.x,a.y-enemy.y)-Math.hypot(b.x-enemy.x,b.y-enemy.y)).slice(0,player.venomChain);
+                for (const ct of chainTargets) { ct.venomStacks = (ct.venomStacks||0)+3; }
+              }
+            }
+          }
+          const died = enemy.takeDamage(projDmg, { crit: proj.isCrit });
           if (proj.onHit) proj.onHit(enemy);
           // Legendary on-hit procs
           if (player.legendaryEffects && enemy.alive) {
@@ -3502,14 +3556,260 @@
     }
 
     // ─ DRUID: extra Spirit regen when summons are active ─────────────────────
+    // ─ DRUID ─────────────────────────────────────────────────────────────────
     if (cls === 'druid') {
+      // Extra Spirit regen with active summons
       const hasSummon = (player.summons || []).some(s => s && s.alive);
       if (hasSummon) player.resource = Math.min(player.maxResource, player.resource + 3 * dt);
+
+      // Wild Shape passive — form bonuses stored as flags for effectiveDmgMult/Speed
+      const form = player.class.wildShape || 'human';
+      player.wildShapeDragonDmg   = (form === 'dragon' || form === 'hybrid') ? 0.35 : 0;
+      player.wildShapePantherSpd  = (form === 'panther' || form === 'hybrid') ? 0.30 : 0;
+      player.wildShapePantherCrit = (form === 'panther' || form === 'hybrid') ? 15 : 0;
+      player.wildShapeDragonSlowSpd = (form === 'dragon') ? -0.10 : 0;
+      // Spirit drain in non-human form
+      if (form !== 'human') {
+        player.resource = Math.max(0, player.resource - 2 * dt);
+        if (player.resource <= 0 && form !== 'hybrid') {
+          player.class = Object.assign({}, player.class, { wildShape: 'human' });
+          player.wildShapeDragonDmg = 0; player.wildShapePantherSpd = 0; player.wildShapePantherCrit = 0;
+        }
+      }
+
+      // Primal Rage (hybrid form ult) timer
+      if (player.primalRageTimer > 0) {
+        player.primalRageTimer -= dt;
+        if (player.primalRageTimer <= 0) {
+          player.primalRageTimer = 0;
+          player.primalRageDmgBonus = 0; player.primalRageKillHeal = false;
+          player.primalRageChainFire = false;
+          player.class = Object.assign({}, player.class, { wildShape: 'human' });
+        }
+      }
+
+      // Cataclysm: periodic lightning strikes
+      if (player.cataclysmTimer > 0) {
+        player.cataclysmTimer -= dt;
+        player.cataclysmNextStrike = (player.cataclysmNextStrike || 0) - dt;
+        if (player.cataclysmNextStrike <= 0) {
+          player.cataclysmNextStrike = player.cataclysmStrikeInterval || 0.4;
+          const alive = enemies.filter(e => e.alive);
+          if (alive.length) {
+            const t = alive[Math.floor(Math.random() * alive.length)];
+            const isCrit = Math.random() * 100 < player.critChance;
+            const dmg = (player.cataclysmDmg || 1) * (isCrit ? 2 : 1);
+            const died = t.takeDamage(dmg, { crit: isCrit });
+            if (isCrit) player.onCrit();
+            if (player.cataclysmRoot) t.stunTimer = Math.max(t.stunTimer || 0, 1.2);
+            spawnBurst(t.x, t.y, ['#88ddff','#ffee44','#ffffff'], 8);
+            spawnDamageNumber(t.x, t.y - t.r, dmg, { color: '#ffee44', crit: isCrit });
+            if (died) handleEnemyDeath(t);
+            // Chain
+            if (player.cataclysmChain) {
+              const near = enemies.filter(e => e.alive && e !== t && Math.hypot(e.x-t.x,e.y-t.y) < 60);
+              for (const n of near.slice(0,2)) {
+                const cd = (player.cataclysmDmg||1)*0.5; const nd = n.takeDamage(cd);
+                spawnBurst(n.x,n.y,['#88ddff','#ffffff'],4);
+                if (nd) handleEnemyDeath(n);
+              }
+            }
+          }
+        }
+        if (player.cataclysmTimer <= 0) {
+          if (player.cataclysmExplode) {
+            for (const e of enemies) {
+              if (!e.alive) continue;
+              const died = e.takeDamage((player.cataclysmDmg||1)*4);
+              if (died) handleEnemyDeath(e);
+            }
+            spawnBurst(player.x, player.y, ['#66cc88','#88ddff','#ffee44','#ffffff'], 32);
+          }
+          player.cataclysmTimer = 0;
+        }
+      }
+
+      // Solar Beam: channel damage line every 0.1s
+      if (player.solarBeamTimer > 0) {
+        player.solarBeamTimer -= dt;
+        player.solarBeamHitTimer = (player.solarBeamHitTimer || 0) - dt;
+        const beamAngle = Math.atan2(mouseY - player.y, mouseX - player.x);
+        const superheated = player.solarBeamSuperheat && (player.solarBeamTimer < (player.solarBeamTimer + dt) * 0.4);
+        const beamW = (player.solarBeamWidth || 14) * (superheated ? 2 : 1);
+        const beamDmg = (player.solarBeamDmg || 1) * (superheated ? 2 : 1);
+        if (player.solarBeamHitTimer <= 0) {
+          player.solarBeamHitTimer = 0.10;
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            // Project enemy onto beam axis
+            const ex = e.x - player.x, ey = e.y - player.y;
+            const along = ex * Math.cos(beamAngle) + ey * Math.sin(beamAngle);
+            const perp = Math.abs(-ex * Math.sin(beamAngle) + ey * Math.cos(beamAngle));
+            if (along > 0 && perp < beamW + e.r) {
+              const isCrit = Math.random()*100 < player.critChance;
+              const dmg = beamDmg * (isCrit ? 2 : 1) * dt * 10;
+              const died = e.takeDamage(dmg, { crit: isCrit });
+              if (isCrit) player.onCrit();
+              burnTimers.set(e, { elapsed:0, rate:0.5, dmg:beamDmg*0.3, timer:2.0 });
+              if (died) handleEnemyDeath(e);
+            }
+          }
+        }
+        if (player.solarBeamTimer <= 0) {
+          player.solarBeamTimer = 0;
+          if (player.solarBeamScorch) groundEffects.push({ type:'burn', x:mouseX, y:mouseY, r:30, life:3.0, maxLife:3.0, dmgPerSec:player.solarBeamDmg||1, color:'#ffee44', hit:new Set() });
+        }
+      }
+
+      // World Tree: periodic acorn projectiles + heal ticks
+      if (player.worldTreeTimer > 0) {
+        player.worldTreeTimer -= dt;
+        player.worldTreeAcornTimer = (player.worldTreeAcornTimer||0) - dt;
+        player.worldTreeHealTick = (player.worldTreeHealTick||0) - dt;
+        // Heal 2% max HP per second
+        if (player.worldTreeHealTick <= 0) {
+          player.worldTreeHealTick = 1.0;
+          player.hp = Math.min(player.maxHp, player.hp + player.maxHp * 0.02);
+        }
+        // Acorn projectile
+        if (player.worldTreeAcornTimer <= 0) {
+          player.worldTreeAcornTimer = 1.0 / (player.worldTreeAcornRate || 3);
+          const t = enemies.filter(e=>e.alive).sort((a,b)=>Math.hypot(a.x-(player.worldTreeX||player.x),a.y-(player.worldTreeY||player.y)) - Math.hypot(b.x-(player.worldTreeX||player.x),b.y-(player.worldTreeY||player.y)))[0];
+          if (t) {
+            const spd = 180;
+            const dx = t.x-(player.worldTreeX||player.x), dy=t.y-(player.worldTreeY||player.y), d=Math.hypot(dx,dy)||1;
+            const proj = new Projectile(player.worldTreeX||player.x, player.worldTreeY||player.y, (dx/d)*spd,(dy/d)*spd, player.worldTreeAcornDmg||1, 0.8, false);
+            proj.r=3; proj.theme='nature'; proj.color='#66cc44';
+            if (player.worldTreeChainHeal) proj.chainHeal = true;
+            projectiles.push(proj);
+          }
+        }
+        if (player.worldTreeTimer <= 0) {
+          player.worldTreeTimer = 0;
+          if (player.worldTreeErupt) {
+            for (const e of enemies) { if (!e.alive) continue; const d=e.takeDamage((player.worldTreeAcornDmg||1)*4); if(d) handleEnemyDeath(e); }
+            spawnBurst(player.worldTreeX||player.x, player.worldTreeY||player.y, ['#66cc44','#aaffaa','#ffffff'],28);
+            if (!player.summons) player.summons = [];
+            for (let i=0;i<3;i++) player.summons.push({ type:'wolf', x:(player.worldTreeX||player.x)+(Math.random()-0.5)*30, y:(player.worldTreeY||player.y)+(Math.random()-0.5)*30, hp:20, maxHp:20, timer:8, dmg:(player.worldTreeAcornDmg||1)*0.5, speed:110, r:6, color:'#aaffcc', attackRate:1.2, attackTimer:0, rank:1 });
+          }
+        }
+      }
+
+      // Bleed ticks on enemies (Shred / Panther form)
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        if ((e.bleedTimer||0) > 0) {
+          e.bleedTimer -= dt;
+          e.bleedElapsed = (e.bleedElapsed||0) + dt;
+          while (e.bleedElapsed >= 0.5) {
+            e.bleedElapsed -= 0.5;
+            const died = e.takeDamage(e.bleedDmg||1);
+            spawnDamageNumber(e.x, e.y-e.r, e.bleedDmg||1, { color:'#cc2222', size:8 });
+            if (died) { handleEnemyDeath(e); break; }
+          }
+          if (e.bleedTimer <= 0) { e.bleedTimer=0; e.bleedElapsed=0; }
+        }
+      }
     }
 
-    // ─ AMAZONIAN: Spirit Charge slow bleed (builds via kills/crits) ──────────
+    // ─ AMAZONIAN ─────────────────────────────────────────────────────────────
     if (cls === 'amazonian') {
-      player.resource = Math.max(0, player.resource - 1.5 * dt);
+      // Spirit Charge slow bleed — suppressed during Spirit Union drain-stop
+      if (!(player.spiritUnionTimer > 0 && player.spiritUnionDrainStop)) {
+        player.resource = Math.max(0, player.resource - 1.5 * dt);
+      }
+
+      // Spirit Bond passive bonuses (applied each frame as player flags)
+      const bond = player.class.spiritBond || 'eagle';
+      const unionActive = player.spiritUnionTimer > 0;
+      const ubMult = (unionActive && player.spiritUnionBonus) ? player.spiritUnionBonus : 1.0;
+      player.bondEagle   = (bond === 'eagle'   || unionActive);
+      player.bondSerpent = (bond === 'serpent'  || unionActive);
+      player.bondWolf    = (bond === 'wolf'     || unionActive);
+      player.bondBear    = (bond === 'bear'     || unionActive);
+      // Eagle: proj speed +30% aspd +20% — handled in effectiveFireRateMult
+      // Wolf: +35% speed — handled in effectiveSpeed
+      // Bear: +30% armor — handled in recomputeStats (too expensive here; use flag)
+      // Serpent: venom on all attacks — handled in projectile hit path
+
+      // Spirit Union timer
+      if (player.spiritUnionTimer > 0) {
+        player.spiritUnionTimer -= dt;
+        if (player.spiritUnionTimer <= 0) {
+          player.spiritUnionTimer = 0;
+          player.class = Object.assign({}, player.class, { spiritBond: 'eagle' });
+          player.bondEagle=true; player.bondSerpent=false; player.bondWolf=false; player.bondBear=false;
+        }
+      }
+
+      // Strafe: rapid javelin burst
+      if (player.strafeTimer > 0) {
+        player.strafeTimer -= dt;
+        player.strafeNext = (player.strafeNext||0) - dt;
+        if (player.strafeNext <= 0 && player.strafeCount > 0) {
+          player.strafeNext = player.strafeInterval || 0.15;
+          player.strafeCount--;
+          const target = findNearestEnemy(player.x, player.y, player.weaponRange*1.4) || { x: mouseX, y: mouseY };
+          const jitter = (Math.random()-0.5)*0.3;
+          const ang = Math.atan2(target.y-player.y, target.x-player.x) + jitter;
+          const isCrit = Math.random()*100 < player.critChance;
+          const dmg = (player.strafeDmg||1)*(isCrit?2:1);
+          const proj = new Projectile(player.x,player.y, Math.cos(ang)*player.weaponProjSpeed,Math.sin(ang)*player.weaponProjSpeed, dmg, 0.5, isCrit);
+          proj.r=2.5; proj.theme='arrow'; proj.color='#ffaa44';
+          if (player.strafePierceCrit && isCrit) proj.pierce = 2;
+          projectiles.push(proj);
+          if (isCrit) player.onCrit();
+        }
+        if (player.strafeTimer <= 0 || player.strafeCount <= 0) {
+          if (player.strafePartingShot) {
+            const t2 = findNearestEnemy(player.x,player.y,999);
+            if (t2) {
+              const ang2 = Math.atan2(t2.y-player.y,t2.x-player.x);
+              const proj2 = new Projectile(player.x,player.y,Math.cos(ang2)*player.weaponProjSpeed*1.3,Math.sin(ang2)*player.weaponProjSpeed*1.3,(player.strafeDmg||1)*2.5,0.7,true);
+              proj2.r=3.5; proj2.theme='arrow'; proj2.color='#ff8800';
+              projectiles.push(proj2);
+              player.onCrit();
+            }
+          }
+          player.strafeTimer=0; player.strafeCount=0;
+        }
+      }
+
+      // Spear Storm: periodic spear drops from sky
+      if (player.spearStormTimer > 0) {
+        player.spearStormTimer -= dt;
+        player.spearStormNext = (player.spearStormNext||0) - dt;
+        if (player.spearStormNext <= 0 && player.spearStormCount > 0) {
+          player.spearStormNext = player.spearStormInterval || 0.10;
+          player.spearStormCount--;
+          const tx = rngInt(8, W-8), ty = rngInt(8, H-8);
+          const isApex = (player.spearStormApex||0) > 0 && player.spearStormCount >= ((player.spearStormCount + (player.spearStormApex||0) - 1));
+          if (isApex && player.spearStormApex > 0) player.spearStormApex--;
+          const isCrit = isApex || Math.random()*100 < player.critChance;
+          const dmg = (player.spearStormDmg||1)*(isCrit?2:1);
+          for (const e of enemies) {
+            if (!e.alive) continue;
+            if (Math.hypot(e.x-tx,e.y-ty) < 24) {
+              const died = e.takeDamage(dmg,{crit:isCrit});
+              if (isCrit) player.onCrit();
+              if (player.spearStormStun) e.stunTimer=Math.max(e.stunTimer||0,1.0);
+              spawnDamageNumber(e.x,e.y-e.r,dmg,{color:isCrit?'#ffaa00':'#ddaa33',crit:isCrit});
+              spawnBurst(e.x,e.y,['#ddaa33','#ffcc66'],5);
+              if (died) handleEnemyDeath(e);
+            }
+          }
+          spawnBurst(tx,ty,['#ddaa33','#ffcc66','#ffffff'],4);
+        }
+        if (player.spearStormTimer <= 0) player.spearStormTimer = 0;
+      }
+
+      // Pack Hunt: attack speed stacks from kills + timer
+      if (player.packHuntTimer > 0) {
+        if (!player.packHuntPersist) player.packHuntTimer -= dt;
+        if (player.packHuntTimer <= 0) {
+          player.packHuntTimer = 0; player.packHuntStacks = 0;
+        }
+      }
     }
   }
 

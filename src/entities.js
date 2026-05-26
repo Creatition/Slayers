@@ -562,11 +562,18 @@ class Player {
       this.resource = Math.min(this.maxResource, this.resource + this.class.critResourceGain);
     }
   }
-  effectiveCritChance() { return this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0); }
+  effectiveCritChance() {
+    let c = this.critChance + (this.hawkEyeTimer > 0 ? 30 : 0);
+    if (this.wildShapePantherCrit) c += this.wildShapePantherCrit;
+    return c;
+  }
   effectiveFireRateMult() {
     let r = this.fireRateMult * (this.hawkEyeTimer > 0 ? 1.3 : 1.0);
     if (this.shoutTimer > 0 && this.shoutSpeedBonus) r *= (1 + this.shoutSpeedBonus);
     if (this.rageTimer > 0 && this.rageSpeedBonus) r *= (1 + this.rageSpeedBonus);
+    if (this.bondEagle) r *= 1.20;
+    if ((this.packHuntTimer > 0 || this.packHuntPersist) && this.packHuntStacks)
+      r *= (1 + this.packHuntStacks * (this.packHuntPerKill || 0.05));
     return r;
   }
   effectiveSpeed() {
@@ -575,6 +582,9 @@ class Player {
     if (this.bigBadVoodooTimer > 0) s *= 1.15;
     if (this.rageTimer > 0) s *= (1 + (this.rageMoveBonus || 0));
     if ((this.stormriderSpeedTimer || 0) > 0) s += 60; // stormrider / kill_speed_burst
+    if (this.wildShapePantherSpd) s *= (1 + this.wildShapePantherSpd);
+    if (this.wildShapeDragonSlowSpd) s *= (1 + this.wildShapeDragonSlowSpd);
+    if (this.bondWolf) s *= 1.35;
     return s;
   }
   effectiveDmgMult() {
@@ -583,6 +593,8 @@ class Player {
     if (this.rageTimer > 0 && this.rageDmgBonus) d *= (1 + this.rageDmgBonus);
     if (this.bloodTideTimer > 0 && this.bloodTideDmgBonus) d *= (1 + this.bloodTideDmgBonus);
     if (this.shoutTimer > 0 && this.shoutDmgBonus) d *= (1 + this.shoutDmgBonus);
+    if (this.wildShapeDragonDmg) d *= (1 + this.wildShapeDragonDmg);
+    if (this.primalRageTimer > 0 && this.primalRageDmgBonus) d *= (1 + this.primalRageDmgBonus);
     return d;
   }
   recomputeStats() {
