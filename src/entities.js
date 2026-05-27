@@ -559,8 +559,6 @@ class Player {
     };
     this.inventory = []; this.INVENTORY_CAP = 24;
     this.gems = []; this.GEM_CAP = 50; // gem stash
-    this.gold = 0;
-    this.mats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
     this.isMoving = false;
     this.animator = (this.class.id === 'berserker' && typeof BerserkerAnimator !== 'undefined')
       ? new BerserkerAnimator() : null;
@@ -1650,7 +1648,7 @@ function handleEnemyDeath(enemy) {
     const primaryColor = enemy.eliteMods[0] ? enemy.eliteMods[0].auraColor : '#ffdd88';
     spawnBurst(enemy.x, enemy.y, [primaryColor, '#ffffff', '#ffdd88', primaryColor], 18);
     xpGems.push(new XPGem(enemy.x, enemy.y, 4));
-    player.gold += rngInt(8, 18);
+    sharedGold += rngInt(8, 18);
     goldFlashTimer = 0.8;
     let eliteDrop = generateItem();
     for (let t = 0; t < 8 && eliteDrop.rarity.id === 'white'; t++) eliteDrop = generateItem();
@@ -1660,7 +1658,7 @@ function handleEnemyDeath(enemy) {
   } else {
     spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 8);
     xpGems.push(new XPGem(enemy.x, enemy.y, 1));
-    player.gold += rngInt(1, 3);
+    sharedGold += rngInt(1, 3);
     if (Math.random() < 0.18) itemDrops.push(new ItemDrop(enemy.x, enemy.y, generateItem()));
     shake = Math.min(shake + 1, 3);
     Sfx.enemyDie();
@@ -1671,7 +1669,7 @@ function handleBossDeath(enemy) {
   spawnBurst(enemy.x, enemy.y, ['#f0f0e0', '#e8e8d8', '#b0b0a0', '#ffffff'], 14);
   xpGems.push(new XPGem(enemy.x, enemy.y, 8));
   const goldAmt = rngInt(40, 80);
-  player.gold += goldAmt;
+  sharedGold += goldAmt;
   goldFlashTimer = 0.8;
   let it = generateItem();
   let tries = 0;

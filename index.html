@@ -195,11 +195,17 @@
   // ── Character Progression (persistent across runs) ─────────
   const CHAR_LEVEL_CAP = 40;
   // Per-class progression — each class levels independently; paragon is shared
-  let classProgress = {}; // { classId: { level, xp, treePts, statPts } }
+  let classProgress = {}; // { classId: { level, xp, treePts, statPts, abilityPts } }
   function ensureCP(cid) {
-    if (!classProgress[cid]) classProgress[cid] = { level: 1, xp: 0, treePts: 0, statPts: 0 };
+    if (!classProgress[cid]) classProgress[cid] = { level: 1, xp: 0, treePts: 0, statPts: 0, abilityPts: 0 };
+    // Back-compat: add abilityPts if missing
+    if (classProgress[cid].abilityPts === undefined) classProgress[cid].abilityPts = 0;
     return classProgress[cid];
   }
+  let charAbilities = {}; // { classId: { abilityId: rank } } — persistent invested abilities
+  // Shared economy — gold and forge mats persist across ALL characters and runs
+  let sharedGold = 0;
+  let sharedMats = { bone: 0, arcane: 0, essence: 0, fragment: 0 };
   // Run-time cached globals (synced from classProgress[selectedClassId] at run start/XP award)
   let charLevel = 1;
   let charXp    = 0;
@@ -938,7 +944,7 @@
         const _uniILvl = waveItemLevel(currentWave, charLevel);
         itemDrops.push(new ItemDrop(e.x,      e.y, generateItemMinRarity('orange', _uniILvl)));
         itemDrops.push(new ItemDrop(e.x + 14, e.y, generateItemMinRarity('yellow', _uniILvl)));
-        const g = rngInt(50, 90); player.gold += g; goldFlashTimer = 0.8;
+        const g = rngInt(50, 90); sharedGold += g; goldFlashTimer = 0.8;
         // Guaranteed gem drop
         if (typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
@@ -955,7 +961,7 @@
         const _legILvl = waveItemLevel(currentWave, charLevel);
         itemDrops.push(new ItemDrop(e.x - 10, e.y, generateItemMinRarity('orange', _legILvl)));
         itemDrops.push(new ItemDrop(e.x + 10, e.y, generateItemMinRarity('yellow', _legILvl)));
-        const g = rngInt(22, 45); player.gold += g; goldFlashTimer = 0.8;
+        const g = rngInt(22, 45); sharedGold += g; goldFlashTimer = 0.8;
         if (typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
           if (gd && player.gems.length < player.GEM_CAP) {
@@ -969,7 +975,7 @@
         // Rare: yellow drop guaranteed, 35% gem, XP ×5, gold
         for (let i = 0; i < 5; i++) xpGems.push(new XPGem(e.x + rngInt(-8,8), e.y + rngInt(-8,8), 2));
         itemDrops.push(new ItemDrop(e.x, e.y, generateItemMinRarity('yellow', waveItemLevel(currentWave, charLevel))));
-        const g = rngInt(8, 18); player.gold += g; goldFlashTimer = 0.8;
+        const g = rngInt(8, 18); sharedGold += g; goldFlashTimer = 0.8;
         shake = Math.min(shake + 2, 6);
         if (Math.random() < 0.35 && typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
@@ -984,7 +990,7 @@
         // Magic elite: wave-scaled drop (early waves may still give blue, late waves give yellow+)
         const _magicILvl = Math.max(8, waveItemLevel(currentWave, charLevel));
         itemDrops.push(new ItemDrop(e.x, e.y, generateItem(_magicILvl)));
-        const g = rngInt(4, 10); player.gold += g; goldFlashTimer = 0.8;
+        const g = rngInt(4, 10); sharedGold += g; goldFlashTimer = 0.8;
         if (Math.random() < 0.12 && typeof rollGemDrop === 'function') {
           const gd = rollGemDrop(charLevel);
           if (gd && player.gems.length < player.GEM_CAP) {
@@ -997,7 +1003,7 @@
       // Normal: 1 XP gem, 18% item chance, small gold
       xpGems.push(new XPGem(e.x, e.y, 1));
       if (Math.random() < 0.18) itemDrops.push(new ItemDrop(e.x, e.y, generateItem(waveItemLevel(currentWave, charLevel))));
-      const g = rngInt(1, 3); player.gold += g; goldFlashTimer = 0.8;
+      const g = rngInt(1, 3); sharedGold += g; goldFlashTimer = 0.8;
       // 5% chance to drop a gem from normal enemy
       if (Math.random() < 0.05 && typeof rollGemDrop === 'function') {
         const gd = rollGemDrop(charLevel);
@@ -1020,7 +1026,7 @@
       const gd = rollGemDrop(charLevel);
       if (gd && player.gems.length < player.GEM_CAP) { player.gems.push(gd); spawnDamageNumber(e.x, e.y - 20, '◆ GEM DROP', { color: '#ffccff', size: 11, vy: -60, life: 1.5 }); }
     }
-    const g = rngInt(30, 60); player.gold += g; goldFlashTimer = 0.8;
+    const g = rngInt(30, 60); sharedGold += g; goldFlashTimer = 0.8;
     shake = Math.min(shake + 6, 10);
     lastBossName = e.name || 'Boss';
     bossDefeatedBannerTimer = 2.0;
@@ -1032,7 +1038,9 @@
     groundEffects = [];
     runBossesKilled++;
     runWavesCompleted++;
-    if (player) player.skillPoints = (player.skillPoints || 0) + 1; // +1 SP per boss
+    // +1 Ability Point per boss kill (persistent)
+    { const _bcp = ensureCP(selectedClassId); _bcp.abilityPts = (_bcp.abilityPts || 0) + 1; saveData(); }
+    if (player) spawnDamageNumber(player.x, player.y - 30, '+1 Ability Pt  [BOSS]', { color: '#aaffaa', size: 11, vy: -58, life: 2.0 });
     // Wave transition — final boss → victory; act bosses → shop/levelup
     if (isFinalWave(currentWave)) {
       Sfx.waveComplete();
@@ -1608,7 +1616,7 @@
           lastLootName = drop.item.base ? (drop.item.base.name || 'Item') : 'Item';
           lootFlashTimer = 1.5;
         } else {
-          player.gold += salvageGold(drop.item);
+          sharedGold += salvageGold(drop.item);
           goldFlashTimer = 0.8;
         }
       }
@@ -1640,16 +1648,15 @@
     if (idx < 0 || idx >= levelUpChoices.length) return;
     levelUpChoices[idx].apply(player);
     player.pendingLevelUps--;
-    if (player.level % 2 === 0) { player.skillPoints = (player.skillPoints || 0) + 1; spawnDamageNumber(player.x, player.y - 24, '+1 Ability Point', { color: '#aaffaa', size: 10, vy: -50, life: 1.5 }); }
-    // Award persistent skill-tree + stat points every in-run level-up
-    // (Persistent character LEVEL comes from run-completion XP via awardRunXp)
+    // Award persistent skill-tree + stat + ability points every in-run level-up
     { const _lcp = ensureCP(selectedClassId);
       if (_lcp.level < CHAR_LEVEL_CAP) {
-        _lcp.level++; _lcp.treePts++; _lcp.statPts++;
+        _lcp.level++; _lcp.treePts++; _lcp.statPts++; _lcp.abilityPts++;
         treePoints = _lcp.treePts; charStatPoints = _lcp.statPts;
         charLevel = _lcp.level;
-        spawnDamageNumber(player.x, player.y - 28, '+1 Skill Tree Pt', { color: '#ffd040', size: 10, vy: -52, life: 1.8 });
-        spawnDamageNumber(player.x, player.y - 40, '+1 Stat Pt',       { color: '#ff8844', size: 10, vy: -42, life: 1.6 });
+        spawnDamageNumber(player.x, player.y - 28, '+1 Skill Pt', { color: '#ffd040', size: 10, vy: -52, life: 1.8 });
+        spawnDamageNumber(player.x, player.y - 40, '+1 Ability Pt', { color: '#aaffaa', size: 10, vy: -44, life: 1.6 });
+        spawnDamageNumber(player.x, player.y - 52, '+1 Stat Pt',   { color: '#ff8844', size: 10, vy: -36, life: 1.4 });
         saveData();
       }
     }
@@ -2110,6 +2117,7 @@
       }
       spentSkillNodes   = data.spentSkillNodes   || {};
       allocatedStats = data.allocatedStats || {};
+      charAbilities = data.charAbilities || {};
       // Sync globals to selectedClassId (will be overwritten at resetWorld anyway)
       { const _cp = ensureCP(selectedClassId); charLevel = _cp.level; charXp = _cp.xp; treePoints = _cp.treePts; charStatPoints = _cp.statPts; }
       paragonLevel  = Math.min(PARAGON_LEVEL_CAP, data.paragonLevel  || 0);
@@ -2128,6 +2136,8 @@
         charInventory[selectedClassId] = data.savedInventory;
       }
       savedGems = data.savedGems || [];
+      sharedGold = data.sharedGold || 0;
+      sharedMats = Object.assign({ bone: 0, arcane: 0, essence: 0, fragment: 0 }, data.sharedMats || {});
     } catch (e) { console.warn('load save failed:', e); }
   }
   function saveData() {
@@ -2157,6 +2167,9 @@
           return _out;
         })(),
         savedGems: player ? (player.gems || []) : savedGems,
+        charAbilities,
+        sharedGold,
+        sharedMats,
       }));
     } catch (e) { console.warn('save failed:', e); }
   }
@@ -2190,6 +2203,15 @@
     }
     if (savedGems && savedGems.length > 0) {
       player.gems = savedGems.slice(0, player.GEM_CAP);
+    }
+    // Restore persistently invested abilities (slots 1-5) from charAbilities
+    { const _ca = charAbilities[selectedClassId] || {};
+      let _slot = 1;
+      for (const [_aid, _rank] of Object.entries(_ca)) {
+        if (_slot >= player.abilities.length) break;
+        const _adef = (typeof ABILITIES !== 'undefined') ? ABILITIES[_aid] : null;
+        if (_adef) { player.abilities[_slot] = { id: _aid, def: _adef, rarity: RARITY.WHITE, rank: _rank }; _slot++; }
+      }
     }
     applyPrimaryStatsToPlayer(player); // set base primary stats from allocated points
     applySkillTreeToPlayer(player); // apply skill tree bonuses (may += more primary stats)
@@ -2287,17 +2309,17 @@
     const item = shopItems[idx];
     if (!item) return;
     const price = itemPrice(item);
-    if (player.gold < price) return;
+    if (sharedGold < price) return;
     if (player.inventory.length >= player.INVENTORY_CAP) return;
-    player.gold -= price;
+    sharedGold -= price;
     player.inventory.push(item);
     shopItems[idx] = null;
     goldFlashTimer = 0.8;
     Sfx.shopBuy();
   }
   function doRefreshShop() {
-    if (player.gold < shopRefreshCost) return;
-    player.gold -= shopRefreshCost;
+    if (sharedGold < shopRefreshCost) return;
+    sharedGold -= shopRefreshCost;
     shopRefreshCost = Math.ceil(shopRefreshCost * 2.5);
     for (let i = 0; i < 4; i++) {
       if (!shopLocked[i]) shopItems[i] = generateItemForClass(player ? player.class.id : 'ranger', waveItemLevel(currentWave, charLevel));
@@ -2310,8 +2332,8 @@
     if (!item) return;
     const goldGain = salvageGold(item);
     const mat = RARITY_MAT[item.rarity.id];
-    player.gold += goldGain;
-    player.mats[mat] = (player.mats[mat] || 0) + 1;
+    sharedGold += goldGain;
+    sharedMats[mat] = (sharedMats[mat] || 0) + 1;
     player.inventory.splice(idx, 1);
     if (selectedInvIdx === idx) selectedInvIdx = -1;
     else if (selectedInvIdx > idx) selectedInvIdx -= 1;
@@ -2323,10 +2345,10 @@
     if (!item) return;
     const spec = rerollSpec(item);
     if (!spec) return;
-    if (player.gold < spec.gold) return;
-    if ((player.mats[spec.mat] || 0) < spec.count) return;
-    player.gold -= spec.gold;
-    player.mats[spec.mat] -= spec.count;
+    if (sharedGold < spec.gold) return;
+    if ((sharedMats[spec.mat] || 0) < spec.count) return;
+    sharedGold -= spec.gold;
+    sharedMats[spec.mat] -= spec.count;
     item.affixes = rollAffixes(rngInt(item.rarity.affixMin, item.rarity.affixMax));
     goldFlashTimer = 0.8;
     Sfx.uiConfirm();
@@ -2351,8 +2373,8 @@
     return count;
   }
   function doRerollLevelUp() {
-    if (player.gold < levelUpRerollCost) return;
-    player.gold -= levelUpRerollCost;
+    if (sharedGold < levelUpRerollCost) return;
+    sharedGold -= levelUpRerollCost;
     levelUpRerollCost = Math.ceil(levelUpRerollCost * 3);
     levelUpChoices = rollLevelUpChoices();
     goldFlashTimer = 0.8;
@@ -2661,7 +2683,7 @@
     const gFlash = goldFlashTimer > 0 ? 'bold 9px monospace' : '8px monospace';
     ctx.fillStyle = goldFlashTimer > 0 ? '#ffe860' : '#ccaa30'; ctx.font = gFlash;
     if (goldFlashTimer > 0) { ctx.shadowColor = '#ffd040'; ctx.shadowBlur = 8; }
-    ctx.fillText(`◈ ${player.gold}g`, W - 8, 38);
+    ctx.fillText(`◈ ${sharedGold}g`, W - 8, 38);
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#505060'; ctx.font = '7px monospace';
     ctx.fillText(`KILLS`, W - 55 + 6, 14);
@@ -2829,13 +2851,13 @@
       ctx.fillText(choice.desc, cx + cardW / 2, cy + 92);
     }
     // Reroll button (escalating cost)
-    const canReroll = player.gold >= levelUpRerollCost;
+    const canReroll = sharedGold >= levelUpRerollCost;
     const rerollLabel = `REROLL  ${levelUpRerollCost}g`;
     const rbW = 120, rbH = 22;
     const rbX = (W - rbW) / 2, rbY = cardY + cardH + 14;
     drawButton(rbX, rbY, rbW, rbH, rerollLabel, canReroll, '#ffd23f');
     ctx.fillStyle = '#666'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(`(gold: ${player.gold})`, W / 2, rbY + rbH + 10);
+    ctx.fillText(`(gold: ${sharedGold})`, W / 2, rbY + rbH + 10);
     ctx.textAlign = 'left';
   }
 
@@ -2937,7 +2959,7 @@
     ctx.fillStyle = '#ff4040'; ctx.textAlign = 'center'; ctx.font = 'bold 26px monospace';
     ctx.fillText('DEFEATED', W / 2, H / 2 - 30);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-    ctx.fillText(`Wave ${currentWave}/20  -  Level ${player.level}  -  Kills ${player.kills}  -  ${player.gold}g`, W / 2, H / 2);
+    ctx.fillText(`Wave ${currentWave}/20  -  Level ${player.level}  -  Kills ${player.kills}  -  ${sharedGold}g`, W / 2, H / 2);
     if (runMode === 'trial') {
       ctx.fillStyle = '#ff4080'; ctx.font = 'bold 9px monospace';
       ctx.fillText(`Slayer Ordeal T${trialTier} FAILED — no loot retained`, W / 2, H / 2 + 16);
@@ -3330,7 +3352,7 @@
     ctx.fillStyle = '#fff'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
     ctx.fillText(_vcl < CHAR_LEVEL_CAP ? `LV ${_vcl}  —  ${_vcx} / ${xpNeeded} XP` : `LV ${_vcl}  MAX LEVEL`, W / 2, 27);
     // Unspent points — show both tree pts and ability pts
-    const _utp = _vtp, _usp = player ? (player.skillPoints || 0) : 0;
+    const _utp = _vtp, _usp = ensureCP(charTreeClass).abilityPts || 0;
     const _uHints = [];
     if (_utp > 0) _uHints.push(`${_utp} Skill Pt${_utp > 1 ? 's' : ''}`);
     if (_usp > 0) _uHints.push(`${_usp} Ability Pt${_usp > 1 ? 's' : ''}`);
@@ -3348,7 +3370,8 @@
     ctx.fillStyle = charTreeTab === 'abilities' ? '#ffaa44' : '#222'; ctx.fillRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
     ctx.strokeStyle = '#ffaa44'; ctx.lineWidth = 1; ctx.strokeRect(ablBtn.x, ablBtn.y, ablBtn.w, ablBtn.h);
     ctx.fillStyle = charTreeTab === 'abilities' ? '#000' : '#ffaa44'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
-    const spLabel = player ? `ABILITIES  [${player.skillPoints||0}SP]` : 'ABILITIES';
+    const _apCount = ensureCP(player ? player.class.id : charTreeClass).abilityPts || 0;
+    const spLabel = `ABILITIES  [${_apCount}AP]`;
     ctx.fillText(spLabel, ablBtn.x + ablBtn.w/2, ablBtn.y + 10);
     ctx.lineWidth = 1;
 
@@ -3389,8 +3412,8 @@
       const ablTotalRows = Math.ceil(allAbl.length / ablPerRow);
       const ablMaxScroll = Math.max(0, ablTotalRows * (cardH2 + gap2) - (H - ablY0 - 10));
       charAbilScroll = Math.max(0, Math.min(ablMaxScroll, charAbilScroll));
-      // Header: ability points available
-      const _ap = player ? (player.skillPoints || 0) : 0;
+      // Header: ability points available (persistent, from classProgress)
+      const _ap = ensureCP(charTreeClass).abilityPts || 0;
       const _charLvl = ensureCP(charTreeClass).level;
       ctx.fillStyle = _ap > 0 ? '#aaffaa' : '#666';
       ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
@@ -3408,13 +3431,17 @@
         const ablTier = adef.tier || 1;
         const reqLv = ablTier <= 1 ? 0 : ablTier === 2 ? 5 : ablTier === 3 ? 10 : 15;
         const tierGateMet = _charLvl >= reqLv;
-        const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        // Check ownership: in-run player OR persistent charAbilities store
+        const _caStore = charAbilities[charTreeClass] || {};
+        const _inRunSlot = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        const owned2 = _inRunSlot || (_caStore[adef.id] ? { id: adef.id, def: adef, rank: _caStore[adef.id] } : null);
         const curRank = owned2 ? (owned2.rank || 1) : 0;
         const maxRank = adef.maxRank || 10;
-        const canRankUp = player && owned2 && curRank < maxRank && _ap >= 1 && charTreeClass === player.class.id;
+        const canRankUp = owned2 && curRank < maxRank && _ap >= 1;
         const isMaxed = owned2 && curRank >= maxRank;
-        const freeSlot = player ? player.abilities.indexOf(null, 1) : -1;
-        const canUnlock = !owned2 && tierGateMet && player && _ap >= 1 && freeSlot >= 0 && charTreeClass === player.class.id;
+        const _caCount = Object.keys(_caStore).length;
+        const freeSlot = player ? player.abilities.indexOf(null, 1) : (_caCount < 5 ? 1 : -1);
+        const canUnlock = !owned2 && tierGateMet && _ap >= 1 && (player ? freeSlot >= 0 : _caCount < 5);
         const hovered2 = mouseX >= ax && mouseX <= ax + cardW2 && mouseY >= ay && mouseY <= ay + cardH2;
         // Card bg
         ctx.fillStyle = !tierGateMet ? '#0a0a0a' : owned2 ? (isMaxed ? '#1a180a' : '#0e1410') : '#111';
@@ -3492,7 +3519,7 @@
           ctx.fillText('★MAX', ax + cardW2 - 11, btnY2 + 6);
         }
         // [-1] refund button (left) — only owned, rank > 1, playing this class
-        if (owned2 && curRank > 1 && player && charTreeClass === player.class.id) {
+        if (owned2 && curRank > 1) {
           const rdBtnX = ax + 4;
           const rdHov = mouseX >= rdBtnX && mouseX < rdBtnX + 18 && mouseY >= btnY2 && mouseY < btnY2 + 12;
           ctx.fillStyle = rdHov ? '#ff6655' : '#3a1111'; ctx.fillRect(rdBtnX, btnY2, 18, 12);
@@ -3501,7 +3528,7 @@
           ctx.fillText('-1', rdBtnX + 9, btnY2 + 9);
         }
         // [UNLOCK] button — unowned, tier unlocked, has AP, has free slot
-        if (!owned2 && tierGateMet && player && charTreeClass === player.class.id) {
+        if (!owned2 && tierGateMet) {
           const ulW = cardW2 - 8, ulX = ax + 4;
           const ulHov = mouseX >= ulX && mouseX < ulX + ulW && mouseY >= btnY2 && mouseY < btnY2 + 12;
           const ulCanDo = _ap >= 1 && freeSlot >= 0;
@@ -3738,7 +3765,7 @@
     ctx.strokeStyle = '#333'; ctx.lineWidth=1; ctx.strokeRect(lW/2-100,63,200,7); ctx.lineWidth=1;
 
     // Unspent hints
-    const _utp = cp.treePts, _usp = player ? (player.skillPoints||0) : 0;
+    const _utp = cp.treePts, _usp = cp.abilityPts || 0;
     const _uh = [];
     if (_utp > 0) _uh.push(`${_utp} Skill Pt${_utp>1?'s':''}`);
     if (_usp > 0) _uh.push(`${_usp} Ability Pt${_usp>1?'s':''}`);
@@ -3887,7 +3914,7 @@
     ctx.fillText('The Slayer-Killer has fallen.', W / 2, H / 2 - 20);
     ctx.fillText('The Crypt, Frostspire, Inferno, and Void are yours.', W / 2, H / 2 - 4);
     ctx.fillStyle = '#fff'; ctx.font = '10px monospace';
-    ctx.fillText(`Final  -  LV ${player.level}  -  KILLS ${player.kills}  -  ${player.gold}g`, W / 2, H / 2 + 22);
+    ctx.fillText(`Final  -  LV ${player.level}  -  KILLS ${player.kills}  -  ${sharedGold}g`, W / 2, H / 2 + 22);
     if (runMode === 'trial') {
       ctx.fillStyle = '#ffd040'; ctx.font = 'bold 10px monospace';
       const unlocked = trialTier < TRIAL_MAX_TIER;
@@ -4330,7 +4357,7 @@
       spdGear ? `+${spdGear}g` : '', spdLvl ? `+${spdLvl}lv` : '', 77);
     // Gold + kills summary
     ctx.fillStyle = '#888'; ctx.font = '7px monospace'; ctx.textAlign = 'left';
-    ctx.fillText(`GOLD ${player.gold}g   KILLS ${player.kills}`, sx, sy + 100);
+    ctx.fillText(`GOLD ${sharedGold}g   KILLS ${player.kills}`, sx, sy + 100);
     ctx.fillStyle = '#555'; ctx.font = '6px monospace';
     ctx.fillText('GREEN=gear  YELLOW=level', sx, sy + 110);
 
@@ -4377,12 +4404,12 @@
     // Gold + Mats display
     ctx.textAlign = 'left'; ctx.fillStyle = '#ffd23f';
     ctx.font = 'bold 10px monospace';
-    ctx.fillText(`GOLD  ${player.gold}`, 10, 14);
+    ctx.fillText(`GOLD  ${sharedGold}`, 10, 14);
     let mx = 10, my = 26;
     ctx.font = '7px monospace';
     for (const matId of ['bone', 'arcane', 'essence', 'fragment']) {
       ctx.fillStyle = MAT_COLORS[matId];
-      ctx.fillText(`${MAT_LABELS[matId]} ${player.mats[matId] || 0}`, mx, my);
+      ctx.fillText(`${MAT_LABELS[matId]} ${sharedMats[matId] || 0}`, mx, my);
       mx += 60;
     }
 
@@ -4405,7 +4432,7 @@
         ctx.fillStyle = item.rarity.color; ctx.font = '6px monospace'; ctx.textAlign = 'center';
         ctx.fillText(item.base.name, x + SHOP_ITEM_W / 2, y + 42);
         const price = itemPrice(item);
-        const canBuy = player.gold >= price && player.inventory.length < player.INVENTORY_CAP;
+        const canBuy = sharedGold >= price && player.inventory.length < player.INVENTORY_CAP;
         ctx.fillStyle = canBuy ? '#ffd23f' : '#664020';
         ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
         ctx.fillText(`${price}g`, x + SHOP_ITEM_W / 2, y + SHOP_ITEM_H - 2);
@@ -4429,7 +4456,7 @@
     // Refresh button
     const refX = SHOP_START_X + 4 * (SHOP_ITEM_W + SHOP_GAP) + 10;
     const refY = SHOP_Y;
-    const canRefresh = player.gold >= shopRefreshCost;
+    const canRefresh = sharedGold >= shopRefreshCost;
     drawButton(refX, refY, 90, SHOP_ITEM_H, `REFRESH\n${shopRefreshCost}g`, canRefresh, '#ffd23f');
     // Newlines in fillText don't work — split manually
     ctx.fillStyle = canRefresh ? '#eee' : '#555';
@@ -4532,7 +4559,7 @@
       drawButton(btnX, btnY,         btnW, btnH, 'EQUIP', canEquip, '#7ad96b');
       const salvageLabel = `SALVAGE  ${salvageG}g + 1 ${MAT_LABELS[matName]}`;
       drawButton(btnX, btnY + btnH + 4, btnW, btnH, salvageLabel, true, '#ff8030');
-      const canReroll = spec && player.gold >= spec.gold && (player.mats[spec.mat] || 0) >= spec.count;
+      const canReroll = spec && sharedGold >= spec.gold && (sharedMats[spec.mat] || 0) >= spec.count;
       const rerollLabel = spec ? `REROLL  ${spec.gold}g + 1 ${MAT_LABELS[spec.mat]}` : 'REROLL';
       drawButton(btnX, btnY + (btnH + 4) * 2, btnW, btnH, rerollLabel, canReroll, '#ffd23f');
     } else {
@@ -5805,7 +5832,7 @@
     ctx.fillStyle = '#ffd040'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
     ctx.fillText('THE SLAYER HUB', W / 2, 22);
     ctx.fillStyle = '#888'; ctx.font = '8px monospace';
-    ctx.fillText('Your gems: ' + (player ? (player.gems || []).length : 0) + '/' + (player ? player.GEM_CAP : 50) + '  |  Gold: ' + (player ? player.gold : 0) + 'g', W / 2, 34);
+    ctx.fillText('Your gems: ' + (player ? (player.gems || []).length : 0) + '/' + (player ? player.GEM_CAP : 50) + '  |  Gold: ' + (player ? sharedGold : 0) + 'g', W / 2, 34);
 
     if (!hubSubMenu) {
       // 4-panel NPC layout
@@ -5866,7 +5893,7 @@
     ctx.fillStyle = '#aaa'; ctx.font = '8px monospace';
     ctx.fillText('Select an item from equipped or inventory to add a socket.', W / 2, 34);
     ctx.fillStyle = '#ffd040';
-    ctx.fillText('Cost: 50g per socket added  |  Gold: ' + player.gold + 'g', W / 2, 44);
+    ctx.fillText('Cost: 50g per socket added  |  Gold: ' + sharedGold + 'g', W / 2, 44);
 
     // Equipped slots
     ctx.fillStyle = '#888'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'left';
@@ -5929,7 +5956,7 @@
         ctx.fillStyle = '#888'; ctx.font = '7px monospace';
         ctx.fillText(it.base.maxSockets > 0 ? `Sockets: ${socks}/${maxS}` : 'Cannot be socketed', 232, 84);
         if (maxS > 0 && socks < maxS) {
-          const canAfford = player.gold >= 50;
+          const canAfford = sharedGold >= 50;
           const label = canAfford ? `ADD SOCKET (50g)` : 'NEED 50g';
           drawButton(232, 98, 140, 18, label, canAfford, canAfford ? '#ff8844' : '#666');
         } else if (maxS > 0) {
@@ -5958,7 +5985,7 @@
     for (let ri = 0; ri < FORGE_RECIPES.length; ri++) {
       const rec = FORGE_RECIPES[ri];
       const fy = fgY + 30 + ri * (frBtnH + frBtnGap);
-      const have = player.mats[rec.matId] || 0;
+      const have = sharedMats[rec.matId] || 0;
       const canForge = have >= rec.cost;
       const fHov = canForge && isHovering(fgX + 6, fy, fgW - 12, frBtnH);
       ctx.fillStyle = fHov ? rec.color + '28' : (canForge ? '#12100e' : '#0d0c0b');
@@ -6323,23 +6350,23 @@
     const _rcp = ensureCP(cid);
     _rcp.treePts += treeRefund;
     if (cid === selectedClassId) treePoints = _rcp.treePts;
-    // Refund all ability points spent (rank = AP invested; slot 0 = signature, refund ranks > 1 only)
+    // Refund all ability points from charAbilities[cid] (persistent truth)
     let ablRefund = 0;
-    if (player && cid === player.class.id) {
-      for (let _si = 0; _si < player.abilities.length; _si++) {
-        const abl = player.abilities[_si];
-        if (!abl) continue;
-        if (_si === 0) {
-          // Signature: refund extra ranks only (rank 1 is free)
-          if ((abl.rank || 1) > 1) { ablRefund += (abl.rank || 1) - 1; abl.rank = 1; }
-        } else {
-          // Unlocked via AP: refund ALL points (rank = AP spent), then remove from slot
-          ablRefund += (abl.rank || 1);
-          player.abilities[_si] = null;
-        }
-      }
-      player.skillPoints = (player.skillPoints || 0) + ablRefund;
+    const _caReset = charAbilities[cid] || {};
+    for (const _aid of Object.keys(_caReset)) {
+      ablRefund += (_caReset[_aid] || 0); // each rank = 1 AP spent
     }
+    charAbilities[cid] = {}; // wipe persistent invested abilities for this class
+    // Also reset in-run player ability slots so they don't linger
+    if (player && cid === player.class.id) {
+      for (let _si = 1; _si < player.abilities.length; _si++) {
+        player.abilities[_si] = null;
+      }
+      // Signature (slot 0): reset to rank 1 (rank 1 is free, refund extras)
+      const _sig = player.abilities[0];
+      if (_sig && (_sig.rank || 1) > 1) { ablRefund += (_sig.rank || 1) - 1; _sig.rank = 1; }
+    }
+    _rcp.abilityPts = (_rcp.abilityPts || 0) + ablRefund;
     // Re-apply skill tree to player since nodes were cleared
     if (player && cid === player.class.id) {
       applySkillTreeToPlayer(player);
@@ -6390,39 +6417,55 @@
         const reqLv2 = ablTier <= 1 ? 0 : ablTier === 2 ? 5 : ablTier === 3 ? 10 : 15;
         const tierGateMet2 = _charLvl2 >= reqLv2;
         if (!tierGateMet2) continue; // can't interact with level-locked abilities
-        const owned2 = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        const _caClass = charAbilities[charTreeClass] || {};
+        const _inRunOwned = player ? player.abilities.find(s => s && s.id === adef.id) : null;
+        const owned2 = _inRunOwned || (_caClass[adef.id] ? { id: adef.id, def: adef, rank: _caClass[adef.id] } : null);
         const curRank = owned2 ? (owned2.rank || 1) : 0;
         const maxRank = adef.maxRank || 10;
+        const _cpClick = ensureCP(charTreeClass);
         const btnY2 = ay + cardH2 - 16;
         // [+1] rank up (right button, only for owned)
         if (owned2 && isHovering(ax + cardW2 - 22, btnY2, 18, 12)) {
-          if (curRank < maxRank && player && (player.skillPoints || 0) >= 1 && charTreeClass === player.class.id) {
-            player.skillPoints--;
-            owned2.rank = curRank + 1;
-            const lbl = owned2.rank >= 10 ? '★CAPSTONE!' : owned2.rank >= 5 ? '★Notable!' : `${owned2.rank}/10`;
-            spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${lbl}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
-            Sfx.uiConfirm && Sfx.uiConfirm();
+          if (curRank < maxRank && (_cpClick.abilityPts || 0) >= 1) {
+            _cpClick.abilityPts--;
+            const newRank = curRank + 1;
+            // Update persistent store
+            if (!charAbilities[charTreeClass]) charAbilities[charTreeClass] = {};
+            charAbilities[charTreeClass][adef.id] = newRank;
+            // Update in-run ability too if active
+            if (_inRunOwned) _inRunOwned.rank = newRank;
+            const lbl = newRank >= 10 ? '★CAPSTONE!' : newRank >= 5 ? '★Notable!' : `${newRank}/10`;
+            if (player) spawnDamageNumber(player.x, player.y - 28, `${adef.name} ${lbl}`, { color: adef.color, size: 11, vy: -55, life: 2.0 });
+            saveData(); Sfx.uiConfirm && Sfx.uiConfirm();
           }
           break;
         }
         // [-1] refund (left button, only for owned rank > 1)
         if (owned2 && curRank > 1 && isHovering(ax + 4, btnY2, 18, 12)) {
-          if (player && charTreeClass === player.class.id) {
-            owned2.rank--;
-            player.skillPoints = (player.skillPoints || 0) + 1;
-            spawnDamageNumber(player.x, player.y - 28, `${adef.name} refunded`, { color: '#ff8866', size: 10, vy: -50, life: 1.8 });
-            Sfx.uiClick && Sfx.uiClick();
-          }
+          _cpClick.abilityPts = (_cpClick.abilityPts || 0) + 1;
+          const newRank = curRank - 1;
+          if (!charAbilities[charTreeClass]) charAbilities[charTreeClass] = {};
+          charAbilities[charTreeClass][adef.id] = newRank;
+          if (_inRunOwned) _inRunOwned.rank = newRank;
+          if (player) spawnDamageNumber(player.x, player.y - 28, `${adef.name} refunded`, { color: '#ff8866', size: 10, vy: -50, life: 1.8 });
+          saveData(); Sfx.uiClick && Sfx.uiClick();
           break;
         }
         // [UNLOCK] button (full-width bottom, only for unowned)
         if (!owned2 && isHovering(ax + 4, btnY2, cardW2 - 8, 12)) {
-          const freeSlot = player ? player.abilities.indexOf(null, 1) : -1;
-          if (player && (player.skillPoints || 0) >= 1 && freeSlot >= 0 && charTreeClass === player.class.id) {
-            player.skillPoints--;
-            player.abilities[freeSlot] = { id: adef.id, def: adef, rarity: RARITY.WHITE, rank: 1 };
-            spawnDamageNumber(player.x, player.y - 28, `${adef.name} UNLOCKED!`, { color: adef.color || '#ffdd44', size: 12, vy: -60, life: 2.2 });
-            Sfx.uiConfirm && Sfx.uiConfirm();
+          const _caKeys = Object.keys(charAbilities[charTreeClass] || {});
+          const hasFreeSlot = _caKeys.length < 5; // max 5 non-signature slots
+          if ((_cpClick.abilityPts || 0) >= 1 && hasFreeSlot) {
+            _cpClick.abilityPts--;
+            if (!charAbilities[charTreeClass]) charAbilities[charTreeClass] = {};
+            charAbilities[charTreeClass][adef.id] = 1;
+            // Equip in active run immediately
+            if (player) {
+              const freeSlot = player.abilities.indexOf(null, 1);
+              if (freeSlot >= 0) player.abilities[freeSlot] = { id: adef.id, def: adef, rarity: RARITY.WHITE, rank: 1 };
+              spawnDamageNumber(player.x, player.y - 28, `${adef.name} UNLOCKED!`, { color: adef.color || '#ffdd44', size: 12, vy: -60, life: 2.2 });
+            }
+            saveData(); Sfx.uiConfirm && Sfx.uiConfirm();
           }
           break;
         }
@@ -7340,13 +7383,13 @@
           // Add socket button (232,98,140,18)
           if (hubSelectedItem && isHovering(232, 98, 140, 18)) {
             const it = hubSelectedItem.source === 'eq' ? player.equipped[hubSelectedItem.key] : hubSelectedItem.it;
-            if (it && player.gold >= 50) {
+            if (it && sharedGold >= 50) {
               const socks = (it.sockets || []);
               const maxS = it.base.maxSockets || 0;
               if (socks.length < maxS) {
                 if (!it.sockets) it.sockets = [];
                 it.sockets.push(null); // empty socket
-                player.gold -= 50;
+                sharedGold -= 50;
                 saveData();
                 spawnDamageNumber(W/2, H/2, 'SOCKET ADDED', { color: '#ff8844', size: 12, vy: -50, life: 1.5 });
               }
@@ -7359,7 +7402,7 @@
               const rec = ctx._forgeRecipes[ri];
               if (rec._fCanForge && rec._fy !== undefined && isHovering(fgX + 6, rec._fy, fgW - 12, frBtnH)) {
                 // Consume materials and forge item
-                player.mats[rec.matId] -= rec.cost;
+                sharedMats[rec.matId] -= rec.cost;
                 const forged = generateItemForClass(player.class.id, waveItemLevel(currentWave, charLevel));
                 // If result is below the minimum rarity, upgrade it
                 const _order = { white: 0, blue: 1, yellow: 2, orange: 3, green: 4 };
@@ -7538,7 +7581,7 @@
     // Level-up: golden radial pulse from edges
     if (levelUpFlashTimer > 0) {
       const _lfa = Math.min(1, levelUpFlashTimer / 1.5) * 0.45;
-      const _lfg = ctx.createRadialGradient(W/2, H/2, H*0.25, W/2, H/2, H*0.85);
+      const _lfg = ctx.createRadialGradient(W/2, H/2, H*0.2, W/2, H/2, H*0.9);
       _lfg.addColorStop(0, 'rgba(0,0,0,0)');
       _lfg.addColorStop(1, `rgba(255,208,64,${_lfa})`);
       ctx.fillStyle = _lfg; ctx.fillRect(0, 0, W, H);
