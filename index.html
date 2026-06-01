@@ -437,6 +437,8 @@
   let damageNumbers = []; // floating damage text
   let bossRef = null;
   let floorDecorations = [];
+  let envProps = []; let envHazards = []; // destructible props + telegraphed hazards
+  let envDebris = []; // flying prop-break chunks
   let hitPauseTimer = 0; // brief freeze-frame on crits for impact
 
   // ============================================================
@@ -693,6 +695,13 @@
   // Each ability gets a distinctive look matching its description.
   // ============================================================
   let abilityVfx = [];
+  let enemyDeaths = []; // dissolving enemy corpses (cosmetic)
+  // Ghostly ally rigs (reuse the enemy rig via the `rig` override on drawEnemy)
+  const SUMMON_RIGS = {
+    wolf:     { arch: 'quad', ol: '#0e2a1c', body: '#3aa06a', bodyLt: '#74d29a', bodySh: '#1c5a3a', eye: '#ccffdd', fur: true, fang: true, F: 14, baseAlpha: 0.82 },
+    spirit:   { arch: 'wraith', ol: '#0e2a18', body: '#3a8a52', bodyLt: '#6ab87a', bodySh: '#1c4a2a', eye: '#ccffaa', baseAlpha: 0.6, F: 4 },
+    skeleton: { arch: 'humanoid', ol: '#1a1430', body: '#cfc6e8', bodyLt: '#ece6f8', bodySh: '#9a90c0', eye: '#cc99ff', ribs: true, skull: true, weapon: 'rustsword', F: 8, baseAlpha: 0.9 },
+  };
 
   function _vfxClampX(x) { return Math.max(6, Math.min(W - 6, x)); }
   function _vfxClampY(y) { return Math.max(6, Math.min(H - 6, y)); }
@@ -1935,6 +1944,7 @@
   // KILL HANDLERS — centralised so ALL kill paths get the same rewards
   // ============================================================
   function handleEnemyDeath(e) {
+    if (typeof ENEMY_RIGS !== 'undefined' && ENEMY_RIGS[e.type]) enemyDeaths.push({ type: e.type, x: e.x, y: e.y, flip: !!e.faceFlip, sc: e.eliteScale || 1, life: 0.42, maxLife: 0.42 });
     if (netIsHost && e._netId) netBroadcastEnemyDeath(e._netId);
     // Client: mark ghost kills so snapshot doesn't re-create them until host confirms dead
     if (netIsOnlineClient() && e._netGhost && e._netId) netKilledIds.add(e._netId);
@@ -2465,6 +2475,7 @@
   // COLLISIONS
   // ============================================================
   function checkCollisions() {
+    if (typeof updateEnvProjectileHits === 'function') updateEnvProjectileHits();
     for (const proj of projectiles) {
       if (proj.dead) continue;
       if (proj.owner && proj.owner !== player) continue; // skip other players' projectiles
@@ -3152,6 +3163,7 @@
         color: biome.decoColors[Math.floor(Math.random() * biome.decoColors.length)],
       });
     }
+    if (typeof regenEnvironment === 'function') regenEnvironment();
   }
   // === SAVE / LOAD ===
   function serializeItem(item) {
@@ -3306,7 +3318,7 @@
     // Track in-run gem XP for persistent level carry-over
     { const _origAddXp = player.addXp.bind(player);
       player.addXp = function(amt) { runXpEarned += amt; _origAddXp(amt); }; }
-    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; abilityVfx = []; meleeSwings = [];
+    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; abilityVfx = []; enemyDeaths = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
@@ -3511,6 +3523,290 @@
   // ============================================================
   // RENDER — Background
   // ============================================================
+  // ============================================================
+  // BIOME FLOORS — cohesive procedural pixel-art tiled floors.
+  // drawBiomeFloor(ctx, W, H, id, t) fills the arena with a tiled
+  // stone/ice/obsidian/void floor + deterministic themed decor.
+  // fillRect-only so it previews offline and renders crisp in-game.
+  // ============================================================
+
+  const _BFTS = 16; // tile size (px)
+  function _fhash(gx, gy) { let n = (Math.imul(gx, 73856093) ^ Math.imul(gy, 19349663)) >>> 0; n ^= n >>> 13; n = Math.imul(n, 0x5bd1e995) >>> 0; n ^= n >>> 15; return n >>> 0; }
+
+  const BIOME_FLOOR = {
+    crypt: {
+      tints: ['#23262c', '#262a30', '#1e2228', '#282c33', '#212530'], grout: '#12141a', hi: '#33373f',
+      decor(ctx, gx, gy, h, t) {
+        if (h % 11 === 0) { ctx.fillStyle = '#15171c'; ctx.fillRect(gx + 3, gy + 5, 8, 1); ctx.fillRect(gx + 8, gy + 5, 1, 6); }
+        if (h % 17 === 0) { ctx.fillStyle = '#8a8470'; ctx.fillRect(gx + 4, gy + 9, 6, 2); ctx.fillStyle = '#aaa490'; ctx.fillRect(gx + 4, gy + 9, 2, 2); }
+        if (h % 29 === 0) { ctx.fillStyle = '#2a3a24'; ctx.fillRect(gx + 10, gy + 2, 4, 3); ctx.fillStyle = '#365028'; ctx.fillRect(gx + 11, gy + 2, 1, 1); }
+        if (h % 53 === 0) { ctx.fillStyle = '#9a9482'; ctx.fillRect(gx + 5, gy + 5, 5, 4); ctx.fillStyle = '#15171c'; ctx.fillRect(gx + 6, gy + 6, 1, 1); ctx.fillRect(gx + 8, gy + 6, 1, 1); }
+      },
+    },
+    frostspire: {
+      tints: ['#bcd6e8', '#aecae0', '#c6e0ee', '#a4c2da', '#b6d0e4'], grout: '#86a4c0', hi: '#eaf6ff',
+      decor(ctx, gx, gy, h, t) {
+        if (h % 9 === 0) { ctx.fillStyle = '#9cb8d2'; ctx.fillRect(gx + 2, gy + 8, 10, 1); ctx.fillRect(gx + 7, gy + 4, 1, 8); }
+        if (h % 23 === 0) { ctx.fillStyle = '#8aaac8'; ctx.fillRect(gx + 5, gy + 5, 6, 6); ctx.fillStyle = '#c8e2f2'; ctx.fillRect(gx + 5, gy + 5, 3, 1); }
+        if (h % 15 === 0) { const tw = 0.35 + 0.65 * Math.abs(Math.sin(t * 2 + gx * 0.11 + gy * 0.13)); ctx.globalAlpha = tw; ctx.fillStyle = '#ffffff'; ctx.fillRect(gx + 11, gy + 4, 1, 1); ctx.fillRect(gx + 12, gy + 5, 1, 1); ctx.fillRect(gx + 11, gy + 6, 1, 1); ctx.globalAlpha = 1; }
+      },
+    },
+    inferno: {
+      tints: ['#1c0f0a', '#180c07', '#22120b', '#150a06', '#1f110a'], grout: '#0c0604', hi: '#36170c',
+      decor(ctx, gx, gy, h, t) {
+        if (h % 6 === 0) { const g = 0.5 + 0.5 * Math.sin(t * 2.5 + h * 0.0007); ctx.fillStyle = 'rgba(255,' + (60 + Math.floor(g * 70)) + ',0,' + (0.55 + g * 0.35).toFixed(3) + ')'; ctx.fillRect(gx + _BFTS - 2, gy + 2, 2, _BFTS - 4); }
+        if (h % 9 === 0) { const g = 0.4 + 0.6 * Math.sin(t * 1.8 + h * 0.0011); ctx.fillStyle = 'rgba(255,' + (40 + Math.floor(g * 70)) + ',0,' + (0.45 + g * 0.35).toFixed(3) + ')'; ctx.fillRect(gx + 2, gy + _BFTS - 2, _BFTS - 4, 2); }
+        if (h % 23 === 0) { const g = 0.5 + 0.5 * Math.sin(t * 4 + gx * 0.3); ctx.fillStyle = 'rgba(255,150,40,' + (0.5 * g).toFixed(3) + ')'; ctx.fillRect(gx + 6, gy + 6, 4, 4); ctx.fillStyle = 'rgba(255,230,120,' + (0.6 * g).toFixed(3) + ')'; ctx.fillRect(gx + 7, gy + 7, 2, 2); }
+      },
+    },
+    void: {
+      tints: ['#160c26', '#120a20', '#1a0e2e', '#100818', '#170d28'], grout: '#0a0614', hi: '#2a1648',
+      decor(ctx, gx, gy, h, t) {
+        if (h % 7 === 0) { const g = 0.25 + 0.3 * Math.sin(t * 0.9 + gx * 0.04 + gy * 0.03); ctx.fillStyle = 'rgba(160,80,255,' + Math.max(0, g).toFixed(3) + ')'; ctx.fillRect(gx, gy, _BFTS, 1); ctx.fillRect(gx, gy, 1, _BFTS); }
+        if (h % 19 === 0) { ctx.fillStyle = '#7a3ad0'; ctx.fillRect(gx + 7, gy + 4, 2, 7); ctx.fillStyle = '#b070ff'; ctx.fillRect(gx + 7, gy + 4, 2, 2); ctx.fillStyle = '#e0c0ff'; ctx.fillRect(gx + 7, gy + 4, 1, 1); }
+        if (h % 13 === 0) { const tw = 0.35 + 0.65 * Math.abs(Math.sin(t * 1.5 + h * 0.002)); ctx.globalAlpha = tw; ctx.fillStyle = '#ddccff'; ctx.fillRect(gx + 3, gy + 11, 1, 1); ctx.globalAlpha = 1; }
+      },
+    },
+  };
+
+  function drawBiomeFloor(ctx, W, H, id, t) {
+    const C = BIOME_FLOOR[id] || BIOME_FLOOR.crypt;
+    const TS = _BFTS;
+    for (let gy = 0; gy < H; gy += TS) {
+      for (let gx = 0; gx < W; gx += TS) {
+        const h = _fhash(gx, gy);
+        ctx.fillStyle = C.tints[h % C.tints.length];
+        ctx.fillRect(gx, gy, TS, TS);
+        ctx.fillStyle = C.grout;
+        ctx.fillRect(gx, gy, TS, 1); ctx.fillRect(gx, gy, 1, TS);
+        if ((h >> 3) % 3 === 0) { ctx.fillStyle = C.hi; ctx.fillRect(gx + 1, gy + 1, TS - 3, 1); }
+        C.decor(ctx, gx, gy, h, t);
+      }
+    }
+  }
+
+  // ============================================================
+  // ENVIRONMENT — destructible props, telegraphed hazards,
+  // arena walls, and themed menu backdrops. Cohesive pixel style.
+  // ============================================================
+
+  const PROP_DEFS = {
+    crypt:      ['tombstone', 'urn', 'bonepile'],
+    frostspire: ['icespike', 'crystal', 'snowmound'],
+    inferno:    ['lavarock', 'vent', 'charbone'],
+    void:       ['voidcrystal', 'shard', 'riftstone'],
+  };
+  function _propPalette(b) {
+    return b === 'crypt' ? ['#8a8470', '#aaa490', '#3a3a32', '#ffffff']
+      : b === 'frostspire' ? ['#bfe6ff', '#7ab8e0', '#ffffff', '#cfeeff']
+      : b === 'inferno' ? ['#ff7722', '#ffdd44', '#3a1a10', '#ff3300']
+      : ['#b070ff', '#7a3ad0', '#e0c0ff', '#3a1860'];
+  }
+
+  function regenEnvironment() {
+    envProps = []; envHazards = []; envDebris = [];
+    const biome = (typeof currentBiome === 'function') ? currentBiome() : { id: 'crypt' };
+    const bid = biome.id;
+    const defs = PROP_DEFS[bid] || PROP_DEFS.crypt;
+    const n = 8 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < n; i++) {
+      const x = ARENA_PAD + 16 + Math.random() * (W - 2 * ARENA_PAD - 32);
+      const y = ARENA_PAD + 18 + Math.random() * (H - 2 * ARENA_PAD - 34);
+      if (Math.hypot(x - W / 2, y - H / 2) < 48) continue; // keep spawn clear
+      envProps.push({ x, y, type: defs[(Math.random() * defs.length) | 0], biome: bid, hp: 3, maxHp: 3, r: 7, ph: Math.random() * 6.28, broken: 0 });
+    }
+    const hn = bid === 'void' ? 3 : 2;
+    for (let i = 0; i < hn; i++) envHazards.push(_newHazard(bid));
+  }
+  function _newHazard(bid) {
+    return { biome: bid, x: ARENA_PAD + 22 + Math.random() * (W - 2 * ARENA_PAD - 44), y: ARENA_PAD + 22 + Math.random() * (H - 2 * ARENA_PAD - 44), r: 22, phase: 'idle', timer: 2.5 + Math.random() * 4.5, hitTimer: 0 };
+  }
+
+  function updateEnvironment(dt) {
+    for (const p of envProps) { p.ph += dt; if (p.hitT) p.hitT = Math.max(0, p.hitT - dt); }
+    for (const d of envDebris) { d.life -= dt; d.vy += 280 * dt; d.x += d.vx * dt; d.y += d.vy * dt; if (d.y > d.gy) { d.y = d.gy; d.vy *= -0.4; d.vx *= 0.6; } d.vx *= 0.98; }
+    envDebris = envDebris.filter(d => d.life > 0);
+    if (typeof state === 'undefined' || typeof STATE === 'undefined' || state !== STATE.PLAYING || !player) return;
+    const wave = (typeof currentWave !== 'undefined') ? currentWave : 1;
+    for (const hz of envHazards) {
+      hz.timer -= dt;
+      if (hz.phase === 'idle') { if (hz.timer <= 0) { hz.phase = 'warn'; hz.timer = 1.0; } }
+      else if (hz.phase === 'warn') { if (hz.timer <= 0) { hz.phase = 'active'; hz.timer = 1.2; hz.hitTimer = 0; if (typeof spawnBurst === 'function') spawnBurst(hz.x, hz.y, _propPalette(hz.biome), 12); } }
+      else if (hz.phase === 'active') {
+        hz.hitTimer -= dt;
+        if (player.iframeTimer <= 0 && hz.hitTimer <= 0 && Math.hypot(player.x - hz.x, player.y - hz.y) < hz.r) {
+          hz.hitTimer = 0.5;
+          const dmg = 4 + Math.floor(wave * 0.8);
+          const elem = hz.biome === 'inferno' ? 'fire' : hz.biome === 'frostspire' ? 'cold' : hz.biome === 'crypt' ? 'poison' : null;
+          const died = player.takeDamage(dmg, elem);
+          if (typeof spawnDamageNumber === 'function') spawnDamageNumber(player.x, player.y - player.r, Math.max(1, dmg - (player.armor || 0)), { color: '#ff7766', size: 9 });
+          if (died) { if (typeof Sfx !== 'undefined' && Sfx.playerDie) Sfx.playerDie(); state = STATE.DEAD; if (typeof playerDeathFlashTimer !== 'undefined' && playerDeathFlashTimer <= 0) { playerDeathFlashTimer = 0.6; spawnBurst(player.x, player.y, ['#ff2222', '#ff8844', '#ffffff'], 24); } }
+          else if (typeof Sfx !== 'undefined' && Sfx.playerHit) Sfx.playerHit();
+        }
+        if (hz.timer <= 0) { hz.phase = 'idle'; hz.timer = 4 + Math.random() * 5; hz.x = ARENA_PAD + 22 + Math.random() * (W - 2 * ARENA_PAD - 44); hz.y = ARENA_PAD + 22 + Math.random() * (H - 2 * ARENA_PAD - 44); }
+      }
+    }
+  }
+
+  function updateEnvProjectileHits() {
+    if (!envProps.length || typeof projectiles === 'undefined') return;
+    for (const proj of projectiles) {
+      if (proj.dead || (proj.owner && proj.owner !== player)) continue;
+      for (const p of envProps) {
+        if (p.broken) continue;
+        const dx = p.x - proj.x, dy = p.y - proj.y, rr = p.r + proj.r;
+        if (dx * dx + dy * dy < rr * rr) {
+          p.hp -= 1;
+          p.hitT = 0.18;
+          if (typeof spawnBurst === 'function') spawnBurst(p.x, p.y - 4, _propPalette(p.biome), 5);
+          if (p.hp <= 0) { p.broken = 1; _breakProp(p); }
+          break;
+        }
+      }
+    }
+  }
+  function _breakProp(p) {
+    const _pal = _propPalette(p.biome);
+    for (let i = 0; i < 7; i++) { const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 60; envDebris.push({ x: p.x, y: p.y - 4, vx: Math.cos(a) * sp, vy: -40 - Math.random() * 60, life: 0.6 + Math.random() * 0.4, maxLife: 1.0, c: _pal[(Math.random() * _pal.length) | 0], sz: 1 + (Math.random() * 2 | 0), gy: p.y + 2 }); }
+    if (typeof spawnBurst === 'function') spawnBurst(p.x, p.y - 4, _propPalette(p.biome), 16);
+    if (typeof shake !== 'undefined') shake = Math.min((shake || 0) + 1.5, 6);
+    const r = Math.random();
+    if (r < 0.38) { const g = 2 + (Math.random() * 5 | 0); if (typeof sharedGold !== 'undefined') sharedGold += g; if (typeof goldFlashTimer !== 'undefined') goldFlashTimer = 0.6; if (typeof spawnDamageNumber === 'function') spawnDamageNumber(p.x, p.y - 6, '+' + g + 'g', { color: '#ffd040', size: 8, vy: -42 }); }
+    else if (r < 0.62 && typeof XPGem !== 'undefined') xpGems.push(new XPGem(p.x, p.y, 2));
+  }
+
+  // ---- drawing ----
+  function drawEnvProps(ctx) {
+    if (typeof envProps === 'undefined') return;
+    for (const p of envProps) {
+      const x = Math.floor(p.x), y = Math.floor(p.y);
+      ctx.globalAlpha = 0.28; ctx.fillStyle = '#000'; ctx.fillRect(x - 6, y + 3, 12, 2); ctx.globalAlpha = 1;
+      if (p.broken) { _propRubble(ctx, x, y, p.biome); continue; }
+      const wob = p.hitT ? Math.sin(p.hitT * 60) * 1.5 : 0;
+      drawProp(ctx, x + wob, y, p.type, p.biome, p.ph);
+    }
+    for (const d of envDebris) { ctx.globalAlpha = Math.max(0, d.life / d.maxLife); ctx.fillStyle = d.c; ctx.fillRect(Math.round(d.x), Math.round(d.y), d.sz, d.sz); }
+    ctx.globalAlpha = 1;
+  }
+  function _propRubble(ctx, x, y, b) {
+    const pal = _propPalette(b);
+    ctx.fillStyle = pal[2]; ctx.fillRect(x - 5, y, 10, 3);
+    ctx.fillStyle = pal[0]; ctx.fillRect(x - 4, y, 3, 2); ctx.fillRect(x + 1, y + 1, 3, 2); ctx.fillRect(x - 1, y - 1, 2, 2);
+  }
+
+  function drawEnvHazards(ctx) {
+    if (typeof envHazards === 'undefined') return;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    for (const hz of envHazards) {
+      if (hz.phase === 'idle') continue;
+      const pal = _propPalette(hz.biome);
+      if (hz.phase === 'warn') {
+        const k = 1 - Math.max(0, hz.timer) / 1.0;
+        ctx.globalAlpha = 0.25 + 0.25 * Math.sin(now * 0.02);
+        ctx.strokeStyle = pal[0]; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(hz.x, hz.y, hz.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.18; ctx.fillStyle = pal[0];
+        ctx.beginPath(); ctx.arc(hz.x, hz.y, hz.r * k, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else { // active
+        const a = Math.max(0, hz.timer) / 1.2;
+        ctx.globalAlpha = 0.45 * a; ctx.fillStyle = pal[3] || pal[0];
+        ctx.beginPath(); ctx.arc(hz.x, hz.y, hz.r, 0, Math.PI * 2); ctx.fill();
+        if (hz.biome === 'inferno') { for (let i = 0; i < 8; i++) { const ang = (i / 8) * 6.28 + now * 0.004; const rr = hz.r * (0.3 + 0.6 * Math.abs(Math.sin(i + now * 0.01))); ctx.globalAlpha = a; ctx.fillStyle = i % 2 ? '#ffdd44' : '#ff6600'; ctx.fillRect(hz.x + Math.cos(ang) * rr, hz.y + Math.sin(ang) * rr - (now * 0.05 % 10), 2, 4); } }
+        else if (hz.biome === 'frostspire') { for (let i = 0; i < 7; i++) { const ang = (i / 7) * 6.28; ctx.globalAlpha = a; ctx.fillStyle = '#dff2ff'; ctx.beginPath(); ctx.moveTo(hz.x + Math.cos(ang) * 6, hz.y + Math.sin(ang) * 6); ctx.lineTo(hz.x + Math.cos(ang) * (hz.r - 2), hz.y + Math.sin(ang) * (hz.r - 2)); ctx.lineTo(hz.x + Math.cos(ang + 0.2) * 6, hz.y + Math.sin(ang + 0.2) * 6); ctx.closePath(); ctx.fill(); } }
+        else if (hz.biome === 'crypt') { for (let i = 0; i < 9; i++) { const ang = now * 0.003 + i * 0.9; const rr = hz.r * (0.3 + 0.6 * Math.abs(Math.sin(i * 1.3 + now * 0.004))); ctx.globalAlpha = a * 0.8; ctx.fillStyle = i % 2 ? '#88dd66' : '#3a7a2a'; ctx.fillRect(hz.x + Math.cos(ang) * rr, hz.y + Math.sin(ang * 1.2) * rr * 0.7, 3, 3); } }
+        else { for (let ring = 1; ring <= 3; ring++) { ctx.globalAlpha = a * 0.5; ctx.strokeStyle = ring % 2 ? '#cc88ff' : '#7a3ad0'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(hz.x, hz.y, hz.r * (ring / 3) * (0.7 + 0.3 * Math.sin(now * 0.01 + ring)), 0, Math.PI * 2); ctx.stroke(); } }
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  // One prop. (x,y) = base center on the ground. Outlined pixel art.
+  function drawProp(ctx, x, y, type, biome, ph) {
+    const bob = Math.sin(ph * 1.5) * 0.6;
+    function R(ox, oy, w, h, c, a) { if (a !== undefined) ctx.globalAlpha = a; ctx.fillStyle = c; ctx.fillRect(Math.round(x + ox), Math.round(y + oy), w, h); if (a !== undefined) ctx.globalAlpha = 1; }
+    function O(ox, oy, w, h) { R(ox - 1, oy - 1, w + 2, h + 2, '#0a0a0e'); } // outline pad
+    const pal = _propPalette(biome);
+    switch (type) {
+      case 'tombstone':
+        O(-5, -16, 10, 16); R(-5, -16, 10, 16, '#6a6e74'); R(-5, -16, 4, 16, '#54585e'); R(-4, -15, 8, 2, '#82868c');
+        R(-3, -16, 6, 3, '#6a6e74'); R(-1, -13, 2, 7, '#3a3c40'); R(-3, -11, 6, 2, '#3a3c40'); break; // cross engraving
+      case 'urn':
+        O(-4, -13, 8, 13); R(-4, -9, 8, 9, '#7a5a3a'); R(-3, -13, 6, 4, '#7a5a3a'); R(-4, -9, 3, 9, '#5a3f28');
+        R(-3, -12, 6, 1, '#9a7a4a'); R(0, -7, 1, 5, '#3a2818', 0.8); break; // crack
+      case 'bonepile':
+        O(-6, -7, 12, 7); R(-6, -3, 12, 3, '#3a3a32'); R(-4, -7, 5, 5, '#d8d4c0'); R(-3, -6, 1, 1, '#15140c'); R(-1, -6, 1, 1, '#15140c');
+        R(2, -5, 5, 2, '#c8c4b0'); R(-5, -4, 7, 1, '#b8b4a0'); break;
+      case 'icespike':
+        O(-5, -15, 10, 15); R(-2, -15, 3, 15, '#bfe6ff'); R(-2, -15, 1, 15, '#ffffff'); R(-5, -8, 3, 8, '#7ab8e0'); R(2, -10, 3, 10, '#9ad2f0');
+        R(-2, -15, 1, 3, '#ffffff', 0.9); break;
+      case 'crystal':
+        O(-4, -12 + bob, 8, 12); R(-3, -10 + bob, 6, 10, '#7ab8e0'); R(-3, -12 + bob, 3, 12, '#bfe6ff'); R(0, -8 + bob, 3, 8, '#5a9ac8');
+        R(-2, -11 + bob, 1, 3, '#ffffff', 0.9); break;
+      case 'snowmound':
+        O(-6, -6, 12, 6); R(-6, -5, 12, 5, '#e8f4ff'); R(-6, -2, 12, 2, '#bcd6e8'); R(-4, -6, 5, 2, '#ffffff');
+        R(3, -4, 1, 1, '#ffffff', 0.7 + 0.3 * Math.sin(ph * 4)); break;
+      case 'lavarock':
+        O(-6, -9, 12, 9); R(-6, -9, 12, 9, '#2a1a14'); R(-6, -9, 4, 9, '#1a0e0a'); R(-2, -7, 1, 6, '#ff5500', 0.5 + 0.4 * Math.sin(ph * 3));
+        R(2, -5, 3, 1, '#ff7722', 0.6 + 0.3 * Math.sin(ph * 2)); R(-4, -3, 2, 1, '#ffaa33', 0.6); break;
+      case 'vent':
+        O(-5, -6, 10, 6); R(-5, -6, 10, 6, '#1a0e0a'); R(-4, -5, 8, 4, '#3a1a10'); R(-3, -4, 6, 2, '#ff5500', 0.6 + 0.4 * Math.sin(ph * 4));
+        R(-1, -10 + bob, 2, 4, '#ff7722', 0.5); R(-1, -13 + bob, 2, 3, '#ffaa33', 0.35); break; // rising heat
+      case 'charbone':
+        O(-6, -7, 12, 7); R(-5, -3, 11, 3, '#1a0e0a'); R(-4, -7, 4, 5, '#3a2a24'); R(-3, -6, 1, 1, '#ff5500', 0.7); R(-1, -6, 1, 1, '#ff5500', 0.7);
+        R(2, -5, 5, 2, '#2a1a14'); break;
+      case 'voidcrystal':
+        O(-4, -13 + bob, 8, 13); R(-3, -11 + bob, 6, 11, '#7a3ad0'); R(-3, -13 + bob, 3, 13, '#b070ff'); R(0, -9 + bob, 3, 9, '#4a2090');
+        R(-2, -12 + bob, 1, 3, '#e0c0ff', 0.9); R(-3, -11 + bob, 6, 11, '#b070ff', 0.15 + 0.15 * Math.sin(ph * 3)); break;
+      case 'shard':
+        O(-3, -14 + bob * 2, 6, 14); R(-2, -14 + bob * 2, 4, 14, '#3a1860'); R(-2, -14 + bob * 2, 2, 14, '#7a3ad0'); R(-1, -13 + bob * 2, 1, 3, '#e0c0ff', 0.9);
+        R(-3, -8 + bob * 2, 6, 6, '#b070ff', 0.12 + 0.12 * Math.sin(ph * 4)); break;
+      case 'riftstone':
+        O(-6, -10, 12, 10); R(-6, -10, 12, 10, '#241038'); R(-6, -10, 4, 10, '#160a26'); R(-2, -8, 4, 7, '#0a0414');
+        R(-1, -8, 2, 7, '#b070ff', 0.5 + 0.4 * Math.sin(ph * 3)); R(-2, -5, 4, 1, '#cc88ff', 0.6); break;
+      default:
+        O(-4, -8, 8, 8); R(-4, -8, 8, 8, pal[0]);
+    }
+  }
+
+  // Themed wall border framing the arena.
+  function drawArenaWalls(ctx, bid, t, W, H) {
+    const C = bid === 'crypt' ? { base: '#2c2f36', dark: '#1a1c22', lt: '#3a3e46', grout: '#101218' }
+      : bid === 'frostspire' ? { base: '#9cc0dc', dark: '#5a7e9c', lt: '#cfe6f4', grout: '#3a5e7a' }
+      : bid === 'inferno' ? { base: '#2a1810', dark: '#180c08', lt: '#3a2418', grout: '#0c0604' }
+      : { base: '#241038', dark: '#140a22', lt: '#3a2058', grout: '#0a0614' };
+    const TH = 12; // wall thickness
+    const TW = 14; // brick width
+    function brickRow(x0, y0, w, h, flip) {
+      for (let gx = x0; gx < x0 + w; gx += TW) {
+        const off = (Math.floor((y0) / TH) % 2) ? TW / 2 : 0;
+        ctx.fillStyle = C.base; ctx.fillRect(gx, y0, Math.min(TW - 1, x0 + w - gx), h - 1);
+        ctx.fillStyle = C.lt; ctx.fillRect(gx, y0, Math.min(TW - 1, x0 + w - gx), 1);
+        ctx.fillStyle = C.dark; ctx.fillRect(gx, y0 + h - 2, Math.min(TW - 1, x0 + w - gx), 1);
+      }
+      ctx.fillStyle = C.grout; ctx.fillRect(x0, flip ? y0 : y0 + h - 1, w, 1);
+    }
+    // top + bottom bands
+    for (let yy = 0; yy < TH; yy += TH) { brickRow(0, yy, W, TH, false); brickRow(0, H - TH + yy, W, TH, true); }
+    // left + right columns
+    for (let yy = 0; yy < H; yy += TH) {
+      ctx.fillStyle = C.base; ctx.fillRect(0, yy, TH, TH - 1); ctx.fillRect(W - TH, yy, TH, TH - 1);
+      ctx.fillStyle = C.lt; ctx.fillRect(0, yy, 1, TH - 1); ctx.fillRect(W - TH, yy, 1, TH - 1);
+      ctx.fillStyle = C.dark; ctx.fillRect(TH - 1, yy, 1, TH - 1); ctx.fillRect(W - 1, yy, 1, TH - 1);
+    }
+    // inner edge shadow
+    ctx.globalAlpha = 0.4; ctx.fillStyle = '#000';
+    ctx.fillRect(TH, TH, W - TH * 2, 1); ctx.fillRect(TH, H - TH - 1, W - TH * 2, 1);
+    ctx.fillRect(TH, TH, 1, H - TH * 2); ctx.fillRect(W - TH - 1, TH, 1, H - TH * 2);
+    ctx.globalAlpha = 1;
+  }
+
+  // Themed menu backdrop: biome floor tiles + vignette darken.
+  function drawMenuBg(ctx, id, W, H) {
+    if (typeof drawBiomeFloor === 'function') drawBiomeFloor(ctx, W, H, id, (typeof performance !== 'undefined' ? performance.now() * 0.001 : 0));
+    else { ctx.fillStyle = '#10101a'; ctx.fillRect(0, 0, W, H); }
+  }
+
   function drawBackground() {
     const biome = currentBiome();
     const t = performance.now() * 0.001; // seconds, for animation
@@ -3518,14 +3814,7 @@
 
     if (biome.id === 'crypt') {
       // === CRYPT: painted background image ===
-      const bgImg = BG_IMAGES.crypt;
-      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(bgImg, 0, 0, W, H);
-      } else {
-        // Fallback: solid fill while image loads
-        ctx.fillStyle = '#15181a'; ctx.fillRect(0, 0, W, H);
-      }
+      drawBiomeFloor(ctx, W, H, 'crypt', t);
       // Torch glow at 4 corners (animated flicker)
       const torchPositions = [[20, 20], [W-20, 20], [20, H-20], [W-20, H-20]];
       for (const [tx, ty] of torchPositions) {
@@ -3556,13 +3845,7 @@
 
     } else if (biome.id === 'frostspire') {
       // === FROSTSPIRE: painted background image ===
-      const bgImg = BG_IMAGES.frostspire;
-      if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(bgImg, 0, 0, W, H);
-      } else {
-        ctx.fillStyle = '#1a2030'; ctx.fillRect(0, 0, W, H);
-      }
+      drawBiomeFloor(ctx, W, H, 'frostspire', t);
       // Snowflakes (drifting particles over the image)
       for (const d of floorDecorations) {
         const drift = Math.sin(t * 0.8 + d.x * 0.05) * 2;
@@ -3576,25 +3859,7 @@
 
     } else if (biome.id === 'inferno') {
       // === INFERNO: cracked lava floor ===
-      const lsz = 20;
-      for (let gy = 0; gy < H; gy += lsz) {
-        for (let gx = 0; gx < W; gx += lsz) {
-          ctx.fillStyle = '#1a0d08';
-          ctx.fillRect(gx, gy, lsz - 1, lsz - 1);
-          // Lava crack seam (every few tiles)
-          const idx = Math.floor(gx/lsz) + Math.floor(gy/lsz) * 33;
-          if (idx % 5 === 0) {
-            const lavaGlow = 0.5 + 0.5 * Math.sin(t * 2.5 + idx * 0.7);
-            ctx.fillStyle = `rgba(255,${60 + Math.floor(lavaGlow*40)},0,${0.5 + lavaGlow * 0.3})`;
-            ctx.fillRect(gx + lsz - 1, gy + 2, 2, lsz - 4);
-          }
-          if (idx % 7 === 0) {
-            const lavaGlow = 0.4 + 0.6 * Math.sin(t * 1.8 + idx * 1.1);
-            ctx.fillStyle = `rgba(255,${40 + Math.floor(lavaGlow*50)},0,${0.4 + lavaGlow * 0.3})`;
-            ctx.fillRect(gx + 2, gy + lsz - 1, lsz - 4, 2);
-          }
-        }
-      }
+      drawBiomeFloor(ctx, W, H, 'inferno', t);
       // Corner fire glow
       const fireCorners = [[0,0],[W,0],[0,H],[W,H]];
       for (const [fx, fy] of fireCorners) {
@@ -3618,6 +3883,7 @@
 
     } else {
       // === VOID: starfield + floating platforms ===
+      drawBiomeFloor(ctx, W, H, 'void', t);
       // Starfield
       for (const d of floorDecorations) {
         const twinkle = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.5 + d.x * 0.09 + d.y * 0.07));
@@ -3627,19 +3893,6 @@
       }
       ctx.globalAlpha = 1;
       // Dark platform tiles with glowing edges
-      const psz = 32;
-      for (let gy = 0; gy < H; gy += psz) {
-        for (let gx = 0; gx < W; gx += psz) {
-          if ((Math.floor(gx/psz) + Math.floor(gy/psz)) % 3 !== 0) {
-            ctx.fillStyle = 'rgba(60,20,100,0.18)';
-            ctx.fillRect(gx + 1, gy + 1, psz - 2, psz - 2);
-            // Glowing edge
-            const eg = 0.3 + 0.2 * Math.sin(t * 0.9 + gx * 0.04 + gy * 0.03);
-            ctx.strokeStyle = `rgba(160,80,255,${eg})`; ctx.lineWidth = 0.5;
-            ctx.strokeRect(gx + 1, gy + 1, psz - 2, psz - 2);
-          }
-        }
-      }
       // Void rift shimmer at corners
       const voidCorners = [[0,0],[W,0],[0,H],[W,H]];
       for (const [vx, vy] of voidCorners) {
@@ -3658,6 +3911,7 @@
       vgv.addColorStop(0, 'rgba(0,0,0,0)'); vgv.addColorStop(1, 'rgba(20,0,50,0.6)');
       ctx.fillStyle = vgv; ctx.fillRect(0,0,W,H);
     }
+    if (typeof drawArenaWalls === 'function') drawArenaWalls(ctx, biome.id, t, W, H);
   }
   function drawBossBar() {
     if (!bossRef || !bossRef.alive) return;
@@ -3688,6 +3942,9 @@
     ctx.fillText(`${Math.ceil(bossRef.hp)} / ${bossRef.maxHp}`, W / 2, by + 8);
     ctx.textAlign = 'left';
   }
+  function _hudAccent() { const c = (typeof currentBiome === 'function') ? currentBiome() : null; return (c && c.decoColors && c.decoColors[3]) ? c.decoColors[3] : '#8899bb'; }
+  function _hudBracket(x, y, w, h, col) { x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h); ctx.fillStyle = col; const L = 4; ctx.fillRect(x, y, L, 1); ctx.fillRect(x, y, 1, L); ctx.fillRect(x + w - L, y, L, 1); ctx.fillRect(x + w - 1, y, 1, L); ctx.fillRect(x, y + h - 1, L, 1); ctx.fillRect(x, y + h - L, 1, L); ctx.fillRect(x + w - L, y + h - 1, L, 1); ctx.fillRect(x + w - 1, y + h - L, 1, L); }
+  function _barStyle(x, y, w, hh, n) { ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(x, y, w, 1); ctx.fillStyle = 'rgba(0,0,0,0.30)'; for (let i = 1; i < n; i++) ctx.fillRect(x + Math.round(w * i / n), y, 1, hh); }
   function drawHud() {
     // Skip player-stat bars on pure menu screens
     if (state === STATE.CLASS_SELECT || state === STATE.TRIAL_LOADOUT) return;
@@ -3696,6 +3953,7 @@
     ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(4, 4, 132, 50);
     ctx.strokeStyle = '#252535'; ctx.lineWidth = 1;
     ctx.strokeRect(4.5, 4.5, 131, 49); ctx.lineWidth = 1;
+    _hudBracket(4, 4, 132, 50, _hudAccent());
     // HP bar
     ctx.fillStyle = '#200808'; ctx.fillRect(hpx, hpy, 120, 8);
     const hpRatio = Math.max(0, player.hp / player.maxHp);
@@ -3705,6 +3963,7 @@
     ctx.fillStyle = _hg; ctx.fillRect(hpx, hpy, 120 * hpRatio, 8);
     if (hpRatio < 0.3) { ctx.shadowColor = '#ff2020'; ctx.shadowBlur = 8; ctx.fillRect(hpx, hpy, 120 * hpRatio, 8); ctx.shadowBlur = 0; }
     ctx.strokeStyle = '#1a0808'; ctx.lineWidth = 1; ctx.strokeRect(hpx, hpy, 120, 8); ctx.lineWidth = 1;
+    _barStyle(hpx, hpy, 120, 8, 6);
     ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'left';
     ctx.fillText(`HP  ${Math.ceil(player.hp)} / ${player.maxHp}`, hpx + 3, hpy + 7);
     // XP bar
@@ -3723,6 +3982,7 @@
     _rg.addColorStop(0, player.class.resourceColor + '88'); _rg.addColorStop(1, player.class.resourceColor);
     ctx.fillStyle = _rg; ctx.fillRect(rx, ry, 120 * resRatio, 4);
     ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 1; ctx.strokeRect(rx, ry, 120, 4); ctx.lineWidth = 1;
+    _barStyle(rx, ry, 120, 4, 6);
     // Labels
     ctx.fillStyle = '#a080e0'; ctx.font = 'bold 7px monospace';
     ctx.fillText(`LV ${player.level}`, hpx + 1, 44);
@@ -3739,6 +3999,7 @@
         ctx.fillRect(W/2 - 52, 3, 104, 24);
         ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
         ctx.strokeRect(W/2 - 52, 3, 104, 24); ctx.lineWidth = 1;
+        _hudBracket(W/2 - 52, 3, 104, 24, _hudAccent());
         ctx.fillStyle = '#e0e0ff'; ctx.font = 'bold 10px monospace';
         ctx.fillText(`WAVE  ${currentWave} / 20`, W / 2, 14);
         ctx.fillStyle = '#606070'; ctx.font = '7px monospace';
@@ -3759,6 +4020,7 @@
     ctx.fillStyle = 'rgba(0,0,0,0.72)'; ctx.fillRect(W - 102, 4, 98, 46);
     ctx.strokeStyle = '#252535'; ctx.lineWidth = 1;
     ctx.strokeRect(W - 102, 4, 98, 46); ctx.lineWidth = 1;
+    _hudBracket(W - 102, 4, 98, 46, _hudAccent());
     ctx.textAlign = 'right'; ctx.font = '8px monospace';
     ctx.fillStyle = '#cc4444';
     ctx.fillText(`⚔ ${player.kills}`, W - 55, 14);
@@ -3792,10 +4054,22 @@
       ctx.fillText(`+ ${lastLootName}`, W / 2, H - 50);
     }
     if (bossBannerTimer > 0 && bossRef) {
-      const a = Math.min(1, bossBannerTimer / 2.5);
-      ctx.fillStyle = `rgba(255,80,80,${a})`;
-      ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
-      ctx.fillText(`${bossRef.name.toUpperCase()} APPROACHES`, W / 2, H / 2 - 20);
+      const tt = bossBannerTimer / 2.5;
+      const inP = Math.min(1, (1 - tt) * 4);
+      const a = Math.min(1, tt * 2);
+      const barH = Math.round(34 * inP);
+      ctx.fillStyle = `rgba(0,0,0,${(0.8 * Math.min(1, inP)).toFixed(3)})`;
+      ctx.fillRect(0, H / 2 - barH - 13, W, barH); ctx.fillRect(0, H / 2 + 13, W, barH);
+      ctx.globalAlpha = a; ctx.fillStyle = '#ff4040';
+      ctx.fillRect(0, H / 2 - 14, W, 1); ctx.fillRect(0, H / 2 + 13, W, 1); ctx.globalAlpha = 1;
+      const scl = 1 + (1 - inP) * 0.7;
+      ctx.save(); ctx.translate(W / 2, H / 2 - 2); ctx.scale(scl, scl);
+      ctx.globalAlpha = a; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 16px monospace';
+      ctx.fillStyle = '#000000'; ctx.fillText(bossRef.name.toUpperCase(), 1, 1);
+      ctx.fillStyle = '#ff5555'; ctx.fillText(bossRef.name.toUpperCase(), 0, 0);
+      ctx.restore(); ctx.globalAlpha = 1; ctx.textBaseline = 'alphabetic';
+      ctx.globalAlpha = a; ctx.fillStyle = '#ffc0c0'; ctx.font = 'bold 7px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('\u2014 WAVE ' + currentWave + ' BOSS \u2014', W / 2, H / 2 + 22); ctx.globalAlpha = 1;
     }
     if (bossDefeatedBannerTimer > 0) {
       const a = Math.min(1, bossDefeatedBannerTimer / 2.0);
@@ -3839,6 +4113,7 @@
     ctx.fillRect(startX - 6, y - 4, totalW + 12, slotSize + 10);
     ctx.strokeStyle = '#2a2a3e'; ctx.lineWidth = 1;
     ctx.strokeRect(startX - 6, y - 4, totalW + 12, slotSize + 10); ctx.lineWidth = 1;
+    _hudBracket(startX - 6, y - 4, totalW + 12, slotSize + 10, _hudAccent());
     for (let i = 0; i < slotCount; i++) {
       const x = startX + i * (slotSize + gap);
       const ability = player.abilities[i];
@@ -4292,8 +4567,8 @@
     ctx.textAlign = 'left';
   }
   function drawClassSelectScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.92)';
-    ctx.fillRect(0, 0, W, H);
+    if (typeof drawMenuBg === 'function') drawMenuBg(ctx, 'crypt', W, H); else { ctx.fillStyle = 'rgba(0,0,0,0.92)'; ctx.fillRect(0, 0, W, H); }
+    ctx.fillStyle = 'rgba(8,8,14,0.78)'; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.font = 'bold 20px monospace';
     ctx.fillText('CHOOSE YOUR SLAYER', W / 2, 28);
     ctx.fillStyle = '#cccccc'; ctx.font = 'bold 9px monospace';
@@ -6929,7 +7204,8 @@
   // HUB SCREEN — Blacksmith, Jeweler, Stash, Shopkeeper
   // ============================================================
   function drawHubScreen() {
-    ctx.fillStyle = '#0e0e16'; ctx.fillRect(0, 0, W, H);
+    if (typeof drawMenuBg === 'function') drawMenuBg(ctx, 'void', W, H); else { ctx.fillStyle = '#0e0e16'; ctx.fillRect(0, 0, W, H); }
+    ctx.fillStyle = 'rgba(8,8,18,0.7)'; ctx.fillRect(0, 0, W, H);
     // Title
     ctx.fillStyle = '#ffd040'; ctx.font = 'bold 16px monospace'; ctx.textAlign = 'center';
     ctx.fillText('THE SLAYER HUB', W / 2, 22);
@@ -8670,6 +8946,9 @@
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
     updateAbilityVfx(dt);
+    for (const d of enemyDeaths) d.life -= dt;
+    enemyDeaths = enemyDeaths.filter(d => d.life > 0);
+    if (typeof updateEnvironment === 'function') updateEnvironment(dt);
     updateDamageNumbers(dt);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
@@ -8721,8 +9000,45 @@
     }
     for (const g of xpGems) g.draw(ctx);
     for (const p of particles) p.draw(ctx);
+    if (typeof drawEnvProps === 'function') drawEnvProps(ctx);
+    if (typeof drawEnvHazards === 'function') drawEnvHazards(ctx);
+    for (const d of enemyDeaths) {
+      if (typeof drawEnemy !== 'function') break;
+      const k = 1 - d.life / d.maxLife;
+      ctx.save();
+      ctx.translate(d.x, d.y); ctx.scale(1 + k * 0.3, Math.max(0.05, 1 - k)); ctx.translate(-d.x, -d.y);
+      drawEnemy(ctx, d.x, d.y, { type: d.type, t: performance.now() / 1000, flip: d.flip, s: 2 * d.sc, alpha: Math.max(0, 1 - k) });
+      ctx.restore();
+    }
     for (const e of enemies) e.draw(ctx);
     for (const e of enemies) if (e.alive && e.elite) drawEliteBeacon(ctx, e);
+    // Summoned allies (wolves / ancestral spirits / raised skeletons) — ghostly, rig-rendered
+    if (player && player.summons && player.summons.length && typeof drawEnemy === 'function') {
+      for (const su of player.summons) {
+        if (!su || su.alive === false) continue;
+        const _scfg = (typeof SUMMON_RIGS !== 'undefined') ? (SUMMON_RIGS[su.type] || SUMMON_RIGS.spirit) : null;
+        if (!_scfg) continue;
+        if (su._ph === undefined) su._ph = Math.random() * 6.28;
+        const _stgt = (typeof findNearestEnemy === 'function') ? findNearestEnemy(su.x, su.y, 400) : null;
+        const _sflip = _stgt ? _stgt.x < su.x : false;
+        const _ssx = Math.floor(su.x), _ssy = Math.floor(su.y);
+        ctx.globalAlpha = 0.22; ctx.fillStyle = _scfg.eye || '#aaffcc'; ctx.fillRect(_ssx - 6, _ssy + 8, 12, 2); ctx.globalAlpha = 1;
+        drawEnemy(ctx, _ssx, _ssy, { rig: _scfg, t: performance.now() / 1000 + su._ph, flip: _sflip, s: 1.7 });
+      }
+    }
+    // Spirit Totem (stationary turret) — wooden idol with a glowing tribal face
+    if (player && player.spiritTotemTimer > 0) {
+      const _tx = Math.floor(player.spiritTotemX || player.x), _ty = Math.floor(player.spiritTotemY || player.y);
+      const _tb = Math.sin(performance.now() * 0.004);
+      ctx.globalAlpha = 0.28; ctx.fillStyle = '#000'; ctx.fillRect(_tx - 6, _ty + 9, 12, 2); ctx.globalAlpha = 1;
+      ctx.fillStyle = '#0e1a08'; ctx.fillRect(_tx - 5, _ty - 12, 10, 22);
+      ctx.fillStyle = '#6a4a28'; ctx.fillRect(_tx - 4, _ty - 11, 8, 20);
+      ctx.fillStyle = '#caa84a'; ctx.fillRect(_tx - 4, _ty - 11, 8, 5);
+      ctx.fillStyle = '#2a1a0c'; ctx.fillRect(_tx - 3, _ty - 2, 2, 2); ctx.fillRect(_tx + 1, _ty - 2, 2, 2);
+      ctx.fillStyle = '#aaff44'; ctx.globalAlpha = 0.85;
+      ctx.fillRect(_tx - 3, _ty - 2, 2, 2); ctx.fillRect(_tx + 1, _ty - 2, 2, 2);
+      ctx.fillRect(_tx - 1, Math.floor(_ty + 2 + _tb), 2, 2); ctx.globalAlpha = 1;
+    }
     for (const sw of meleeSwings) sw.draw(ctx);
     for (const p of projectiles) p.draw(ctx);
     for (const ep of enemyProjectiles) ep.draw(ctx);
@@ -8747,12 +9063,12 @@
       ctx.save();
       ctx.globalAlpha = _rp.dead ? 0.3 : 1.0;
       // Draw actual player sprite scaled ×2 (same as local player)
-      const _rpSprite = (typeof PLAYER_SPRITES !== 'undefined') ? PLAYER_SPRITES[_rp.classId || 'ranger'] : null;
-      if (_rpSprite) {
-        drawSprite(ctx, _rpSprite, _rpx, _rpy, _rp.facing === -1, false, 2);
+      if (typeof drawCharacter === 'function' && typeof CLASS_RIGS !== 'undefined' && CLASS_RIGS[_rp.classId || 'ranger']) {
+        drawCharacter(ctx, _rpx, _rpy, { classId: _rp.classId || 'ranger', dir: 'down', flip: _rp.facing === -1, state: _rp.moving ? 'run' : 'idle', t: performance.now() / 1000, s: 2 });
       } else {
-        ctx.fillStyle = _rcl.color;
-        ctx.beginPath(); ctx.arc(_rpx, _rpy, 8, 0, Math.PI*2); ctx.fill();
+        const _rpSprite = (typeof PLAYER_SPRITES !== 'undefined') ? PLAYER_SPRITES[_rp.classId || 'ranger'] : null;
+        if (_rpSprite) drawSprite(ctx, _rpSprite, _rpx, _rpy, _rp.facing === -1, false, 2);
+        else { ctx.fillStyle = _rcl.color; ctx.beginPath(); ctx.arc(_rpx, _rpy, 8, 0, Math.PI*2); ctx.fill(); }
       }
       // HP bar
       const _rhpPct = Math.max(0, (_rp.hp||0) / (_rp.maxHp||100));
