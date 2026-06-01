@@ -687,6 +687,1081 @@
     return ABILITY_LIST.filter(a => !a.classOf || a.classOf === classId);
   }
 
+  // ============================================================
+  // ABILITY VFX — thematic spell animations (cosmetic overlay).
+  // Pure visuals: never alters damage/combat (that lives in cast()).
+  // Each ability gets a distinctive look matching its description.
+  // ============================================================
+  let abilityVfx = [];
+
+  function _vfxClampX(x) { return Math.max(6, Math.min(W - 6, x)); }
+  function _vfxClampY(y) { return Math.max(6, Math.min(H - 6, y)); }
+  function _jit(n) { return (Math.random() - 0.5) * n; }
+  function _lighten(hex) {
+    const c = ('' + hex).replace('#', '');
+    if (c.length !== 6) return '#ffffff';
+    const r = Math.min(255, parseInt(c.slice(0, 2), 16) + 80);
+    const g = Math.min(255, parseInt(c.slice(2, 4), 16) + 80);
+    const b = Math.min(255, parseInt(c.slice(4, 6), 16) + 80);
+    return 'rgb(' + r + ',' + g + ',' + b + ')';
+  }
+  function _seedParticles(x, y, palette, count, spd) {
+    spd = spd || 60;
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = spd * (0.4 + Math.random() * 0.8);
+      const c = palette[(Math.random() * palette.length) | 0];
+      particles.push(new Particle(x + _jit(4), y + _jit(4), Math.cos(a) * s, Math.sin(a) * s, c, 0.3 + Math.random() * 0.4, 1 + (Math.random() * 2 | 0)));
+    }
+  }
+  function _aimAngle(x, y) {
+    if (mouseX >= 0) return Math.atan2(mouseY - player.y, mouseX - player.x);
+    return Math.atan2(y - player.y, x - player.x);
+  }
+  function vfxResolvePos(at) {
+    if (at === 'cursor') {
+      if (mouseX < 0) return { x: _vfxClampX(player.x + 70), y: player.y };
+      return { x: _vfxClampX(mouseX), y: _vfxClampY(mouseY) };
+    }
+    if (at === 'nearest') {
+      const e = (typeof findNearestEnemy === 'function') ? findNearestEnemy(player.x, player.y, 9999) : null;
+      if (e) return { x: e.x, y: e.y };
+      if (mouseX >= 0) return { x: _vfxClampX(mouseX), y: _vfxClampY(mouseY) };
+      return { x: player.x + 70, y: player.y };
+    }
+    if (at === 'forward') {
+      const e = (typeof findNearestEnemy === 'function') ? findNearestEnemy(player.x, player.y, 9999) : null;
+      let ax, ay;
+      if (e) { ax = e.x; ay = e.y; }
+      else if (mouseX >= 0) { ax = mouseX; ay = mouseY; }
+      else { ax = player.x + 70; ay = player.y; }
+      return { x: ax, y: ay, ang: Math.atan2(ay - player.y, ax - player.x) };
+    }
+    return { x: player.x, y: player.y };
+  }
+  function _nearestEnemies(x, y, n, maxR) {
+    return enemies.filter(e => e.alive && (maxR ? Math.hypot(e.x - x, e.y - y) < maxR : true))
+      .sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))
+      .slice(0, n);
+  }
+  function _jaggedLine(ctx, x0, y0, x1, y1, segs, amp) {
+    ctx.beginPath(); ctx.moveTo(x0, y0);
+    for (let i = 1; i < segs; i++) {
+      const t = i / segs;
+      ctx.lineTo(x0 + (x1 - x0) * t + _jit(amp), y0 + (y1 - y0) * t + _jit(amp));
+    }
+    ctx.lineTo(x1, y1); ctx.stroke();
+  }
+
+  // Draw a small oriented projectile glyph at local origin (caller handles transform).
+  function _glyph(ctx, g, color, alpha) {
+    ctx.globalAlpha = alpha;
+    switch (g) {
+      case 'arrow':
+        ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(7, 0); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(2, -3); ctx.moveTo(7, 0); ctx.lineTo(2, 3); ctx.stroke();
+        ctx.strokeStyle = '#fff'; ctx.beginPath(); ctx.moveTo(-9, 0); ctx.lineTo(-5, 0); ctx.stroke(); break;
+      case 'dagger':
+        ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-4, -2.5); ctx.lineTo(-4, 2.5); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillRect(8, -1, 2, 2); break;
+      case 'javelin':
+        ctx.strokeStyle = color; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(-12, 0); ctx.lineTo(9, 0); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(6, -3); ctx.lineTo(6, 3); ctx.closePath(); ctx.fill(); break;
+      case 'bone':
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(-10, 0); ctx.lineTo(9, 0); ctx.stroke();
+        ctx.fillStyle = color; ctx.fillRect(9, -3, 3, 6); ctx.fillRect(-12, -3, 3, 6); break;
+      case 'orb': {
+        const r = 6;
+        ctx.globalAlpha = alpha * 0.5; ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(0, 0, r + 4, 0, 6.28); ctx.fill();
+        ctx.globalAlpha = alpha; ctx.fillStyle = _lighten(color);
+        ctx.beginPath(); ctx.arc(0, 0, r, 0, 6.28); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-1, -1, r * 0.4, 0, 6.28); ctx.fill(); break;
+      }
+      case 'hammer':
+        ctx.fillStyle = '#caa'; ctx.fillRect(-1.5, -10, 3, 20);
+        ctx.fillStyle = color; ctx.fillRect(-6, -10, 12, 6);
+        ctx.fillStyle = '#fff'; ctx.fillRect(-6, -10, 12, 2); break;
+      case 'shield':
+        ctx.fillStyle = color; ctx.beginPath();
+        ctx.moveTo(0, -8); ctx.lineTo(7, -4); ctx.lineTo(5, 7); ctx.lineTo(0, 9); ctx.lineTo(-5, 7); ctx.lineTo(-7, -4); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(0, 5); ctx.moveTo(-4, 0); ctx.lineTo(4, 0); ctx.stroke(); break;
+      case 'skull':
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, -1, 5, 0, 6.28); ctx.fill();
+        ctx.fillRect(-3, 3, 6, 3);
+        ctx.fillStyle = '#100018'; ctx.fillRect(-3, -2, 2, 2); ctx.fillRect(1, -2, 2, 2); ctx.fillRect(-1, 2, 2, 3); break;
+      case 'frog':
+        ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(0, 0, 5, 4, 0, 0, 6.28); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.fillRect(-3, -3, 2, 2); ctx.fillRect(1, -3, 2, 2);
+        ctx.fillStyle = '#040'; ctx.fillRect(-3, -3, 1, 1); ctx.fillRect(2, -3, 1, 1); break;
+      case 'spider':
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+        for (let i = 0; i < 4; i++) { const yy = -3 + i * 2; ctx.beginPath(); ctx.moveTo(-6, yy); ctx.lineTo(6, yy + (i < 2 ? -2 : 2)); ctx.stroke(); }
+        ctx.fillStyle = _lighten(color); ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, 6.28); ctx.fill(); break;
+      case 'blade':
+        ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.arc(0, 0, 7, -0.9, 0.9); ctx.stroke();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(0, 0, 7, -0.5, 0.5); ctx.stroke(); break;
+      default:
+        ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 0, 3, 0, 6.28); ctx.fill();
+    }
+    ctx.lineCap = 'butt';
+  }
+
+  // ---- emit helpers ----
+  function _projFan(glyph, color, ox, oy, angBase, n, spread, speed, opts) {
+    opts = opts || {};
+    for (let i = 0; i < n; i++) {
+      const t = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;
+      const a = angBase + t * spread;
+      abilityVfx.push({
+        type: 'projGlyph', glyph, color, x: ox + Math.cos(a) * 10, y: oy + Math.sin(a) * 10,
+        vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, ang: a,
+        spin: opts.spin ? Math.random() * 6.28 : undefined, spinSpeed: opts.spin ? 16 : 0,
+        electric: opts.electric, coil: opts.coil, big: opts.big,
+        life: opts.life || 0.5, maxLife: opts.life || 0.5, delay: opts.delay || 0,
+      });
+    }
+  }
+  function _projRingOut(glyph, color, ox, oy, n, speed, life, delay) {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * 6.28;
+      abilityVfx.push({
+        type: 'projGlyph', glyph, color, x: ox + Math.cos(a) * 8, y: oy + Math.sin(a) * 8,
+        vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, ang: a,
+        life: life || 0.5, maxLife: life || 0.5, delay: delay || 0,
+      });
+    }
+  }
+
+  // Emit one ability's VFX from a spec.
+  function emitVfx(spec) {
+    const at = spec.at || 'self';
+    const col = spec.color || '#ffffff';
+    const sc = spec.scale || 1;
+    const pos = vfxResolvePos(at);
+    const x = pos.x, y = pos.y;
+    const ang = (pos.ang !== undefined) ? pos.ang : _aimAngle(x, y);
+    const delay = spec.delay || 0;
+    const long = !!spec.long;
+
+    switch (spec.type) {
+      case 'projGlyph': {
+        const speed = spec.big ? 150 : 230;
+        if (spec.ring) _projRingOut(spec.glyph, col, x, y, spec.n || 8, 180, 0.55, delay);
+        else _projFan(spec.glyph, col, player.x, player.y, ang, spec.n || 1, spec.spread || 0, speed, { spin: spec.spin, electric: spec.electric, coil: spec.coil, big: spec.big, delay, life: 0.55 });
+        _seedParticles(player.x + Math.cos(ang) * 10, player.y + Math.sin(ang) * 10, [col, '#ffffff'], 5, 70);
+        break;
+      }
+      case 'pierceBeam':
+        abilityVfx.push({ type: 'pierceBeam', x: player.x, y: player.y, ang, life: 0.42, maxLife: 0.42, width: 7 * sc, color: col, spear: spec.spear, delay });
+        _seedParticles(player.x, player.y, [col, '#ffffff'], 10, 80); break;
+      case 'holyBeamRay':
+        abilityVfx.push({ type: 'holyBeamRay', x: player.x, y: player.y, ang, life: 0.5, maxLife: 0.5, width: 16 * sc, color: col, sun: spec.sun, delay });
+        _seedParticles(player.x, player.y, [col, '#ffffff'], 12, 70); break;
+      case 'coneBlast':
+        abilityVfx.push({ type: 'coneBlast', x: player.x, y: player.y, ang, life: 0.55, maxLife: 0.55, len: 86 * sc, half: 0.55, color: col, delay });
+        _seedParticles(player.x + Math.cos(ang) * 30, player.y + Math.sin(ang) * 30, ['#ffee66', '#ff8800', col], 10, 90); break;
+      case 'lightning': {
+        const count = spec.count || 1;
+        const tgts = _nearestEnemies(x, y, count, 9999);
+        const pts = [{ x: player.x, y: player.y }];
+        if (tgts.length) for (const t of tgts) pts.push({ x: t.x, y: t.y });
+        else pts.push({ x, y });
+        abilityVfx.push({ type: 'lightning', points: pts, life: 0.34, maxLife: 0.34, color: col, width: 2.4 * sc, delay });
+        for (const p of pts) _seedParticles(p.x, p.y, [col, '#ffffff', '#dfffff'], 5, 70);
+        break;
+      }
+      case 'clawSlash':
+        abilityVfx.push({ type: 'clawSlash', x: player.x, y: player.y, ang, life: 0.3, maxLife: 0.3, r: 40 * sc, color: col, delay }); break;
+      case 'swordSlash':
+        abilityVfx.push({ type: 'swordSlash', x: player.x, y: player.y, ang, life: 0.3, maxLife: 0.3, r: 42 * sc, color: col, delay });
+        _seedParticles(player.x + Math.cos(ang) * 30, player.y + Math.sin(ang) * 30, [col, '#ffffff'], 6, 80); break;
+      case 'comboSlash':
+        for (let i = 0; i < (spec.n || 3); i++)
+          abilityVfx.push({ type: 'swordSlash', x: player.x, y: player.y, ang: ang + _jit(0.5), life: 0.26, maxLife: 0.26, r: 36 * sc, color: col, delay: delay + i * 0.12, flip: i % 2 });
+        break;
+      case 'waveArc':
+        for (let i = 0; i < (spec.n || 3); i++)
+          abilityVfx.push({ type: 'waveArc', x: player.x, y: player.y, ang, life: 0.5, maxLife: 0.5, maxR: 70 * sc, color: col, delay: delay + i * 0.14 });
+        break;
+      case 'whirlwind':
+        abilityVfx.push({ type: 'whirlwind', x: (at === 'cursor' ? x : player.x), y: (at === 'cursor' ? y : player.y), follow: at !== 'cursor', spin: 0, life: long ? 2.5 : 0.7, maxLife: long ? 2.5 : 0.7, r: 38 * sc, color: col, delay }); break;
+      case 'strikeFlurry': {
+        const tgts = (at === 'self') ? _nearestEnemies(player.x, player.y, spec.n || 7, 180) : _nearestEnemies(x, y, spec.n || 5, 120);
+        const pts = tgts.length ? tgts.map(t => ({ x: t.x, y: t.y })) : [{ x, y }];
+        for (let i = 0; i < (spec.n || 5); i++) {
+          const p = pts[i % pts.length];
+          abilityVfx.push({ type: 'strikeFlash', x: p.x + _jit(10), y: p.y + _jit(10), life: 0.22, maxLife: 0.22, color: col, electric: spec.electric, delay: delay + i * 0.07 });
+        }
+        break;
+      }
+      case 'daggerStrike':
+        if (spec.smoke) abilityVfx.push({ type: 'smokeCloud', x, y, life: 0.5, maxLife: 0.5, maxR: 34, color: col, delay });
+        abilityVfx.push({ type: 'daggerStrike', x, y, life: 0.3, maxLife: 0.3, color: col, delay: delay + (spec.smoke ? 0.08 : 0) });
+        _seedParticles(x, y, [col, '#ffffff'], 8, 90); break;
+      case 'tornado':
+        abilityVfx.push({ type: 'tornado', x, y, vx: spec.drift ? (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 14) : _jit(8), vy: _jit(8), spin: Math.random() * 6.28, life: spec.drift ? 3.2 : 2.0, maxLife: spec.drift ? 3.2 : 2.0, h: 56 * sc, w: 22 * sc, color: col, delay }); break;
+      case 'quakeLine':
+        abilityVfx.push({ type: 'quakeLine', x: player.x, y: player.y, ang: _aimAngle(x, y), len: 140 * sc, life: 0.7, maxLife: 0.7, color: col, delay }); break;
+      case 'quakeRadial':
+        abilityVfx.push({ type: 'quakeRadial', x, y, life: 0.6, maxLife: 0.6, maxR: 64 * sc, color: col, delay });
+        _seedParticles(x, y, [col, '#cca070', '#665533', '#ffffff'], 18, 110); break;
+      case 'leapSlam':
+        abilityVfx.push({ type: 'dashStreak', x0: player.x, y0: player.y, x1: x, y1: y, life: 0.32, maxLife: 0.32, color: col, delay });
+        abilityVfx.push({ type: 'quakeRadial', x, y, life: 0.6, maxLife: 0.6, maxR: 66 * sc, color: col, delay: delay + 0.2 }); break;
+      case 'meteorFall':
+        abilityVfx.push({ type: 'meteorFall', x, y, life: 0.75, maxLife: 0.75, color: col, r: 38 * sc, delay }); break;
+      case 'frostNova':
+        abilityVfx.push({ type: 'frostNova', x, y, life: 0.55, maxLife: 0.55, maxR: 72 * sc, color: col, delay });
+        _seedParticles(x, y, [col, '#ffffff', '#cfeeff'], 16, 110); break;
+      case 'blizzard':
+        abilityVfx.push({ type: 'blizzard', x, y, life: long ? 5.0 : 2.2, maxLife: long ? 5.0 : 2.2, r: 66 * sc, color: col, delay }); break;
+      case 'poisonCloud':
+        abilityVfx.push({ type: 'poisonCloud', x, y, life: long ? 3.0 : 1.2, maxLife: long ? 3.0 : 1.2, r: 50 * sc, color: col, delay }); break;
+      case 'locustSwarm':
+        abilityVfx.push({ type: 'locustSwarm', x, y, follow: at === 'self', life: 1.6, maxLife: 1.6, r: 52 * sc, color: col, delay }); break;
+      case 'singularity':
+        abilityVfx.push({ type: 'singularity', x, y, spin: 0, life: long ? 2.6 : 1.0, maxLife: long ? 2.6 : 1.0, r: 30 * sc, color: col, delay }); break;
+      case 'consecrate':
+        abilityVfx.push({ type: 'consecrate', x, y, life: 1.2, maxLife: 1.2, r: 58 * sc, color: col, delay }); break;
+      case 'vineBurst':
+        abilityVfx.push({ type: 'vineBurst', x, y, life: 0.9, maxLife: 0.9, r: 46 * sc, color: col, delay });
+        _seedParticles(x, y, [col, '#aaff66', '#225511'], 12, 70); break;
+      case 'thornWall':
+        abilityVfx.push({ type: 'thornWall', x, y, ang: _aimAngle(x, y) + Math.PI / 2, life: 1.2, maxLife: 1.2, len: 80 * sc, color: col, delay }); break;
+      case 'netTrap':
+        abilityVfx.push({ type: 'netTrap', x, y, life: 1.4, maxLife: 1.4, r: 30 * sc, color: col, delay }); break;
+      case 'holyNova':
+        abilityVfx.push({ type: 'holyNova', x: player.x, y: player.y, life: 0.6, maxLife: 0.6, maxR: 66 * sc, color: col, delay });
+        if (spec.freeze) abilityVfx.push({ type: 'frostNova', x: player.x, y: player.y, life: 0.5, maxLife: 0.5, maxR: 60, color: '#cfeeff', delay });
+        _seedParticles(player.x, player.y, [col, '#ffffff', '#fff6c0'], 16, 100); break;
+      case 'holyColumn':
+        abilityVfx.push({ type: 'holyColumn', x, y, life: 0.6, maxLife: 0.6, w: 22 * sc, color: col, delay }); break;
+      case 'shieldDome':
+        abilityVfx.push({ type: 'shieldDome', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, r: 30 * sc, color: col, delay }); break;
+      case 'boneNova':
+        abilityVfx.push({ type: 'boneNova', x, y, life: 0.5, maxLife: 0.5, maxR: 56 * sc, n: 16, color: col, delay });
+        _seedParticles(x, y, [col, '#ffffff'], 12, 130); break;
+      case 'bloodNova':
+        abilityVfx.push({ type: 'bloodNova', x: player.x, y: player.y, life: 0.55, maxLife: 0.55, maxR: 58 * sc, color: col, delay });
+        _seedParticles(player.x, player.y, [col, '#aa0022', '#ff5577'], 20, 130); break;
+      case 'soulNova':
+        abilityVfx.push({ type: 'soulNova', x: player.x, y: player.y, life: 0.7, maxLife: 0.7, maxR: 58 * sc, color: col, delay }); break;
+      case 'summon': {
+        const n = spec.n || 2;
+        const spots = [];
+        for (let i = 0; i < n; i++) spots.push({ x: x + _jit(50) + (at === 'forward' ? 0 : 0), y: y + _jit(30), creature: spec.creature });
+        abilityVfx.push({ type: 'summon', x, y, spots, creature: spec.creature, life: 1.0, maxLife: 1.0, color: col, delay });
+        if (spec.soul) abilityVfx.push({ type: 'soulNova', x: player.x, y: player.y, life: 0.7, maxLife: 0.7, maxR: 56, color: col, delay });
+        break;
+      }
+      case 'worldTree':
+        abilityVfx.push({ type: 'worldTree', x, y, life: 1.5, maxLife: 1.5, color: col, delay });
+        for (let i = 0; i < 5; i++) abilityVfx.push({ type: 'vineBurst', x: x + _jit(70), y: y + _jit(50), life: 0.9, maxLife: 0.9, r: 30, color: '#448833', delay: Math.random() * 0.6 });
+        break;
+      case 'smokeCloud':
+        abilityVfx.push({ type: 'smokeCloud', x: (at === 'self' ? player.x : x), y: (at === 'self' ? player.y : y), life: 0.65, maxLife: 0.65, maxR: 42 * sc, color: col, delay });
+        if (spec.dash) abilityVfx.push({ type: 'dashStreak', x0: player.x, y0: player.y, x1: player.x - Math.cos(ang) * 50, y1: player.y - Math.sin(ang) * 50, life: 0.3, maxLife: 0.3, color: col, delay });
+        _seedParticles(x, y, [col, '#221133', '#553377'], 14, 70); break;
+      case 'shadowClone':
+        abilityVfx.push({ type: 'shadowClone', x: player.x, y: player.y, life: 0.9, maxLife: 0.9, color: col, delay });
+        _seedParticles(player.x, player.y, [col, '#110022'], 12, 60); break;
+      case 'dashStreak':
+        abilityVfx.push({ type: 'dashStreak', x0: player.x, y0: player.y, x1: x, y1: y, life: 0.4, maxLife: 0.4, color: col, wind: spec.wind, delay }); break;
+      case 'shoutWave':
+        abilityVfx.push({ type: 'shoutWave', x: player.x, y: player.y, follow: true, life: 0.7, maxLife: 0.7, r: 40 * sc, color: col, delay });
+        if (spec.fear) abilityVfx.push({ type: 'screenPulse', x: player.x, y: player.y, life: 0.5, maxLife: 0.5, color: col, delay });
+        break;
+      case 'rageAura':
+        abilityVfx.push({ type: 'rageAura', x: player.x, y: player.y, follow: true, life: long ? 1.4 : 1.0, maxLife: long ? 1.4 : 1.0, r: 30 * sc, color: col, delay }); break;
+      case 'eyeEmblem':
+        abilityVfx.push({ type: 'eyeEmblem', x: player.x, y: player.y, follow: true, life: 1.0, maxLife: 1.0, color: col, delay }); break;
+      case 'runeOrbit':
+        abilityVfx.push({ type: 'runeOrbit', x: player.x, y: player.y, follow: true, spin: 0, life: 1.3, maxLife: 1.3, r: 30 * sc, color: col, delay }); break;
+      case 'weaponCoat':
+        abilityVfx.push({ type: 'weaponCoat', x: player.x, y: player.y, follow: true, life: 0.9, maxLife: 0.9, color: col, delay }); break;
+      case 'morphBurst':
+        abilityVfx.push({ type: 'morphBurst', x: player.x, y: player.y, follow: true, life: 0.8, maxLife: 0.8, r: 34, color: col, creature: spec.creature, delay });
+        if (spec.rage) abilityVfx.push({ type: 'rageAura', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, r: 30, color: col, delay });
+        _seedParticles(player.x, player.y, [col, '#ffffff'], 14, 90); break;
+      case 'lichAura':
+        abilityVfx.push({ type: 'lichAura', x: player.x, y: player.y, follow: true, life: 1.3, maxLife: 1.3, r: 28, color: col, delay }); break;
+      case 'flameRing':
+        abilityVfx.push({ type: 'flameRing', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, r: 30 * sc, color: col, delay }); break;
+      case 'holyWings':
+        abilityVfx.push({ type: 'holyWings', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, color: col, delay }); break;
+      case 'ghostForm':
+        abilityVfx.push({ type: 'ghostForm', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, color: col, delay }); break;
+      case 'zenAura':
+        abilityVfx.push({ type: 'zenAura', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, r: 30, color: col, delay });
+        if (spec.heal) abilityVfx.push({ type: 'healPlus', x: player.x, y: player.y, follow: true, life: 0.9, maxLife: 0.9, color: col, delay }); break;
+      case 'boneArmorAura':
+        abilityVfx.push({ type: 'boneArmorAura', x: player.x, y: player.y, follow: true, spin: 0, life: 1.3, maxLife: 1.3, r: 24, color: col, delay }); break;
+      case 'markEmblem': {
+        let marks;
+        if (at === 'all') marks = _nearestEnemies(player.x, player.y, 30, 9999).map(t => ({ x: t.x, y: t.y }));
+        else if (at === 'self') marks = [{ x: player.x, y: player.y, self: true }];
+        else marks = (function () { const e = _nearestEnemies(player.x, player.y, 1, 9999); return e.length ? [{ x: e[0].x, y: e[0].y }] : [{ x, y }]; })();
+        abilityVfx.push({ type: 'markEmblem', marks, glyph: spec.glyph || 'target', life: 0.9, maxLife: 0.9, color: col, delay });
+        break;
+      }
+      case 'unionAura':
+        abilityVfx.push({ type: 'unionAura', x: player.x, y: player.y, follow: true, spin: 0, life: 1.4, maxLife: 1.4, r: 32, color: col, delay }); break;
+      case 'packBuff':
+        abilityVfx.push({ type: 'packBuff', x: player.x, y: player.y, follow: true, life: 1.1, maxLife: 1.1, color: col, delay }); break;
+      case 'maskBuff':
+        abilityVfx.push({ type: 'maskBuff', x: player.x, y: player.y, follow: true, life: 1.2, maxLife: 1.2, color: col, delay }); break;
+      case 'healPlus':
+        abilityVfx.push({ type: 'healPlus', x: player.x, y: player.y, follow: true, life: 1.0, maxLife: 1.0, color: col, scale: sc, delay }); break;
+      case 'hexAll': {
+        const marks = _nearestEnemies(player.x, player.y, 30, 9999).map(t => ({ x: t.x, y: t.y }));
+        abilityVfx.push({ type: 'markEmblem', marks: marks.length ? marks : [{ x, y }], glyph: 'skull', life: 0.9, maxLife: 0.9, color: col, delay });
+        abilityVfx.push({ type: 'screenPulse', x: player.x, y: player.y, life: 0.5, maxLife: 0.5, color: col, delay }); break;
+      }
+      case 'apocalypse': {
+        const marks = _nearestEnemies(player.x, player.y, 30, 9999).map(t => ({ x: t.x, y: t.y }));
+        abilityVfx.push({ type: 'apocalypse', marks, life: 1.0, maxLife: 1.0, color: col, delay }); break;
+      }
+      case 'vortexPull':
+        abilityVfx.push({ type: 'vortexPull', x: player.x, y: player.y, follow: true, spin: 0, life: 0.6, maxLife: 0.6, r: 70 * sc, color: col, delay }); break;
+      case 'timeStop':
+        abilityVfx.push({ type: 'timeStop', x: player.x, y: player.y, life: 0.8, maxLife: 0.8, color: col });
+        abilityVfx.push({ type: 'frostNova', x: player.x, y: player.y, life: 0.6, maxLife: 0.6, maxR: 120, color: col }); break;
+      case 'boneCyclone':
+        abilityVfx.push({ type: 'boneCyclone', x: player.x, y: player.y, follow: true, spin: 0, life: long ? 3.0 : 1.4, maxLife: long ? 3.0 : 1.4, r: 42 * sc, color: col, delay }); break;
+      case 'screenPulse':
+        abilityVfx.push({ type: 'screenPulse', x: player.x, y: player.y, life: 0.6, maxLife: 0.6, color: col, delay }); break;
+      case 'genericBuff':
+      default:
+        abilityVfx.push({ type: 'genericBuff', x: player.x, y: player.y, follow: true, life: 1.0, maxLife: 1.0, r: 30, color: col, delay }); break;
+    }
+    if (spec._buff) abilityVfx.push({ type: 'genericBuff', x: player.x, y: player.y, follow: true, life: 1.0, maxLife: 1.0, r: 30, color: col, delay });
+  }
+
+  // One canonical effect at an explicit point (screen-wide ultimates / combos).
+  function abilityVfxPoint(fx, x, y, color, delay, scale) {
+    const sc = scale || 1, col = color || '#ffffff';
+    switch (fx) {
+      case 'skyBolt':
+        abilityVfx.push({ type: 'lightning', points: [{ x: x + _jit(18), y: Math.max(0, y - 190) }, { x, y }], life: 0.3, maxLife: 0.3, color: col, width: 3 * sc, delay }); break;
+      case 'meteorFall':
+        abilityVfx.push({ type: 'meteorFall', x, y, life: 0.75, maxLife: 0.75, color: col, r: 34 * sc, delay }); break;
+      case 'holyColumn':
+        abilityVfx.push({ type: 'holyColumn', x, y, life: 0.6, maxLife: 0.6, w: 20 * sc, color: col, delay }); break;
+      case 'tornado':
+        abilityVfx.push({ type: 'tornado', x, y, vx: (Math.random() < 0.5 ? -1 : 1) * 20, vy: _jit(8), spin: Math.random() * 6.28, life: 2.6, maxLife: 2.6, h: 50 * sc, w: 20 * sc, color: col, delay }); break;
+      case 'vineBurst':
+        abilityVfx.push({ type: 'vineBurst', x, y, life: 0.9, maxLife: 0.9, r: 36 * sc, color: col, delay }); break;
+      case 'spearDrop': {
+        const drops = [];
+        for (let i = 0; i < 5; i++) drops.push({ x: x + _jit(50), y0: y - 140 - Math.random() * 40, len: 18 + Math.random() * 8, t: Math.random() * 0.4, ground: y + _jit(36) });
+        abilityVfx.push({ type: 'projRain', glyph: 'javelin', x, y, drops, life: 1.0, maxLife: 1.0, color: col, delay }); break;
+      }
+      default: break;
+    }
+  }
+  function emitScreen(fx, color, n, spread) {
+    n = n || 10; spread = spread || 2.4;
+    for (let i = 0; i < n; i++)
+      abilityVfxPoint(fx, 40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80), color, Math.random() * spread);
+  }
+
+  // ---- Per-ability dispatch table ----
+  const ABILITY_VFX = {
+    // RANGER
+    multishot:      { type: 'projGlyph', glyph: 'arrow', at: 'forward', n: 3, spread: 0.34, color: '#ffd23f' },
+    piercingShot:   { type: 'pierceBeam', at: 'forward', color: '#5599ff' },
+    hawkEye:        { type: 'eyeEmblem', color: '#33cc55' },
+    huntersArrow:   { type: 'projGlyph', glyph: 'arrow', at: 'forward', n: 1, color: '#7ad96b' },
+    focusShot:      { type: 'pierceBeam', at: 'forward', color: '#aaff55', scale: 1.3 },
+    rainOfArrows:   { type: 'projRain', glyph: 'arrow', at: 'cursor', color: '#ffaa44' },
+    arrowVolley:    { type: 'projGlyph', glyph: 'arrow', ring: true, n: 8, color: '#ff8000' },
+    trapNet:        { type: 'netTrap', at: 'forward', color: '#88cc44' },
+    volleyShot:     { type: 'projGlyph', glyph: 'arrow', at: 'forward', n: 5, spread: 0.5, color: '#55dd88' },
+    stormOfArrows:  { type: 'projRain', glyph: 'arrow', at: 'cursor', color: '#44bb44', long: true, scale: 1.3 },
+    eagleEyeShot:   { type: 'eyeEmblem', color: '#ffee44' },
+    huntersMark:    { type: 'markEmblem', at: 'all', glyph: 'target', color: '#33ff77' },
+    markedForDeath: { type: 'markEmblem', at: 'self', glyph: 'skull', color: '#00cc44' },
+    trueshot:       { type: 'pierceBeam', at: 'forward', color: '#ffff00', scale: 1.9 },
+    // SORCERER
+    fireball:       { type: 'projGlyph', glyph: 'orb', at: 'forward', n: 1, color: '#ff5520', big: true },
+    frostNova:      { type: 'frostNova', color: '#aaccff' },
+    arcaneJolt:     { type: 'lightning', at: 'nearest', count: 1, color: '#aaccff' },
+    chainLightning: { type: 'lightning', at: 'nearest', count: 4, color: '#ffff80' },
+    arcaneOrb:      { type: 'projGlyph', glyph: 'orb', at: 'forward', n: 1, color: '#aa66ff', big: true },
+    infernoStream:  { type: 'coneBlast', at: 'forward', color: '#ff6622' },
+    meteor:         { type: 'meteorFall', at: 'cursor', color: '#ff4400' },
+    blizzard:       { type: 'blizzard', at: 'cursor', color: '#5599ff', long: true },
+    arcaneSurge:    { type: 'runeOrbit', color: '#dd66ff' },
+    timeFreeze:     { type: 'timeStop', color: '#aaccff' },
+    meteorShower:   { type: 'screenMeteors', color: '#ff4400' },
+    singularity:    { type: 'singularity', at: 'cursor', color: '#aa55ff', long: true },
+    // BERSERKER
+    whirlwind:        { type: 'whirlwind', color: '#ff6060' },
+    cleave:           { type: 'swordSlash', at: 'forward', color: '#ffaa40', scale: 1.3 },
+    warCry:           { type: 'shoutWave', color: '#cc4040' },
+    bloodRend:        { type: 'comboSlash', at: 'forward', n: 3, color: '#cc4040' },
+    recklessSwing:    { type: 'swordSlash', at: 'forward', color: '#ff4444', scale: 1.7 },
+    battleShout:      { type: 'shoutWave', color: '#ffaa00' },
+    charge:           { type: 'dashStreak', at: 'forward', color: '#ffaa40' },
+    groundSlam:       { type: 'quakeRadial', color: '#cc6020' },
+    berserkerLeap:    { type: 'leapSlam', at: 'cursor', color: '#ff6600' },
+    berserkerRage:    { type: 'rageAura', color: '#ff2222' },
+    warchiefCall:     { type: 'summon', creature: 'warrior', n: 3, at: 'forward', color: '#cc8800' },
+    berserkerWhirlwind:{ type: 'whirlwind', color: '#ff8822', long: true },
+    earthshatter:     { type: 'quakeRadial', color: '#aa6633', scale: 1.5 },
+    titansFall:       { type: 'leapSlam', at: 'cursor', color: '#ff4400', scale: 1.7 },
+    bloodTide:        { type: 'rageAura', color: '#cc0033', long: true },
+    primalRoar:       { type: 'shoutWave', color: '#ff8800', fear: true },
+    berserkerArmyUlt: { type: 'rageAura', color: '#ff0000', long: true, scale: 1.5 },
+    // ASSASSIN
+    shadowStrike: { type: 'daggerStrike', at: 'nearest', color: '#cc88ff', smoke: true },
+    bladeFlurry:  { type: 'projGlyph', glyph: 'dagger', at: 'forward', n: 5, spread: 0.6, color: '#dd99ff' },
+    evasion:      { type: 'smokeCloud', color: '#aa66cc', dash: true },
+    smokeBomb:    { type: 'smokeCloud', color: '#887799', scale: 1.5 },
+    backstab:     { type: 'daggerStrike', at: 'nearest', color: '#ff66cc' },
+    poisonBlade:  { type: 'weaponCoat', color: '#44cc44' },
+    shadowClone:  { type: 'shadowClone', color: '#882299' },
+    bladestorm:   { type: 'whirlwind', at: 'cursor', color: '#cc66ff' },
+    deathMark:    { type: 'markEmblem', at: 'nearest', glyph: 'skull', color: '#ff2266' },
+    deathBlossom: { type: 'projGlyph', glyph: 'blade', ring: true, n: 20, at: 'cursor', color: '#cc0066', delay: 0.18 },
+    shadowRealm:  { type: 'ghostForm', color: '#aa55dd' },
+    assassinate:  { type: 'daggerStrike', at: 'nearest', color: '#cc3388', smoke: true },
+    // TEMPLAR
+    fistsOfThunder:  { type: 'strikeFlurry', at: 'nearest', n: 5, color: '#ffaa44', electric: true },
+    innerSanctuary:  { type: 'healPlus', color: '#ffe0a0', scale: 1.2 },
+    mantraOfHealing: { type: 'zenAura', color: '#ffeeaa', heal: true },
+    cycloneStrike:   { type: 'vortexPull', color: '#ffcc66' },
+    tempestRush:     { type: 'dashStreak', at: 'forward', color: '#ffcc44' },
+    cripplingWave:   { type: 'waveArc', at: 'forward', n: 3, color: '#ffaa44' },
+    sevenSidedStrike:{ type: 'strikeFlurry', at: 'self', n: 7, color: '#ff8822' },
+    epiphany:        { type: 'zenAura', color: '#ffeecc' },
+    innerFire:       { type: 'flameRing', color: '#ff8822' },
+    transcendence:   { type: 'ghostForm', color: '#ffeecc' },
+    serenity:        { type: 'holyNova', color: '#ffffff', scale: 1.4, freeze: true },
+    divinePalm:      { type: 'holyBeamRay', at: 'forward', color: '#ffcc66', delay: 0.12 },
+    // CRUSADER
+    holyNova:          { type: 'holyNova', color: '#ffe866' },
+    consecration:      { type: 'consecrate', color: '#ffdd44' },
+    divineShield:      { type: 'shieldDome', color: '#ffffff' },
+    hammerOfJustice:   { type: 'projGlyph', glyph: 'hammer', at: 'forward', n: 1, color: '#ffcc44', spin: true },
+    holyBeam:          { type: 'holyBeamRay', at: 'forward', color: '#ffe866' },
+    layOnHands:        { type: 'healPlus', color: '#fffacc', scale: 1.5 },
+    avengerShield:     { type: 'projGlyph', glyph: 'shield', at: 'forward', n: 1, color: '#ffe866', spin: true },
+    blessingOfMight:   { type: 'holyWings', color: '#ffcc44' },
+    wrathOfHeaven:     { type: 'wrathColumns', color: '#ffee66' },
+    divineIntervention:{ type: 'holyNova', color: '#ffffff', scale: 1.6, pulse: true },
+    crusadersEdge:     { type: 'holyWings', color: '#ffcc44' },
+    // SHAMAN
+    plagueFrogs:   { type: 'projGlyph', glyph: 'frog', ring: true, n: 8, color: '#55dd66' },
+    soulHarvest:   { type: 'soulNova', color: '#22aa44' },
+    hexBolt:       { type: 'projGlyph', glyph: 'skull', at: 'nearest', n: 1, color: '#55dd66' },
+    spiritTotem:   { type: 'summon', creature: 'totem', n: 1, at: 'forward', color: '#aaff44' },
+    bigBadVoodoo:  { type: 'maskBuff', color: '#aaff44' },
+    corpseSpiders: { type: 'projGlyph', glyph: 'spider', at: 'forward', n: 3, spread: 0.4, color: '#885522' },
+    venomCloud:    { type: 'poisonCloud', at: 'cursor', color: '#44cc22', long: true },
+    locustSwarm:   { type: 'locustSwarm', color: '#66aa22' },
+    stormCall:     { type: 'lightning', at: 'nearest', count: 4, color: '#88ddff' },
+    spiritWalk:    { type: 'ghostForm', color: '#99eeff' },
+    massHex:       { type: 'hexAll', color: '#55dd66' },
+    spiritStorm:   { type: 'skyStorm', color: '#cceeff' },
+    ancestralFury: { type: 'summon', creature: 'ancestor', n: 3, at: 'self', color: '#aaff88', soul: true },
+    // NECROMANCER
+    boneSpear:        { type: 'projGlyph', glyph: 'bone', at: 'forward', n: 1, color: '#ccbbee' },
+    deathNova:        { type: 'boneNova', color: '#9988cc' },
+    boneArmor:        { type: 'boneArmorAura', color: '#d0c8ee' },
+    bloodNova:        { type: 'bloodNova', color: '#cc2244' },
+    corpseExplosion:  { type: 'boneNova', at: 'nearest', color: '#9988cc' },
+    skeletonWarrior:  { type: 'summon', creature: 'skeleton', n: 2, color: '#ccbbee' },
+    corpseLance:      { type: 'projGlyph', glyph: 'bone', at: 'forward', n: 3, spread: 0.5, color: '#aa99dd' },
+    deathCoil:        { type: 'projGlyph', glyph: 'skull', at: 'nearest', n: 1, color: '#aa88dd', coil: true },
+    lichForm:         { type: 'lichAura', color: '#7755aa' },
+    boneStorm:        { type: 'boneCyclone', color: '#ccbbee', long: true },
+    bloodRitual:      { type: 'bloodNova', color: '#cc2244', scale: 1.6, summon: true },
+    necroticApocalypse:{ type: 'apocalypse', color: '#aa55dd' },
+    // DRUID
+    shred:        { type: 'clawSlash', at: 'forward', color: '#66cc88' },
+    stormStrike:  { type: 'lightning', at: 'nearest', count: 3, color: '#88ddff' },
+    wildShift:    { type: 'morphBurst', color: '#cc8844', creature: 'dragon' },
+    summonWolves: { type: 'summon', creature: 'wolf', n: 3, color: '#66cc88' },
+    thornWall:    { type: 'thornWall', at: 'cursor', color: '#448833' },
+    entangle:     { type: 'vineBurst', color: '#66cc44' },
+    tornado:      { type: 'tornado', at: 'cursor', color: '#aaf0cc', drift: true },
+    earthShock:   { type: 'quakeLine', at: 'cursor', color: '#aa8833' },
+    solarBeam:    { type: 'holyBeamRay', at: 'forward', color: '#ffee44', sun: true, scale: 1.4 },
+    cataclysm:    { type: 'cataclysm', color: '#66cc88' },
+    primalRage:   { type: 'morphBurst', color: '#ff6622', creature: 'hybrid', rage: true },
+    worldTree:    { type: 'worldTree', at: 'cursor', color: '#66cc44' },
+    // AMAZONIAN
+    javelinVolley: { type: 'projGlyph', glyph: 'javelin', at: 'forward', n: 3, spread: 0.34, color: '#ddaa33' },
+    spiritDash:    { type: 'dashStreak', at: 'forward', color: '#ddaa33' },
+    eagleMark:     { type: 'markEmblem', at: 'nearest', glyph: 'target', color: '#ffcc44' },
+    spiritBond:    { type: 'morphBurst', color: '#ddaa33', creature: 'beast' },
+    venomTip:      { type: 'weaponCoat', color: '#44cc44' },
+    packHunt:      { type: 'packBuff', color: '#cc8833' },
+    thunderJavelin:{ type: 'projGlyph', glyph: 'javelin', at: 'forward', n: 1, color: '#88ccff', electric: true },
+    strafe:        { type: 'projGlyph', glyph: 'javelin', at: 'forward', n: 6, spread: 0.5, color: '#ffaa44', _buff: true },
+    galeForce:     { type: 'dashStreak', at: 'forward', color: '#88aaff', wind: true },
+    stormOfSpears: { type: 'screenSpears', color: '#ddaa33' },
+    apexPredator:  { type: 'pierceBeam', at: 'forward', color: '#ffaa00', scale: 1.8, spear: true },
+    spiritUnion:   { type: 'unionAura', color: '#ddaa33' },
+  };
+
+  // Main entry, called from castAbility on a successful cast.
+  function playAbilityVfx(def) {
+    if (!def) return;
+    let spec = ABILITY_VFX[def.id];
+    if (!spec) spec = { type: 'genericBuff', color: def.color || '#ffffff' };
+    switch (spec.type) {
+      case 'screenMeteors': emitScreen('meteorFall', spec.color, 12, 2.4); return;
+      case 'screenSpears': for (let i = 0; i < 14; i++) abilityVfxPoint('spearDrop', 40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80), spec.color, Math.random() * 2.6); return;
+      case 'skyStorm': for (let i = 0; i < 14; i++) abilityVfxPoint('skyBolt', 40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80), spec.color, Math.random() * 3.0); return;
+      case 'wrathColumns': {
+        const tg = _nearestEnemies(player.x, player.y, 12, 9999);
+        if (tg.length) for (const t of tg) abilityVfxPoint('holyColumn', t.x, t.y, spec.color, Math.random() * 0.4);
+        else emitScreen('holyColumn', spec.color, 8, 0.5);
+        return;
+      }
+      case 'cataclysm': {
+        for (let i = 0; i < 5; i++) abilityVfxPoint('skyBolt', 40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80), '#88ddff', Math.random() * 2.4);
+        for (let i = 0; i < 2; i++) abilityVfxPoint('tornado', 80 + Math.random() * (W - 160), 60 + Math.random() * (H - 120), '#aaf0cc', Math.random() * 1.6);
+        for (let i = 0; i < 4; i++) abilityVfxPoint('vineBurst', 40 + Math.random() * (W - 80), 40 + Math.random() * (H - 80), '#66cc44', Math.random() * 2.2);
+        return;
+      }
+      default: break;
+    }
+    emitVfx(spec);
+    if (spec.pulse) emitVfx({ type: 'screenPulse', color: spec.color });
+    if (spec.summon) emitVfx({ type: 'summon', creature: 'skeleton', n: 3, color: spec.color });
+  }
+
+  // ---- UPDATE ----
+  function updateAbilityVfx(dt) {
+    for (const v of abilityVfx) {
+      if (v.delay && v.delay > 0) { v.delay -= dt; continue; }
+      v.life -= dt;
+      if (v.follow) { v.x = player.x; v.y = player.y; }
+      else { if (v.vx) v.x += v.vx * dt; if (v.vy) v.y += v.vy * dt; }
+      if (v.spin !== undefined) v.spin += (v.spinSpeed || 9) * dt;
+      if (v.type === 'projRain') for (const d of v.drops) d.t += dt;
+    }
+    abilityVfx = abilityVfx.filter(v => v.life > 0 || (v.delay && v.delay > 0));
+  }
+
+  // ---- DRAW ----
+  function drawAbilityVfx(ctx) {
+    const now = performance.now();
+    for (const v of abilityVfx) {
+      if (v.delay && v.delay > 0) continue;
+      const a = Math.max(0, Math.min(1, v.life / v.maxLife));
+      const k = 1 - a;
+      ctx.save();
+      switch (v.type) {
+        case 'projGlyph': {
+          const spin = v.spin;
+          const drawAt = (gx, gy, al) => { ctx.save(); ctx.translate(gx, gy); ctx.rotate(spin !== undefined ? spin : v.ang); _glyph(ctx, v.glyph, v.color, al); ctx.restore(); };
+          for (let i = 3; i >= 1; i--) drawAt(v.x - (v.vx || 0) * 0.012 * i, v.y - (v.vy || 0) * 0.012 * i, a * 0.16 * (4 - i));
+          drawAt(v.x, v.y, a);
+          if (v.electric) { ctx.globalAlpha = a * 0.9; ctx.strokeStyle = '#cfefff'; ctx.lineWidth = 1.5; _jaggedLine(ctx, v.x - (v.vx || 0) * 0.03, v.y - (v.vy || 0) * 0.03, v.x, v.y, 4, 5); }
+          break;
+        }
+        case 'pierceBeam': {
+          const dx = Math.cos(v.ang), dy = Math.sin(v.ang), L = 460;
+          ctx.globalAlpha = a * 0.4; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = v.width * 2.2; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + dx * L, v.y + dy * L); ctx.stroke();
+          ctx.globalAlpha = a * 0.9; ctx.strokeStyle = v.color; ctx.lineWidth = v.width;
+          ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + dx * L, v.y + dy * L); ctx.stroke();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = v.width * 0.35;
+          ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + dx * L, v.y + dy * L); ctx.stroke();
+          if (v.spear) { ctx.save(); ctx.translate(v.x + dx * 60 * (1 + k), v.y + dy * 60 * (1 + k)); ctx.rotate(v.ang); _glyph(ctx, 'javelin', v.color, a); ctx.restore(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'holyBeamRay': {
+          const dx = Math.cos(v.ang), dy = Math.sin(v.ang), L = 460;
+          const grad = ctx.createLinearGradient(v.x, v.y, v.x + dx * L, v.y + dy * L);
+          grad.addColorStop(0, v.color); grad.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.globalAlpha = a * 0.6; ctx.strokeStyle = grad; ctx.lineWidth = v.width; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + dx * L, v.y + dy * L); ctx.stroke();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = v.width * 0.4;
+          ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + dx * L, v.y + dy * L); ctx.stroke();
+          if (v.sun) { ctx.globalAlpha = a; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, v.width * 0.7, 0, 6.28); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v.x, v.y, v.width * 0.35, 0, 6.28); ctx.fill(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'coneBlast': {
+          const flick = 0.8 + 0.2 * Math.sin(now * 0.03);
+          ctx.globalAlpha = a * 0.5 * flick; ctx.fillStyle = v.color;
+          ctx.beginPath(); ctx.moveTo(v.x, v.y);
+          ctx.lineTo(v.x + Math.cos(v.ang - v.half) * v.len, v.y + Math.sin(v.ang - v.half) * v.len);
+          ctx.lineTo(v.x + Math.cos(v.ang + v.half) * v.len, v.y + Math.sin(v.ang + v.half) * v.len);
+          ctx.closePath(); ctx.fill();
+          ctx.globalAlpha = a * 0.8; ctx.fillStyle = '#ffee66';
+          ctx.beginPath(); ctx.moveTo(v.x, v.y);
+          ctx.lineTo(v.x + Math.cos(v.ang - v.half * 0.5) * v.len * 0.7, v.y + Math.sin(v.ang - v.half * 0.5) * v.len * 0.7);
+          ctx.lineTo(v.x + Math.cos(v.ang + v.half * 0.5) * v.len * 0.7, v.y + Math.sin(v.ang + v.half * 0.5) * v.len * 0.7);
+          ctx.closePath(); ctx.fill(); break;
+        }
+        case 'lightning': {
+          const pts = v.points;
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = v.width + 2;
+          for (let i = 0; i < pts.length - 1; i++) _jaggedLine(ctx, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 6, 7);
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = v.width;
+          for (let i = 0; i < pts.length - 1; i++) _jaggedLine(ctx, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, 6, 6);
+          ctx.fillStyle = v.color;
+          for (const p of pts) { ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, 6.28); ctx.fill(); }
+          break;
+        }
+        case 'clawSlash': {
+          const sweep = v.ang - 0.5 + k * 1.0;
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(v.x, v.y, v.r + i * 6, sweep - 0.6, sweep + 0.6); ctx.stroke(); }
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; ctx.globalAlpha = a * 0.8;
+          for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(v.x, v.y, v.r + i * 6, sweep - 0.3, sweep + 0.3); ctx.stroke(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'swordSlash': {
+          const dir = v.flip ? -1 : 1;
+          const sweep = v.ang - dir * 0.7 + dir * k * 1.4;
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.arc(v.x, v.y, v.r, sweep - 0.5, sweep + 0.5); ctx.stroke();
+          ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.globalAlpha = a * 0.8;
+          ctx.beginPath(); ctx.arc(v.x, v.y, v.r + 4, sweep - 0.6, sweep + 0.6); ctx.stroke();
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'waveArc': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.9; ctx.strokeStyle = v.color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.arc(v.x, v.y, r, v.ang - 0.7, v.ang + 0.7); ctx.stroke();
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'whirlwind': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a * 0.9; ctx.strokeStyle = v.color; ctx.lineWidth = 3; ctx.lineCap = 'round';
+          for (let s = 0; s < 2; s++) { const off = rot + s * Math.PI; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, off, off + 1.6); ctx.stroke(); }
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5;
+          for (let s = 0; s < 2; s++) { const off = rot * 1.2 + s * Math.PI; ctx.beginPath(); ctx.arc(v.x, v.y, v.r * 0.7, off, off + 1.4); ctx.stroke(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'strikeFlash': {
+          ctx.globalAlpha = a; ctx.strokeStyle = v.electric ? '#cfefff' : '#ffffff'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          const r = 9 + k * 5;
+          ctx.beginPath(); ctx.moveTo(v.x - r, v.y - r); ctx.lineTo(v.x + r, v.y + r); ctx.moveTo(v.x + r, v.y - r); ctx.lineTo(v.x - r, v.y + r); ctx.stroke();
+          ctx.strokeStyle = v.color; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'daggerStrike': {
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+          const r = 14 + k * 6;
+          ctx.beginPath(); ctx.moveTo(v.x - r, v.y - r); ctx.lineTo(v.x + r, v.y + r); ctx.moveTo(v.x + r, v.y - r); ctx.lineTo(v.x - r, v.y + r); ctx.stroke();
+          ctx.strokeStyle = v.color; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(v.x - r * 0.7, v.y); ctx.lineTo(v.x + r * 0.7, v.y); ctx.stroke();
+          // crit star
+          ctx.fillStyle = v.color; ctx.globalAlpha = a;
+          for (let i = 0; i < 4; i++) { const a2 = i * Math.PI / 2 + 0.4; ctx.fillRect(v.x + Math.cos(a2) * (r + 4), v.y + Math.sin(a2) * (r + 4), 2, 2); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'tornado': {
+          ctx.globalAlpha = a * 0.85;
+          const layers = 7;
+          for (let i = 0; i < layers; i++) {
+            const t = i / (layers - 1), ry = v.y - t * v.h, rw = v.w * (0.25 + t * 0.85);
+            const wob = Math.sin(v.spin + t * 4) * (3 + t * 6);
+            ctx.strokeStyle = i % 2 ? _lighten(v.color) : v.color; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.ellipse(v.x + wob, ry, rw, rw * 0.32, 0, 0, 6.28); ctx.stroke();
+          }
+          ctx.fillStyle = '#ddeedd';
+          for (let i = 0; i < 6; i++) { const t = Math.random(), ry = v.y - t * v.h, rw = v.w * (0.25 + t * 0.85); ctx.globalAlpha = a * 0.7; ctx.fillRect(v.x + Math.cos(v.spin * 2 + i) * rw, ry, 2, 2); }
+          break;
+        }
+        case 'quakeLine': {
+          const dx = Math.cos(v.ang), dy = Math.sin(v.ang), reach = v.len * Math.min(1, k * 1.4);
+          ctx.globalAlpha = a; ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 4;
+          _jaggedLine(ctx, v.x, v.y, v.x + dx * reach, v.y + dy * reach, 9, 9);
+          ctx.strokeStyle = v.color; ctx.lineWidth = 1.5; ctx.globalAlpha = a * 0.8;
+          _jaggedLine(ctx, v.x, v.y, v.x + dx * reach, v.y + dy * reach, 9, 6);
+          ctx.fillStyle = '#8a6a4a'; ctx.globalAlpha = a;
+          for (let i = 0; i < 8; i++) { const t = Math.random(); ctx.fillRect(v.x + dx * reach * t + _jit(8), v.y + dy * reach * t + _jit(8), 2, 2); }
+          break;
+        }
+        case 'quakeRadial': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = v.color; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.strokeStyle = '#5a3a1a'; ctx.lineWidth = 2.5; ctx.globalAlpha = a * 0.8;
+          for (let i = 0; i < 7; i++) { const a2 = (i / 7) * 6.28 + 0.2; _jaggedLine(ctx, v.x, v.y, v.x + Math.cos(a2) * r, v.y + Math.sin(a2) * r, 4, 5); }
+          ctx.fillStyle = '#8a6a4a'; ctx.globalAlpha = a;
+          for (let i = 0; i < 10; i++) { const a2 = Math.random() * 6.28, rr = r * Math.random(); ctx.fillRect(v.x + Math.cos(a2) * rr, v.y + Math.sin(a2) * rr - k * 6, 2, 3); }
+          break;
+        }
+        case 'meteorFall': {
+          if (k < 0.6) {
+            const prog = k / 0.6, sx = v.x - 130 * (1 - prog), sy = v.y - 200 * (1 - prog);
+            ctx.globalAlpha = 0.9; ctx.lineCap = 'round'; ctx.strokeStyle = v.color; ctx.lineWidth = 7;
+            ctx.beginPath(); ctx.moveTo(sx - 34, sy - 50); ctx.lineTo(sx, sy); ctx.stroke();
+            ctx.strokeStyle = '#ffee66'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(sx - 22, sy - 32); ctx.lineTo(sx, sy); ctx.stroke();
+            ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 6.28); ctx.fill(); ctx.lineCap = 'butt';
+          } else {
+            const prog = (k - 0.6) / 0.4, r = v.r * prog;
+            ctx.globalAlpha = (1 - prog) * 0.8; ctx.fillStyle = '#ff5500'; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.fill();
+            ctx.globalAlpha = (1 - prog); ctx.strokeStyle = '#ffee66'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          }
+          break;
+        }
+        case 'frostNova': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.5; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 2;
+          for (let i = 0; i < 12; i++) { const a2 = (i / 12) * 6.28; ctx.beginPath(); ctx.moveTo(v.x + Math.cos(a2) * r, v.y + Math.sin(a2) * r); ctx.lineTo(v.x + Math.cos(a2) * (r + 8), v.y + Math.sin(a2) * (r + 8)); ctx.stroke(); }
+          break;
+        }
+        case 'blizzard': {
+          ctx.globalAlpha = a * 0.18; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a * 0.9; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 1.5;
+          for (let i = 0; i < 14; i++) { const px = v.x + _jit(v.r * 2), py = v.y + _jit(v.r * 1.6); ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - 3, py + 8); ctx.stroke(); }
+          ctx.globalAlpha = a * 0.6; ctx.fillStyle = '#ffffff';
+          for (let i = 0; i < 8; i++) ctx.fillRect(v.x + _jit(v.r * 2), v.y + _jit(v.r * 1.6), 2, 2);
+          break;
+        }
+        case 'poisonCloud': {
+          ctx.globalAlpha = a * 0.32; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a * 0.85; ctx.fillStyle = '#88ff99';
+          for (let i = 0; i < 10; i++) { const a2 = (i / 10) * 6.28 + Math.sin(now * 0.004 + i); const rr = v.r * (0.4 + 0.5 * Math.abs(Math.sin(i + k * 3))); ctx.beginPath(); ctx.arc(v.x + Math.cos(a2) * rr, v.y + Math.sin(a2) * rr, 3, 0, 6.28); ctx.fill(); }
+          break;
+        }
+        case 'locustSwarm': {
+          ctx.globalAlpha = a; ctx.fillStyle = v.color;
+          for (let i = 0; i < 26; i++) { const a2 = now * 0.005 + i * 1.3; const rr = v.r * (0.3 + 0.7 * Math.abs(Math.sin(i * 1.7 + now * 0.003))); ctx.fillRect(v.x + Math.cos(a2) * rr, v.y + Math.sin(a2 * 1.3) * rr * 0.7, 2, 2); }
+          break;
+        }
+        case 'singularity': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a * 0.95; ctx.fillStyle = '#000010'; ctx.beginPath(); ctx.arc(v.x, v.y, v.r * (0.6 + 0.4 * a), 0, 6.28); ctx.fill();
+          ctx.strokeStyle = v.color; ctx.lineWidth = 2.5; ctx.globalAlpha = a;
+          for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(v.x, v.y, v.r * (0.7 + i * 0.4), rot + i * 2, rot + i * 2 + 4.5); ctx.stroke(); }
+          ctx.globalAlpha = a * 0.7; ctx.fillStyle = _lighten(v.color);
+          for (let i = 0; i < 10; i++) { const a2 = rot * 1.5 + i * 0.8, rr = v.r * (1.6 - (i / 10)); ctx.fillRect(v.x + Math.cos(a2) * rr, v.y + Math.sin(a2) * rr, 2, 2); }
+          break;
+        }
+        case 'consecrate': {
+          const pulse = 0.4 + 0.2 * Math.sin(now * 0.008);
+          ctx.globalAlpha = a * pulse * 0.4; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a * 0.85; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.stroke();
+          ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.globalAlpha = a * pulse;
+          ctx.beginPath(); ctx.moveTo(v.x, v.y - v.r * 0.6); ctx.lineTo(v.x, v.y + v.r * 0.6); ctx.moveTo(v.x - v.r * 0.6, v.y); ctx.lineTo(v.x + v.r * 0.6, v.y); ctx.stroke();
+          break;
+        }
+        case 'vineBurst': {
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          const grow = Math.min(1, k * 1.6);
+          for (let i = 0; i < 7; i++) {
+            const a2 = (i / 7) * 6.28 + 0.3, bx = v.x + Math.cos(a2) * v.r * 0.5, by = v.y + Math.sin(a2) * v.r * 0.4, h = v.r * grow * (0.7 + Math.random() * 0.3);
+            ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(bx + _jit(10), by - h * 0.6, bx + _jit(6), by - h); ctx.stroke();
+            ctx.fillStyle = _lighten(v.color); ctx.fillRect(bx + _jit(6) - 1, by - h - 1, 3, 3);
+          }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'thornWall': {
+          const dx = Math.cos(v.ang), dy = Math.sin(v.ang), grow = Math.min(1, k * 1.6);
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+          for (let i = -3; i <= 3; i++) {
+            const bx = v.x + dx * i * 12, by = v.y + dy * i * 12, h = 26 * grow;
+            ctx.beginPath(); ctx.moveTo(bx, by + 6); ctx.lineTo(bx + _jit(4), by - h); ctx.stroke();
+            ctx.fillStyle = _lighten(v.color); ctx.fillRect(bx - 1, by - h - 1, 3, 3);
+          }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'netTrap': {
+          ctx.globalAlpha = a * 0.85; ctx.strokeStyle = v.color; ctx.lineWidth = 1;
+          for (let i = 0; i < 8; i++) { const a2 = (i / 8) * 6.28; ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + Math.cos(a2) * v.r, v.y + Math.sin(a2) * v.r); ctx.stroke(); }
+          for (let ring = 1; ring <= 3; ring++) { ctx.beginPath(); for (let i = 0; i <= 8; i++) { const a2 = (i / 8) * 6.28, rr = v.r * ring / 3, px = v.x + Math.cos(a2) * rr, py = v.y + Math.sin(a2) * rr; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke(); }
+          break;
+        }
+        case 'holyNova': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.4; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 3; ctx.globalAlpha = a * 0.9;
+          for (let i = 0; i < 4; i++) { const a2 = i * Math.PI / 2 + now * 0.001; ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + Math.cos(a2) * (r + 10), v.y + Math.sin(a2) * (r + 10)); ctx.stroke(); }
+          break;
+        }
+        case 'holyColumn': {
+          const w = v.w * (0.6 + Math.sin(now * 0.02) * 0.15);
+          const grad = ctx.createLinearGradient(v.x, v.y - 200, v.x, v.y);
+          grad.addColorStop(0, 'rgba(255,255,200,0)'); grad.addColorStop(1, v.color);
+          ctx.globalAlpha = a * 0.8; ctx.fillStyle = grad; ctx.fillRect(v.x - w / 2, v.y - 200, w, 200);
+          ctx.globalAlpha = a; ctx.fillStyle = '#ffffff'; ctx.fillRect(v.x - w / 5, v.y - 200, w / 2.5, 200);
+          ctx.globalAlpha = a * 0.6; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(v.x, v.y, w, w * 0.4, 0, 0, 6.28); ctx.stroke();
+          break;
+        }
+        case 'shieldDome': {
+          ctx.globalAlpha = a * 0.7; ctx.strokeStyle = v.color; ctx.lineWidth = 2;
+          ctx.beginPath(); for (let i = 0; i <= 6; i++) { const a2 = i * Math.PI / 3 + now * 0.0008; const px = v.x + Math.cos(a2) * v.r, py = v.y + Math.sin(a2) * v.r; if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); } ctx.stroke();
+          ctx.globalAlpha = a * 0.15; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.arc(v.x, v.y, v.r * 0.7, 0, 6.28); ctx.stroke();
+          break;
+        }
+        case 'boneNova': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+          for (let i = 0; i < v.n; i++) { const a2 = (i / v.n) * 6.28; const ix = v.x + Math.cos(a2) * r, iy = v.y + Math.sin(a2) * r; ctx.strokeStyle = i % 2 ? '#ffffff' : v.color; ctx.beginPath(); ctx.moveTo(ix, iy); ctx.lineTo(ix + Math.cos(a2) * 8, iy + Math.sin(a2) * 8); ctx.stroke(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'bloodNova': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.55; ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.fill();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#ff5577'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.fillStyle = v.color; ctx.globalAlpha = a * 0.8;
+          for (let i = 0; i < 10; i++) { const a2 = (i / 10) * 6.28 + k; ctx.fillRect(v.x + Math.cos(a2) * r, v.y + Math.sin(a2) * r, 3, 3); }
+          break;
+        }
+        case 'soulNova': {
+          const r = v.maxR * k;
+          ctx.globalAlpha = a * 0.7; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.fillStyle = _lighten(v.color); ctx.globalAlpha = a;
+          for (let i = 0; i < 8; i++) { const a2 = (i / 8) * 6.28 + now * 0.002; const yy = v.y + Math.sin(a2) * r - k * 10; ctx.beginPath(); ctx.arc(v.x + Math.cos(a2) * r, yy, 2.5, 0, 6.28); ctx.fill(); }
+          break;
+        }
+        case 'summon': {
+          ctx.globalAlpha = a;
+          for (const s of v.spots) {
+            const rise = (1 - a) * 6;
+            ctx.globalAlpha = a * 0.5; ctx.fillStyle = v.color;
+            ctx.beginPath(); ctx.ellipse(s.x, s.y + 6, 8, 3, 0, 0, 6.28); ctx.fill();
+            ctx.globalAlpha = a; _silhouette(ctx, s.creature, s.x, s.y - rise, v.color);
+          }
+          break;
+        }
+        case 'worldTree': {
+          const grow = Math.min(1, k * 1.5), h = 72 * grow;
+          ctx.globalAlpha = a; ctx.strokeStyle = '#6b4a2a'; ctx.lineWidth = 6; ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x, v.y - h); ctx.stroke();
+          ctx.fillStyle = v.color; ctx.globalAlpha = a * 0.85;
+          for (let i = 0; i < 5; i++) { const a2 = (i / 5) * 6.28; ctx.beginPath(); ctx.arc(v.x + Math.cos(a2) * 18 * grow, v.y - h + Math.sin(a2) * 14 * grow, 14 * grow, 0, 6.28); ctx.fill(); }
+          ctx.fillStyle = _lighten(v.color); ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(v.x, v.y - h, 16 * grow, 0, 6.28); ctx.fill();
+          break;
+        }
+        case 'smokeCloud': {
+          const r = v.maxR * Math.min(1, k * 1.3);
+          ctx.globalAlpha = a * 0.55; ctx.fillStyle = '#0a0014';
+          for (let i = 0; i < 6; i++) { const a2 = (i / 6) * 6.28 + k; ctx.beginPath(); ctx.arc(v.x + Math.cos(a2) * r * 0.5, v.y + Math.sin(a2) * r * 0.5, r * 0.55, 0, 6.28); ctx.fill(); }
+          ctx.globalAlpha = a * 0.7; ctx.fillStyle = v.color;
+          for (let i = 0; i < 6; i++) { const a2 = (i / 6) * 6.28 - k * 2; ctx.fillRect(v.x + Math.cos(a2) * r, v.y + Math.sin(a2) * r, 2, 2); }
+          break;
+        }
+        case 'shadowClone': {
+          const off = 16;
+          ctx.globalAlpha = a * 0.5; ctx.fillStyle = v.color;
+          ctx.fillRect(v.x - off - 4, v.y - 8, 8, 16);
+          ctx.fillRect(v.x + off - 4, v.y - 8, 8, 16);
+          ctx.globalAlpha = a * 0.3; ctx.fillStyle = '#110022';
+          ctx.fillRect(v.x - off - 5, v.y - 9, 10, 18); ctx.fillRect(v.x + off - 5, v.y - 9, 10, 18);
+          break;
+        }
+        case 'dashStreak': {
+          ctx.lineCap = 'round';
+          for (let i = 0; i < 5; i++) { const t = i / 4, px = v.x0 + (v.x1 - v.x0) * t, py = v.y0 + (v.y1 - v.y0) * t; ctx.globalAlpha = a * (0.15 + t * 0.4); ctx.fillStyle = v.color; ctx.fillRect(px - 3, py - 6, 6, 12); }
+          ctx.globalAlpha = a * 0.7; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(v.x0, v.y0); ctx.lineTo(v.x1, v.y1); ctx.stroke();
+          if (v.wind) { ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1; for (let i = 0; i < 3; i++) { const t = i / 3; const px = v.x0 + (v.x1 - v.x0) * t; const py = v.y0 + (v.y1 - v.y0) * t; ctx.beginPath(); ctx.moveTo(px, py - 8 + i * 6); ctx.lineTo(px + 16, py - 8 + i * 6); ctx.stroke(); } }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'shoutWave': {
+          const ang = _aimAngle(v.x + 1, v.y);
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = v.color; ctx.lineWidth = 2.5;
+          for (let ring = 0; ring < 3; ring++) { const rr = (k * v.r) + ring * 12; ctx.beginPath(); ctx.arc(v.x, v.y, rr, ang - 0.7, ang + 0.7); ctx.stroke(); }
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(v.x, v.y, k * v.r + 6, ang - 0.5, ang + 0.5); ctx.stroke();
+          break;
+        }
+        case 'rageAura': {
+          ctx.globalAlpha = a * 0.6; ctx.strokeStyle = v.color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(v.x, v.y + 4, v.r, 0, 6.28); ctx.stroke();
+          ctx.fillStyle = v.color;
+          for (let i = 0; i < 8; i++) { const a2 = (i / 8) * 6.28 + now * 0.003; const fy = v.y + 4 - ((now * 0.06 + i * 14) % 30); ctx.globalAlpha = a * 0.9; ctx.fillRect(v.x + Math.cos(a2) * v.r, fy, 2, 4); }
+          ctx.globalAlpha = a * 0.5; ctx.fillStyle = _lighten(v.color);
+          for (let i = 0; i < 4; i++) { const a2 = (i / 4) * 6.28 - now * 0.004; ctx.fillRect(v.x + Math.cos(a2) * v.r * 0.6, v.y + 4 + Math.sin(a2) * v.r * 0.6, 3, 3); }
+          break;
+        }
+        case 'eyeEmblem': {
+          const ey = v.y - 24;
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.ellipse(v.x, ey, 11, 6, 0, 0, 6.28); ctx.stroke();
+          ctx.fillStyle = v.color; ctx.beginPath(); ctx.arc(v.x, ey, 3, 0, 6.28); ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v.x + 1, ey - 1, 1.2, 0, 6.28); ctx.fill();
+          ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 1; ctx.globalAlpha = a * 0.8;
+          ctx.beginPath(); ctx.moveTo(v.x - 16, ey); ctx.lineTo(v.x - 12, ey); ctx.moveTo(v.x + 12, ey); ctx.lineTo(v.x + 16, ey); ctx.moveTo(v.x, ey - 10); ctx.lineTo(v.x, ey - 7); ctx.stroke();
+          break;
+        }
+        case 'runeOrbit': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 1.5;
+          for (let i = 0; i < 5; i++) { const a2 = rot + (i / 5) * 6.28; const px = v.x + Math.cos(a2) * v.r, py = v.y + 4 + Math.sin(a2) * v.r * 0.5; ctx.save(); ctx.translate(px, py); ctx.rotate(a2); ctx.strokeRect(-3, -3, 6, 6); ctx.beginPath(); ctx.moveTo(-3, 0); ctx.lineTo(3, 0); ctx.stroke(); ctx.restore(); }
+          break;
+        }
+        case 'weaponCoat': {
+          ctx.globalAlpha = a; ctx.fillStyle = v.color;
+          for (let i = 0; i < 5; i++) { const dx2 = 10 + i * 4; const dy2 = v.y - 6 + ((now * 0.05 + i * 12) % 18); ctx.fillRect(v.x + dx2, dy2, 2, 4); }
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(v.x + 8, v.y - 8); ctx.lineTo(v.x + 22, v.y + 2); ctx.stroke();
+          break;
+        }
+        case 'morphBurst': {
+          const r = v.r * Math.min(1, k * 1.4);
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, r, 0, 6.28); ctx.stroke();
+          ctx.globalAlpha = a; _silhouette(ctx, v.creature, v.x, v.y - 4, v.color);
+          break;
+        }
+        case 'lichAura': {
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y + 4, v.r, 0, 6.28); ctx.stroke();
+          const sy = v.y - 26;
+          ctx.globalAlpha = a; ctx.fillStyle = '#e8e0ff'; ctx.beginPath(); ctx.arc(v.x, sy, 6, 0, 6.28); ctx.fill(); ctx.fillRect(v.x - 4, sy + 3, 8, 4);
+          ctx.fillStyle = v.color; ctx.fillRect(v.x - 3, sy - 1, 2, 3); ctx.fillRect(v.x + 1, sy - 1, 2, 3);
+          ctx.fillStyle = _lighten(v.color); ctx.globalAlpha = a * 0.7;
+          for (let i = 0; i < 5; i++) { const a2 = (i / 5) * 6.28 - now * 0.003; ctx.fillRect(v.x + Math.cos(a2) * v.r, v.y + 4 + Math.sin(a2) * v.r * 0.6, 2, 2); }
+          break;
+        }
+        case 'flameRing': {
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y + 4, v.r, 0, 6.28); ctx.stroke();
+          for (let i = 0; i < 10; i++) { const a2 = (i / 10) * 6.28 + now * 0.002; const fx = v.x + Math.cos(a2) * v.r, fy = v.y + 4 + Math.sin(a2) * v.r; const fh = 8 + 4 * Math.sin(now * 0.02 + i); ctx.globalAlpha = a * 0.9; ctx.fillStyle = v.color; ctx.beginPath(); ctx.moveTo(fx - 3, fy); ctx.lineTo(fx, fy - fh); ctx.lineTo(fx + 3, fy); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#ffee66'; ctx.beginPath(); ctx.moveTo(fx - 1.5, fy); ctx.lineTo(fx, fy - fh * 0.5); ctx.lineTo(fx + 1.5, fy); ctx.closePath(); ctx.fill(); }
+          break;
+        }
+        case 'holyWings': {
+          const wy = v.y - 6, spread = 18 + 4 * Math.sin(now * 0.005);
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+          for (const dir of [-1, 1]) { for (let f = 0; f < 3; f++) { ctx.beginPath(); ctx.moveTo(v.x + dir * 3, wy); ctx.quadraticCurveTo(v.x + dir * (spread * 0.6), wy - 6 + f * 5, v.x + dir * spread, wy + f * 6); ctx.stroke(); } }
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(v.x, v.y - 26, 7, 3, 0, 0, 6.28); ctx.stroke();
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'ghostForm': {
+          ctx.globalAlpha = a * 0.35; ctx.fillStyle = v.color;
+          for (let i = 0; i < 3; i++) { const a2 = now * 0.002 + i * 2.1; const gx = v.x + Math.cos(a2) * 14, gy = v.y + Math.sin(a2) * 8; ctx.fillRect(gx - 4, gy - 8, 8, 16); }
+          ctx.globalAlpha = a * 0.6; ctx.strokeStyle = _lighten(v.color); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(v.x, v.y, 18, 0, 6.28); ctx.stroke();
+          break;
+        }
+        case 'zenAura': {
+          const pulse = 0.5 + 0.3 * Math.sin(now * 0.005);
+          ctx.globalAlpha = a * pulse * 0.5; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, v.r * (0.7 + k * 0.4), 0, 6.28); ctx.stroke();
+          ctx.globalAlpha = a; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(v.x, v.y - 26, 8, 3, 0, 0, 6.28); ctx.stroke();
+          ctx.fillStyle = v.color; ctx.globalAlpha = a * 0.7;
+          for (let i = 0; i < 6; i++) { const a2 = (i / 6) * 6.28 + now * 0.0015; ctx.fillRect(v.x + Math.cos(a2) * v.r * 0.8, v.y + Math.sin(a2) * v.r * 0.8, 2, 2); }
+          break;
+        }
+        case 'boneArmorAura': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a; ctx.fillStyle = '#fff'; ctx.strokeStyle = v.color; ctx.lineWidth = 1;
+          for (let i = 0; i < 6; i++) { const a2 = rot + (i / 6) * 6.28; const px = v.x + Math.cos(a2) * v.r, py = v.y + Math.sin(a2) * v.r * 0.8; ctx.save(); ctx.translate(px, py); ctx.rotate(a2); ctx.fillRect(-3, -1.5, 6, 3); ctx.strokeRect(-3, -1.5, 6, 3); ctx.restore(); }
+          break;
+        }
+        case 'markEmblem': {
+          ctx.globalAlpha = a; ctx.lineWidth = 1.5;
+          for (const m of v.marks) {
+            const r = 11 + k * 4;
+            if (v.glyph === 'skull') { ctx.save(); ctx.translate(m.x, m.y - (m.self ? 22 : 14)); _glyph(ctx, 'skull', v.color, a); ctx.restore(); }
+            else { ctx.strokeStyle = v.color; ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, 6.28); ctx.stroke(); ctx.beginPath(); ctx.moveTo(m.x - r - 3, m.y); ctx.lineTo(m.x - r + 3, m.y); ctx.moveTo(m.x + r - 3, m.y); ctx.lineTo(m.x + r + 3, m.y); ctx.moveTo(m.x, m.y - r - 3); ctx.lineTo(m.x, m.y - r + 3); ctx.moveTo(m.x, m.y + r - 3); ctx.lineTo(m.x, m.y + r + 3); ctx.stroke(); ctx.fillStyle = v.color; ctx.fillRect(m.x - 1, m.y - 1, 2, 2); }
+          }
+          break;
+        }
+        case 'unionAura': {
+          const rot = v.spin || 0; const creatures = ['piranha', 'snake', 'cat', 'spider'];
+          ctx.globalAlpha = a * 0.4; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, 6.28); ctx.stroke();
+          for (let i = 0; i < 4; i++) { const a2 = rot + (i / 4) * 6.28; const px = v.x + Math.cos(a2) * v.r, py = v.y + Math.sin(a2) * v.r * 0.8; ctx.globalAlpha = a; _silhouette(ctx, creatures[i], px, py, v.color); }
+          break;
+        }
+        case 'packBuff': {
+          ctx.globalAlpha = a; ctx.fillStyle = v.color;
+          for (let i = 0; i < 5; i++) { const px = v.x + ((i * 47) % 60) - 30; const py = v.y + 8 - ((now * 0.04 + i * 22) % 36); ctx.beginPath(); ctx.arc(px, py, 2.5, 0, 6.28); ctx.fill(); ctx.fillRect(px - 3, py - 3, 1.5, 1.5); ctx.fillRect(px + 2, py - 3, 1.5, 1.5); }
+          break;
+        }
+        case 'maskBuff': {
+          const my = v.y - 26;
+          ctx.globalAlpha = a; ctx.fillStyle = v.color; ctx.beginPath(); ctx.moveTo(v.x, my - 8); ctx.lineTo(v.x + 7, my); ctx.lineTo(v.x + 4, my + 9); ctx.lineTo(v.x - 4, my + 9); ctx.lineTo(v.x - 7, my); ctx.closePath(); ctx.fill();
+          ctx.fillStyle = '#200'; ctx.fillRect(v.x - 4, my - 1, 3, 2); ctx.fillRect(v.x + 1, my - 1, 3, 2); ctx.fillStyle = '#fff'; ctx.fillRect(v.x - 1, my + 3, 2, 4);
+          ctx.globalAlpha = a * 0.5; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y + 4, 28, 0, 6.28); ctx.stroke();
+          break;
+        }
+        case 'healPlus': {
+          const sc2 = v.scale || 1;
+          ctx.globalAlpha = a * 0.4; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y + 4, 24 * sc2 * (0.6 + k * 0.4), 0, 6.28); ctx.stroke();
+          for (let i = 0; i < 5; i++) { const px = v.x + ((i * 53) % 40) - 20; const py = v.y + 4 - ((now * 0.04 + i * 26) % 42); ctx.fillStyle = i % 2 ? v.color : '#fff'; ctx.globalAlpha = a; ctx.fillRect(px - 3, py, 7, 2); ctx.fillRect(px, py - 3, 2, 7); }
+          break;
+        }
+        case 'apocalypse': {
+          ctx.globalAlpha = a * 0.25; ctx.fillStyle = '#000010'; ctx.fillRect(0, 0, W, H);
+          ctx.globalAlpha = a; ctx.fillStyle = v.color;
+          for (const m of v.marks) { ctx.save(); ctx.translate(m.x, m.y - 14 + (1 - a) * 6); _glyph(ctx, 'skull', v.color, a); ctx.restore(); }
+          break;
+        }
+        case 'vortexPull': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = v.color; ctx.lineWidth = 2;
+          for (let i = 0; i < 8; i++) { const a2 = rot + (i / 8) * 6.28; const r0 = v.r, r1 = v.r * 0.2; ctx.beginPath(); ctx.moveTo(v.x + Math.cos(a2) * r0, v.y + Math.sin(a2) * r0); ctx.lineTo(v.x + Math.cos(a2 + 0.4) * r1, v.y + Math.sin(a2 + 0.4) * r1); ctx.stroke(); }
+          ctx.globalAlpha = a; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v.x, v.y, 4, 0, 6.28); ctx.fill();
+          break;
+        }
+        case 'timeStop': {
+          ctx.globalAlpha = a * 0.2; ctx.fillStyle = v.color; ctx.fillRect(0, 0, W, H);
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y, 18, 0, 6.28); ctx.stroke();
+          const hr = now * 0.001; ctx.beginPath(); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + Math.cos(hr) * 12, v.y + Math.sin(hr) * 12); ctx.moveTo(v.x, v.y); ctx.lineTo(v.x + Math.cos(hr * 4) * 8, v.y + Math.sin(hr * 4) * 8); ctx.stroke();
+          break;
+        }
+        case 'boneCyclone': {
+          const rot = v.spin || 0;
+          ctx.globalAlpha = a; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.lineCap = 'round';
+          for (let i = 0; i < 10; i++) { const a2 = rot + (i / 10) * 6.28; const rr = v.r * (0.7 + 0.3 * Math.sin(rot * 2 + i)); const ix = v.x + Math.cos(a2) * rr, iy = v.y + Math.sin(a2) * rr; ctx.strokeStyle = i % 2 ? '#fff' : v.color; ctx.beginPath(); ctx.moveTo(ix - Math.cos(a2) * 4, iy - Math.sin(a2) * 4); ctx.lineTo(ix + Math.cos(a2) * 4, iy + Math.sin(a2) * 4); ctx.stroke(); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'screenPulse': {
+          ctx.globalAlpha = a * 0.18; ctx.fillStyle = v.color; ctx.fillRect(0, 0, W, H);
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = v.color; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(v.x, v.y, (1 - a) * 240, 0, 6.28); ctx.stroke();
+          break;
+        }
+        case 'projRain': {
+          ctx.lineCap = 'round';
+          for (const d of v.drops) { if (d.t < 0) continue; const fall = (d.t % 0.6) / 0.6; const cy = d.y0 + (d.ground - d.y0) * fall; ctx.globalAlpha = a * 0.9; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(d.x + 4, cy - d.len); ctx.lineTo(d.x, cy); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.globalAlpha = a; ctx.fillRect(d.x - 1, cy - 1, 2, 2); }
+          ctx.lineCap = 'butt'; break;
+        }
+        case 'genericBuff': {
+          const r = v.r * (0.6 + k * 0.6);
+          ctx.globalAlpha = a * 0.8; ctx.strokeStyle = v.color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(v.x, v.y + 4, r, 0, 6.28); ctx.stroke();
+          ctx.globalAlpha = a; ctx.fillStyle = v.color;
+          for (let i = 0; i < 4; i++) { const px = v.x + ((i * 37) % 30) - 15; const py = v.y + 4 - ((now * 0.05 + i * 18) % 34); ctx.beginPath(); ctx.moveTo(px, py - 4); ctx.lineTo(px - 3, py); ctx.lineTo(px + 3, py); ctx.closePath(); ctx.fill(); }
+          break;
+        }
+        default: break;
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Tiny creature/animal silhouettes for summons, morphs, unions.
+  function _silhouette(ctx, c, x, y, color) {
+    ctx.fillStyle = color;
+    switch (c) {
+      case 'wolf': case 'cat':
+        ctx.beginPath(); ctx.ellipse(x, y, 7, 4, 0, 0, 6.28); ctx.fill(); ctx.fillRect(x + 5, y - 5, 4, 4); ctx.fillRect(x + 6, y - 8, 1.5, 3); ctx.fillRect(x + 8, y - 8, 1.5, 3); ctx.fillRect(x - 8, y - 4, 2, 3); break;
+      case 'skeleton': case 'warrior':
+        ctx.fillRect(x - 3, y - 8, 6, 12); ctx.fillStyle = '#eee'; ctx.beginPath(); ctx.arc(x, y - 10, 3.5, 0, 6.28); ctx.fill(); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x + 4, y - 6); ctx.lineTo(x + 9, y - 12); ctx.stroke(); break;
+      case 'spider': case 'tarantula':
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; for (let i = 0; i < 4; i++) { const yy = y - 3 + i * 2; ctx.beginPath(); ctx.moveTo(x - 7, yy); ctx.lineTo(x + 7, yy + (i < 2 ? -2 : 2)); ctx.stroke(); } ctx.fillStyle = _lighten(color); ctx.beginPath(); ctx.arc(x, y, 4, 0, 6.28); ctx.fill(); break;
+      case 'totem':
+        ctx.fillRect(x - 4, y - 12, 8, 18); ctx.fillStyle = _lighten(color); ctx.fillRect(x - 4, y - 12, 8, 5); ctx.fillStyle = '#200'; ctx.fillRect(x - 2, y - 4, 1.5, 1.5); ctx.fillRect(x + 1, y - 4, 1.5, 1.5); break;
+      case 'ancestor': case 'snake':
+        ctx.globalAlpha *= 0.7; ctx.beginPath(); ctx.ellipse(x, y - 4, 5, 9, 0, 0, 6.28); ctx.fill(); ctx.fillStyle = _lighten(color); ctx.beginPath(); ctx.arc(x, y - 9, 3, 0, 6.28); ctx.fill(); break;
+      case 'dragon':
+        ctx.beginPath(); ctx.ellipse(x, y, 8, 5, 0, 0, 6.28); ctx.fill(); ctx.beginPath(); ctx.moveTo(x - 2, y - 4); ctx.lineTo(x - 12, y - 12); ctx.lineTo(x - 4, y - 2); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(x + 2, y - 4); ctx.lineTo(x + 12, y - 12); ctx.lineTo(x + 4, y - 2); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillRect(x + 5, y - 6, 4, 4); break;
+      case 'hybrid':
+        ctx.beginPath(); ctx.ellipse(x, y, 8, 5, 0, 0, 6.28); ctx.fill(); ctx.beginPath(); ctx.moveTo(x + 2, y - 4); ctx.lineTo(x + 12, y - 11); ctx.lineTo(x + 4, y - 2); ctx.closePath(); ctx.fill(); ctx.fillRect(x + 6, y - 6, 4, 4); ctx.fillStyle = '#fff'; ctx.fillRect(x + 7, y - 8, 1.5, 3); break;
+      case 'beast': case 'piranha':
+        ctx.beginPath(); ctx.ellipse(x, y, 7, 4, 0, 0, 6.28); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(x - 7, y); ctx.lineTo(x - 4, y - 2); ctx.lineTo(x - 4, y + 2); ctx.closePath(); ctx.fill(); ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(x + 7, y); ctx.lineTo(x + 11, y - 3); ctx.lineTo(x + 11, y + 3); ctx.closePath(); ctx.fill(); break;
+      default:
+        ctx.beginPath(); ctx.arc(x, y, 5, 0, 6.28); ctx.fill();
+    }
+  }
+
+
   function castAbility(slotIdx) {
     if (slotIdx < 0 || slotIdx > 5) return;
     const slot = player.abilities[slotIdx];
@@ -700,6 +1775,7 @@
       Sfx.abilityCast();
       // Visual cast ring
       abilityFlashes.push({ x: player.x, y: player.y, r: 4, maxR: 44, life: 1.0, maxLife: 1.0, color: slot.def.color || '#ffffff', name: slot.def.name });
+      playAbilityVfx(slot.def);
     }
   }
 
@@ -1643,6 +2719,10 @@
     levelUpChoices = rollLevelUpChoices();
     levelUpRerollCost = 1;
     levelUpFlashTimer = 1.5;
+    // Flush frame input — same frame-leak prevention as enterShop
+    keyJustPressed.clear();
+    if (typeof gpJustPressed !== 'undefined') gpJustPressed.clear();
+    mouseClicked = false;
   }
   function pickLevelUp(idx) {
     if (idx < 0 || idx >= levelUpChoices.length) return;
@@ -1834,8 +2914,15 @@
     state = STATE.SHOP;
     shopRefreshCost = 5;
     shopItems = [];
-    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(player ? player.class.id : 'ranger', waveItemLevel(currentWave, charLevel)));
+    const _shopClassId = (player && player.class && player.class.id) ? player.class.id : (typeof selectedClassId !== 'undefined' ? selectedClassId : 'ranger');
+    for (let i = 0; i < 4; i++) shopItems.push(generateItemForClass(_shopClassId, waveItemLevel(currentWave, charLevel)));
     selectedInvIdx = -1;
+    // Flush frame input so the keystroke that ended the wave can't immediately
+    // skip the shop on the same frame (frame-leak bug — hits Druid hardest
+    // because Wild Shape is spammed on the same A/1 button used to advance).
+    keyJustPressed.clear();
+    if (typeof gpJustPressed !== 'undefined') gpJustPressed.clear();
+    mouseClicked = false;
   }
   // Returns act info for the act the given wave belongs to.
   // Wave 1-5 = Act I (Crypt, BoneLord), 6-10 = II (Frostspire, Ice Giant), etc.
@@ -2219,7 +3306,7 @@
     // Track in-run gem XP for persistent level carry-over
     { const _origAddXp = player.addXp.bind(player);
       player.addXp = function(amt) { runXpEarned += amt; _origAddXp(amt); }; }
-    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; meleeSwings = [];
+    enemies = []; projectiles = []; enemyProjectiles = []; xpGems = []; itemDrops = []; particles = []; abilityFlashes = []; abilityVfx = []; meleeSwings = [];
     groundEffects = []; damageNumbers = []; bossRef = null; shake = 0; hitPauseTimer = 0;
     state = STATE.PLAYING;
     currentWave = 1; spawnTimer = 0; intermissionTimer = 0;
@@ -2971,98 +4058,113 @@
     ctx.textAlign = 'left';
   }
   function drawStashBankingScreen() {
-    ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#ffd040'; ctx.textAlign = 'center'; ctx.font = 'bold 16px monospace';
-    ctx.fillText('BANK ONE ITEM TO YOUR STASH', W / 2, 18);
-    ctx.fillStyle = '#888'; ctx.font = '8px monospace';
-    ctx.fillText('Click any run item to mark it. DONE saves it; SKIP discards all run loot.', W / 2, 32);
+    // Two-way stash manager: move items between character inventory and shared stash.
+    const _inHub = (hubSubMenu === 'stash');
+    ctx.fillStyle = 'rgba(0,0,0,0.92)'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#aaaaff'; ctx.textAlign = 'center'; ctx.font = 'bold 14px monospace';
+    ctx.fillText('SHARED STASH', W / 2, 16);
+    ctx.fillStyle = '#666'; ctx.font = '7px monospace';
+    ctx.fillText('Click inv item → stash  |  Click stash item → inventory  |  Items persist between runs', W / 2, 27);
 
-    // Stash row (top)
-    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
-    ctx.fillText(`STASH (${stash.length}/${stashSize})`, 20, 52);
-    const stashY = 58, sSize = 26, sGap = 4;
+    // ── Shared stash grid (top half) ─────────────────────────
+    const stashCols = 10, stashSlot = 28, stashGap = 3;
+    const stashStartX = 20, stashStartY = 38;
+    ctx.fillStyle = '#aaaaff'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`SHARED STASH  (${stash.length}/${stashSize})`, stashStartX, stashStartY - 4);
     for (let i = 0; i < stashSize; i++) {
-      const col = i % 10;
-      const x = 20 + col * (sSize + sGap);
+      const col = i % stashCols, row = Math.floor(i / stashCols);
+      const x = stashStartX + col * (stashSlot + stashGap);
+      const y = stashStartY + row * (stashSlot + stashGap);
       const item = stash[i];
-      ctx.fillStyle = '#22222a';
-      ctx.fillRect(x, stashY, sSize, sSize);
-      ctx.strokeStyle = '#444';
-      ctx.strokeRect(x + 0.5, stashY + 0.5, sSize - 1, sSize - 1);
-      if (item) drawItemInBox(item, x, stashY, sSize);
-    }
-
-    // Run loot
-    ctx.fillStyle = '#aaa'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
-    ctx.fillText('YOUR RUN LOOT', 20, 102);
-
-    const runItems = [];
-    for (const k of SLOT_ORDER) {
-      if (player.equipped[k]) runItems.push({ source: 'eq', key: k, item: player.equipped[k] });
-    }
-    for (let i = 0; i < player.inventory.length; i++) {
-      runItems.push({ source: 'inv', key: i, item: player.inventory[i] });
-    }
-
-    const cols = 10, slotSize = 28, slotGap = 4;
-    const startX = 20, startY = 112;
-    for (let i = 0; i < runItems.length; i++) {
-      const r = runItems[i];
-      const col = i % cols, row = Math.floor(i / cols);
-      const x = startX + col * (slotSize + slotGap);
-      const y = startY + row * (slotSize + slotGap);
-      const hovered = mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize;
-      const isSel = pendingBank && pendingBank.source === r.source && pendingBank.key === r.key;
-      ctx.fillStyle = isSel ? '#3a3a45' : (hovered ? '#33333d' : '#22222a');
-      ctx.fillRect(x, y, slotSize, slotSize);
-      ctx.strokeStyle = isSel ? '#ffd23f' : '#444';
-      ctx.lineWidth = isSel ? 3 : 1;
-      ctx.strokeRect(x + 0.5, y + 0.5, slotSize - 1, slotSize - 1);
+      const hov = mouseX >= x && mouseX < x + stashSlot && mouseY >= y && mouseY < y + stashSlot;
+      ctx.fillStyle = hov && item ? '#33334a' : '#1a1a2a';
+      ctx.fillRect(x, y, stashSlot, stashSlot);
+      ctx.strokeStyle = (hov && item) ? '#aaaaff' : '#333';
+      ctx.lineWidth = (hov && item) ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, stashSlot - 1, stashSlot - 1);
       ctx.lineWidth = 1;
-      drawItemInBox(r.item, x, y, slotSize, isSel);
+      if (item) drawItemInBox(item, x, y, stashSlot);
     }
-    if (runItems.length === 0) {
-      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('(no items collected this run)', W / 2, 180);
-    }
+    // Stash rows count: ceil(stashSize/stashCols)
+    const stashRows = Math.ceil(stashSize / stashCols);
+    const stashEndY = stashStartY + stashRows * (stashSlot + stashGap) + 6;
 
-    // Tooltip
-    let tooltipItem = null;
-    for (let i = 0; i < runItems.length; i++) {
-      const r = runItems[i];
-      const col = i % cols, row = Math.floor(i / cols);
-      const x = startX + col * (slotSize + slotGap);
-      const y = startY + row * (slotSize + slotGap);
-      if (mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize) { tooltipItem = r.item; break; }
-    }
-    if (!tooltipItem && pendingBank) {
-      tooltipItem = pendingBank.source === 'inv' ? player.inventory[pendingBank.key] : player.equipped[pendingBank.key];
-    }
-    const tx = 20, ty = H - 95, tw = W - 40, th = 50;
-    ctx.fillStyle = '#1a1a22'; ctx.fillRect(tx, ty, tw, th);
-    ctx.strokeStyle = tooltipItem ? tooltipItem.rarity.color : '#333';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(tx + 1, ty + 1, tw - 2, th - 2); ctx.lineWidth = 1;
-    if (tooltipItem) {
-      ctx.fillStyle = tooltipItem.rarity.color; ctx.font = 'bold 10px monospace'; ctx.textAlign = 'left';
-      ctx.fillText(itemDisplayName(tooltipItem), tx + 8, ty + 13);
-      ctx.fillStyle = '#ddd'; ctx.font = '7px monospace';
-      const afftext = tooltipItem.affixes.length === 0 ? '(no affixes)' : tooltipItem.affixes.map(a => a.def.fmt(a.value)).join('  -  ');
-      ctx.fillText(afftext, tx + 8, ty + 26);
-      if (pendingBank) {
-        ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 8px monospace';
-        ctx.fillText('SELECTED — WILL BE BANKED ON DONE', tx + 8, ty + 40);
+    // ── Character inventory grid (bottom half) ────────────────
+    const invSlot = 28, invGap = 3, invCols = 10;
+    const invStartX = 20, invStartY = stashEndY + 14;
+    const classLabel = player ? (player.class.name || player.class.id).toUpperCase() : '';
+    ctx.fillStyle = '#88ff88'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+    ctx.fillText(`${classLabel} INVENTORY  (${player ? player.inventory.length : 0}/${player ? player.INVENTORY_CAP : 24})`, invStartX, invStartY - 4);
+    // Equipped items too
+    const invItems = [];
+    if (player) {
+      for (const k of SLOT_ORDER) {
+        if (player.equipped[k]) invItems.push({ source: 'eq', key: k, item: player.equipped[k] });
       }
-    } else {
-      ctx.fillStyle = '#555'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-      ctx.fillText('Hover or click any run item', tx + tw / 2, ty + th / 2 + 3);
+      for (let i = 0; i < player.inventory.length; i++) {
+        if (player.inventory[i]) invItems.push({ source: 'inv', key: i, item: player.inventory[i] });
+      }
+    }
+    for (let i = 0; i < invItems.length; i++) {
+      const r = invItems[i];
+      const col = i % invCols, row = Math.floor(i / invCols);
+      const x = invStartX + col * (invSlot + invGap);
+      const y = invStartY + row * (invSlot + invGap);
+      const hov = mouseX >= x && mouseX < x + invSlot && mouseY >= y && mouseY < y + invSlot;
+      ctx.fillStyle = hov ? '#33443d' : '#1a2a1e';
+      ctx.fillRect(x, y, invSlot, invSlot);
+      ctx.strokeStyle = hov ? '#88ff88' : '#334433';
+      ctx.lineWidth = hov ? 2 : 1;
+      ctx.strokeRect(x + 0.5, y + 0.5, invSlot - 1, invSlot - 1);
+      ctx.lineWidth = 1;
+      drawItemInBox(r.item, x, y, invSlot);
+      // Equipped badge
+      if (r.source === 'eq') {
+        ctx.fillStyle = 'rgba(100,200,100,0.25)'; ctx.fillRect(x, y, invSlot, invSlot);
+        ctx.fillStyle = '#88ff88'; ctx.font = '5px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('EQ', x + 2, y + 7);
+      }
+    }
+    if (invItems.length === 0) {
+      ctx.fillStyle = '#445544'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      ctx.fillText('(inventory empty)', W / 2, invStartY + 18);
     }
 
-    // Buttons
-    const stashFull = stash.length >= stashSize;
-    const doneLabel = !pendingBank ? 'DONE (no bank)' : (stashFull ? 'STASH FULL' : 'DONE - BANK IT');
-    drawButton(W - 280, H - 30, 130, 24, doneLabel, !(pendingBank && stashFull), '#7ad96b');
-    drawButton(W - 140, H - 30, 120, 24, 'SKIP', true, '#888');
+    // ── Tooltip ───────────────────────────────────────────────
+    let tooltipItem = null;
+    // Check stash hover
+    for (let i = 0; i < stash.length; i++) {
+      const col = i % stashCols, row = Math.floor(i / stashCols);
+      const x = stashStartX + col * (stashSlot + stashGap);
+      const y = stashStartY + row * (stashSlot + stashGap);
+      if (mouseX >= x && mouseX < x + stashSlot && mouseY >= y && mouseY < y + stashSlot) { tooltipItem = stash[i]; break; }
+    }
+    // Check inv hover
+    if (!tooltipItem) {
+      for (let i = 0; i < invItems.length; i++) {
+        const col = i % invCols, row = Math.floor(i / invCols);
+        const x = invStartX + col * (invSlot + invGap);
+        const y = invStartY + row * (invSlot + invGap);
+        if (mouseX >= x && mouseX < x + invSlot && mouseY >= y && mouseY < y + invSlot) { tooltipItem = invItems[i].item; break; }
+      }
+    }
+    const tx2 = 20, ty2 = H - 52, tw2 = W - 40, th2 = 24;
+    if (tooltipItem) {
+      ctx.fillStyle = '#1a1a22'; ctx.fillRect(tx2, ty2, tw2, th2);
+      ctx.strokeStyle = tooltipItem.rarity.color; ctx.lineWidth = 2;
+      ctx.strokeRect(tx2 + 1, ty2 + 1, tw2 - 2, th2 - 2); ctx.lineWidth = 1;
+      ctx.fillStyle = tooltipItem.rarity.color; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'left';
+      ctx.fillText(itemDisplayName(tooltipItem), tx2 + 8, ty2 + 11);
+      ctx.fillStyle = '#bbb'; ctx.font = '6px monospace';
+      const afftext2 = tooltipItem.affixes && tooltipItem.affixes.length
+        ? tooltipItem.affixes.map(a => a.def.fmt(a.value)).join('  ·  ')
+        : '(no affixes)';
+      ctx.fillText(afftext2, tx2 + 8, ty2 + 21);
+    }
+
+    // ── Done button ───────────────────────────────────────────
+    drawButton(W - 120, H - 26, 110, 20, 'CLOSE  [B/Esc]', true, '#aaaaff');
+    ctx.textAlign = 'left';
   }
   // ============================================================
   // TRIAL LOADOUT — pre-run gear equip screen
@@ -6424,8 +7526,8 @@
         const maxRank = adef.maxRank || 10;
         const _cpClick = ensureCP(charTreeClass);
         const btnY2 = ay + cardH2 - 16;
-        // [+1] rank up (right button, only for owned)
-        if (owned2 && isHovering(ax + cardW2 - 22, btnY2, 18, 12)) {
+        // [+1] rank up — right button or right-half of card (controller-friendly)
+        if (owned2 && (isHovering(ax + cardW2 - 22, btnY2, 18, 12) || isHovering(ax + cardW2/2, ay, cardW2/2, cardH2 - 14))) {
           if (curRank < maxRank && (_cpClick.abilityPts || 0) >= 1) {
             _cpClick.abilityPts--;
             const newRank = curRank + 1;
@@ -6451,8 +7553,8 @@
           saveData(); Sfx.uiClick && Sfx.uiClick();
           break;
         }
-        // [UNLOCK] button (full-width bottom, only for unowned)
-        if (!owned2 && isHovering(ax + 4, btnY2, cardW2 - 8, 12)) {
+        // [UNLOCK] button — click button area OR anywhere on card (controller-friendly)
+        if (!owned2 && (isHovering(ax + 4, btnY2, cardW2 - 8, 12) || isHovering(ax, ay, cardW2, cardH2 - 14))) {
           const _caKeys = Object.keys(charAbilities[charTreeClass] || {});
           const hasFreeSlot = _caKeys.length < 5; // max 5 non-signature slots
           if ((_cpClick.abilityPts || 0) >= 1 && hasFreeSlot) {
@@ -6478,7 +7580,7 @@
         for (const node of tree.nodes) {
               const nx = 30 + node.x * treeViewZoom + treeViewX;
           const ny2 = 80 + node.y * treeViewZoom + treeViewY;
-          const r = ((NODE_R[node.type] || 7) + 4) * treeViewZoom;
+          const r = (NODE_R[node.type] || 7) * treeViewZoom + 4;
           const dx = mouseX - nx, dy = mouseY - ny2;
           if (dx*dx + dy*dy <= r*r) { spendSkillNode(charTreeClass, node); Sfx.uiConfirm && Sfx.uiConfirm(); break; }
         }
@@ -6917,44 +8019,77 @@
         if (runMode === 'trial') {
           endTrial(state === STATE.VICTORY);
         } else {
+          // Inventory persists per-character (charInventory). Go straight to class select.
+          // Use HUB → STASH to move items to shared stash between runs.
+          saveData();
           pendingBank = null;
-          state = STATE.STASH_BANKING;
+          state = STATE.CLASS_SELECT;
         }
       }
     }
     else if (state === STATE.STASH_BANKING) {
       updateVirtualCursor(dt);
       if (gpJustPressed.has(0)) mouseClicked = true;
-      if (gpJustPressed.has(1)) { pendingBank = null; state = STATE.CLASS_SELECT; }
+      // B button or Escape = close
+      if (gpJustPressed.has(1) || keyJustPressed.has('escape')) {
+        if (hubSubMenu === 'stash') { hubSubMenu = null; state = STATE.HUB; }
+        else { state = STATE.CLASS_SELECT; }
+      }
       if (mouseClicked) {
-        const runItems = [];
-        for (const k of SLOT_ORDER) {
-          if (player.equipped[k]) runItems.push({ source: 'eq', key: k });
+        // Recompute layout (must match drawStashBankingScreen exactly)
+        const _sCols = 10, _sSlot = 28, _sGap = 3, _sX = 20, _sY = 38;
+        const _sRows = Math.ceil(stashSize / _sCols);
+        const _sEndY = _sY + _sRows * (_sSlot + _sGap) + 6;
+        const _iSlot = 28, _iGap = 3, _iCols = 10, _iX = 20, _iY = _sEndY + 14;
+
+        // Close button
+        if (isHovering(W - 120, H - 26, 110, 20)) {
+          if (hubSubMenu === 'stash') { hubSubMenu = null; state = STATE.HUB; }
+          else { state = STATE.CLASS_SELECT; }
         }
-        for (let i = 0; i < player.inventory.length; i++) {
-          runItems.push({ source: 'inv', key: i });
-        }
-        const cols = 10, slotSize = 28, slotGap = 4, startX = 20, startY = 112;
-        let consumed = false;
-        for (let i = 0; i < runItems.length; i++) {
-          const r = runItems[i];
-          const col = i % cols, row = Math.floor(i / cols);
-          const x = startX + col * (slotSize + slotGap);
-          const y = startY + row * (slotSize + slotGap);
-          if (mouseX >= x && mouseX < x + slotSize && mouseY >= y && mouseY < y + slotSize) {
-            if (pendingBank && pendingBank.source === r.source && pendingBank.key === r.key) pendingBank = null;
-            else pendingBank = r;
-            consumed = true;
-            break;
+        // Click a stash slot → retrieve item to character inventory
+        else {
+          let handled = false;
+          for (let i = 0; i < stashSize && !handled; i++) {
+            if (!stash[i]) continue;
+            const col = i % _sCols, row = Math.floor(i / _sCols);
+            const x = _sX + col * (_sSlot + _sGap);
+            const y = _sY + row * (_sSlot + _sGap);
+            if (mouseX >= x && mouseX < x + _sSlot && mouseY >= y && mouseY < y + _sSlot) {
+              handled = true;
+              if (player && player.inventory.length < player.INVENTORY_CAP) {
+                player.inventory.push(stash[i]);
+                stash.splice(i, 1);
+                saveData();
+                Sfx.uiClick && Sfx.uiClick();
+              }
+            }
           }
-        }
-        if (!consumed) {
-          if (isHovering(W - 280, H - 30, 130, 24)) {
-            commitBank();
-            state = STATE.CLASS_SELECT;
-          } else if (isHovering(W - 140, H - 30, 120, 24)) {
-            pendingBank = null;
-            state = STATE.CLASS_SELECT;
+          // Click an inventory slot → bank item to stash
+          if (!handled && player) {
+            const _invItems = [];
+            for (const k of SLOT_ORDER) {
+              if (player.equipped[k]) _invItems.push({ source: 'eq', key: k, item: player.equipped[k] });
+            }
+            for (let i = 0; i < player.inventory.length; i++) {
+              if (player.inventory[i]) _invItems.push({ source: 'inv', key: i, item: player.inventory[i] });
+            }
+            for (let i = 0; i < _invItems.length && !handled; i++) {
+              const r = _invItems[i];
+              const col = i % _iCols, row = Math.floor(i / _iCols);
+              const x = _iX + col * (_iSlot + _iGap);
+              const y = _iY + row * (_iSlot + _iGap);
+              if (mouseX >= x && mouseX < x + _iSlot && mouseY >= y && mouseY < y + _iSlot) {
+                handled = true;
+                // Only bank unequipped inventory items (not equipped gear)
+                if (r.source === 'inv' && stash.length < stashSize) {
+                  stash.push(r.item);
+                  player.inventory.splice(r.key, 1);
+                  saveData();
+                  Sfx.uiClick && Sfx.uiClick();
+                }
+              }
+            }
           }
         }
       }
@@ -7468,6 +8603,59 @@
               }
             }
           }
+        } else if (hubSubMenu === 'stash') {
+          // Stash screen — same layout as drawStashBankingScreen
+          const _sCols = 10, _sSlot = 28, _sGap = 3, _sX = 20, _sY = 38;
+          const _sRows = Math.ceil(stashSize / _sCols);
+          const _sEndY = _sY + _sRows * (_sSlot + _sGap) + 6;
+          const _iSlot = 28, _iGap = 3, _iCols = 10, _iX = 20, _iY = _sEndY + 14;
+          // Close button
+          if (isHovering(W - 120, H - 26, 110, 20)) {
+            hubSubMenu = null; hubSelectedItem = null;
+          } else {
+            let _handled = false;
+            // Click stash slot → retrieve to character inventory
+            for (let i = 0; i < stashSize && !_handled; i++) {
+              if (!stash[i]) continue;
+              const col = i % _sCols, row = Math.floor(i / _sCols);
+              const x = _sX + col * (_sSlot + _sGap);
+              const y = _sY + row * (_sSlot + _sGap);
+              if (mouseX >= x && mouseX < x + _sSlot && mouseY >= y && mouseY < y + _sSlot) {
+                _handled = true;
+                if (player && player.inventory.length < player.INVENTORY_CAP) {
+                  player.inventory.push(stash[i]);
+                  stash.splice(i, 1);
+                  saveData();
+                  Sfx.uiClick && Sfx.uiClick();
+                }
+              }
+            }
+            // Click inv slot → bank to stash (inventory items only, not equipped)
+            if (!_handled && player) {
+              const _invItems = [];
+              for (const k of SLOT_ORDER) {
+                if (player.equipped[k]) _invItems.push({ source: 'eq', key: k, item: player.equipped[k] });
+              }
+              for (let i = 0; i < player.inventory.length; i++) {
+                if (player.inventory[i]) _invItems.push({ source: 'inv', key: i, item: player.inventory[i] });
+              }
+              for (let i = 0; i < _invItems.length && !_handled; i++) {
+                const r = _invItems[i];
+                const col = i % _iCols, row = Math.floor(i / _iCols);
+                const x = _iX + col * (_iSlot + _iGap);
+                const y = _iY + row * (_iSlot + _iGap);
+                if (mouseX >= x && mouseX < x + _iSlot && mouseY >= y && mouseY < y + _iSlot) {
+                  _handled = true;
+                  if (r.source === 'inv' && stash.length < stashSize) {
+                    stash.push(r.item);
+                    player.inventory.splice(r.key, 1);
+                    saveData();
+                    Sfx.uiClick && Sfx.uiClick();
+                  }
+                }
+              }
+            }
+          }
         }
       }
       // H key from dead/victory → hub
@@ -7481,6 +8669,7 @@
 
     for (const p of particles) p.update(dt);
     particles = particles.filter(p => !p.dead);
+    updateAbilityVfx(dt);
     updateDamageNumbers(dt);
     if (levelUpFlashTimer > 0) levelUpFlashTimer -= dt;
     if (lootFlashTimer > 0) lootFlashTimer -= dt;
@@ -7537,6 +8726,7 @@
     for (const sw of meleeSwings) sw.draw(ctx);
     for (const p of projectiles) p.draw(ctx);
     for (const ep of enemyProjectiles) ep.draw(ctx);
+    drawAbilityVfx(ctx);
     if (state !== STATE.DEAD) player.draw(ctx);
     // Draw extra local players
     for (const _ep of extraPlayers) {
