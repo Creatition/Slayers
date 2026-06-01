@@ -1958,3 +1958,194 @@ class CharAnimator {
     return true;
   }
 }
+
+// ============================================================
+// ENEMY RIG — procedural animated pixel-art monsters.
+// Same art language as the player rig: dark outlines, shading,
+// animated walk. drawEnemy(ctx, cx, cy, {type, t, flip, flash, s, alpha})
+// Draws only with fillRect/fillStyle/globalAlpha (browser + preview).
+// ============================================================
+
+const ENEMY_RIGS = {
+  skeleton:   { arch: 'humanoid', ol: '#15140c', body: '#d8d4c0', bodyLt: '#f0ecd8', bodySh: '#9a9484', eye: '#a8e0ff', ribs: true, skull: true, weapon: 'rustsword', F: 9 },
+  zombie:     { arch: 'humanoid', ol: '#101a0a', body: '#5a7a3a', bodyLt: '#7a9a50', bodySh: '#3a5224', skin: '#86965a', eye: '#c8ff66', hunch: true, reach: true, torn: true, F: 5 },
+  yeti:       { arch: 'humanoid', ol: '#222a32', body: '#dfe6ee', bodyLt: '#ffffff', bodySh: '#a8b4c2', skin: '#bcd2e2', eye: '#3a7acc', big: true, horns: true, bigArm: true, F: 5 },
+  rat:        { arch: 'quad', ol: '#120e0a', body: '#6a5e52', bodyLt: '#8a7c6c', bodySh: '#443a30', ear: '#c88a86', eye: '#ff5544', tail: 'long', small: true, F: 18 },
+  frostWolf:  { arch: 'quad', ol: '#142028', body: '#8fb6d6', bodyLt: '#c2e0f2', bodySh: '#566f88', eye: '#7af0ff', fur: true, fang: true, F: 14 },
+  hellhound:  { arch: 'quad', ol: '#0e0604', body: '#34211e', bodyLt: '#5a302a', bodySh: '#1c0e0c', eye: '#ff7a22', mane: '#ff5511', fang: true, F: 15 },
+  imp:        { arch: 'imp', ol: '#280a06', body: '#c83828', bodyLt: '#ee5a40', bodySh: '#8a2418', eye: '#ffdd44', horns: true, wings: true, tail: true, fireHand: true, F: 8 },
+  shadow:     { arch: 'wraith', ol: '#060410', body: '#1e1830', bodyLt: '#36304e', bodySh: '#100a1c', eye: '#aef0ff', claws: true, baseAlpha: 0.82, F: 4 },
+  voidCaster: { arch: 'caster', ol: '#100820', body: '#3a2458', bodyLt: '#56386e', bodySh: '#241038', eye: '#dd66ff', orb: '#aa66ff', hood: true, F: 4 },
+};
+
+function drawEnemy(ctx, cx, cy, o) {
+  const cfg = (o.rig) || ENEMY_RIGS[o.type];
+  if (!cfg) return;
+  const s = o.s || 2;
+  const flip = !!o.flip;
+  const t = o.t || 0;
+  const flash = !!o.flash;
+  const OL = cfg.ol || '#0a0710';
+  const F = cfg.F || 8;
+  const baseA = (o.alpha !== undefined) ? o.alpha : (cfg.baseAlpha !== undefined ? cfg.baseAlpha : 1);
+
+  function col(c) { return flash ? '#ffffff' : c; }
+  function blk(ax, ay, aw, ah, c, alpha) {
+    ctx.globalAlpha = baseA * (alpha === undefined ? 1 : alpha);
+    ctx.fillStyle = col(c);
+    const x = flip ? (cx - (ax + aw) * s) : (cx + ax * s);
+    ctx.fillRect(Math.round(x), Math.round(cy + ay * s), Math.max(1, Math.ceil(aw * s)), Math.max(1, Math.ceil(ah * s)));
+    ctx.globalAlpha = 1;
+  }
+  function disc(ax, ay, ar, c, alpha) {
+    ctx.globalAlpha = baseA * (alpha === undefined ? 1 : alpha);
+    ctx.fillStyle = col(c);
+    for (let dy = -Math.ceil(ar); dy <= Math.ceil(ar); dy++) {
+      const dx = Math.sqrt(Math.max(0, ar * ar - dy * dy));
+      if (dx <= 0) continue;
+      const x0 = ax - dx, w = 2 * dx;
+      const x = flip ? (cx - (x0 + w) * s) : (cx + x0 * s);
+      ctx.fillRect(Math.round(x), Math.round(cy + (ay + dy) * s), Math.max(1, Math.ceil(w * s)), Math.max(1, Math.ceil(s)));
+    }
+    ctx.globalAlpha = 1;
+  }
+  function bar(x0, y0, x1, y1, th, c, alpha) {
+    const steps = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    for (let i = 0; i <= steps; i++) { const u = i / steps; disc(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, th, c, alpha); }
+  }
+  function limb(x0, y0, x1, y1, th, c) { bar(x0, y0, x1, y1, th + 0.5, OL); bar(x0, y0, x1, y1, th, c); }
+  function ball(ax, ay, ar, c) { disc(ax, ay, ar + 0.5, OL); disc(ax, ay, ar, c); }
+  function shadowOval(w) { ctx.globalAlpha = 0.3 * baseA; ctx.fillStyle = '#000'; ctx.fillRect(Math.round(cx - w * s / 2), Math.round(cy + 9 * s), w * s, Math.max(1, Math.round(1.4 * s))); ctx.globalAlpha = 1; }
+
+  if (cfg.arch === 'humanoid') drawHumanoid();
+  else if (cfg.arch === 'quad') drawQuad();
+  else if (cfg.arch === 'imp') drawImp();
+  else if (cfg.arch === 'wraith') drawWraith();
+  else if (cfg.arch === 'caster') drawCaster();
+
+  function drawHumanoid() {
+    const big = cfg.big ? 1.25 : 1;
+    const legPh = Math.sin(t * F), bob = Math.abs(Math.sin(t * F)) * 1.0;
+    const hunch = cfg.hunch ? 2.0 : 0;
+    shadowOval(7 * big);
+    const hipY = (4 - bob * 0.3) * big, shY = (-5 - bob) * big, headY = (-10.5 - bob) * big - hunch * 0.3;
+    const lean = hunch;
+    // legs
+    for (const side of [-1, 1]) {
+      const ph = side > 0 ? legPh : -legPh;
+      const footX = side * 1.3 * big + ph * 3.2 * big, fY = (12.5 * big) - Math.max(0, ph * side) * 1.4;
+      limb(side * 1.4 * big, hipY, footX, fY, 1.4 * big, side > 0 ? cfg.body : cfg.bodySh);
+      blk(footX - 1.5 * big, fY - 0.3, 3.0 * big, 1.5, OL);
+      blk(footX - 1.3 * big, fY - 0.2, 2.6 * big, 1.1, side > 0 ? cfg.bodySh : OL);
+    }
+    // back arm
+    const baX = -1.2 * big + lean, baHx = -2.6 * big + lean * 1.4, baHy = hipY + (cfg.reach ? -1 : 1.5);
+    limb(baX, shY + 0.5, baHx, baHy, 1.15 * big, cfg.bodySh);
+    // torso
+    limb(0, hipY, lean, shY + 0.5, 2.9 * big, cfg.body);
+    blk((flip ? 1.2 : -2.8) * big + lean, shY, 1.2 * big, hipY - shY, cfg.bodySh, 0.85);
+    if (cfg.ribs) { for (let i = 0; i < 3; i++) blk(-1.8 * big, shY + 1 + i * 1.6, 3.6 * big, 0.5, cfg.bodySh, 0.85); blk(-0.4 * big, shY + 0.5, 0.8 * big, hipY - shY, cfg.bodySh, 0.6); }
+    if (cfg.torn) { for (let i = 0; i < 4; i++) blk(-2.2 * big + i * 1.2, hipY - 0.4, 0.9, 1.0 + (i % 2) * 0.8, cfg.bodySh); }
+    // head
+    const hX = lean * 0.8;
+    blk(hX - 0.7 * big, shY - 1.4, 1.5 * big, 1.6, cfg.skin || cfg.bodySh);
+    ball(hX, headY, 2.7 * big, cfg.skin || cfg.body);
+    if (cfg.skull) { blk(hX - 1.5 * big, headY - 0.3, 1.2 * big, 1.3, '#15140c'); blk(hX + 0.4 * big, headY - 0.3, 1.2 * big, 1.3, '#15140c'); blk(hX - 0.3 * big, headY + 1.4, 0.7 * big, 1.0, '#15140c'); disc(hX - 0.9 * big, headY - 0.0, 0.45, cfg.eye, 0.9); disc(hX + 0.9 * big, headY, 0.45, cfg.eye, 0.9); blk(hX - 1.5 * big, headY + 1.6, 3.0 * big, 0.4, OL, 0.6); }
+    else { const ex = flip ? -0.9 * big : 0.6 * big; blk(hX + ex, headY - 0.2, 0.9 * big, 0.9, cfg.eye); if (cfg.eye) blk(hX + ex - 0.2, headY - 0.4, 1.2 * big, 1.2, cfg.eye, 0.2); }
+    if (cfg.horns) { for (const d2 of [-1.4, 1.4]) { bar(hX + d2 * big, headY - 1.8 * big, hX + d2 * 1.5 * big, headY - 3.8 * big, 0.6, OL); bar(hX + d2 * big, headY - 1.8 * big, hX + d2 * 1.5 * big, headY - 3.6 * big, 0.4, '#e8e0c8'); } }
+    // front arm
+    const faHx = 2.6 * big + lean + (cfg.reach ? 1.5 : 0), faHy = cfg.reach ? shY + 2 : hipY + 1;
+    limb(1.2 * big + lean, shY + 0.6, faHx, faHy, 1.2 * big, cfg.bodyLt);
+    if (cfg.bigArm) { ball(faHx, faHy, 1.6 * big, cfg.body); ball((1.2 * big + faHx) / 2, (shY + faHy) / 2, 1.5 * big, cfg.body); }
+    else ball(faHx, faHy, 0.95 * big, cfg.skin || cfg.body);
+    if (cfg.weapon === 'rustsword') { const a2 = 0.2; bar(faHx, faHy, faHx + Math.cos(a2) * 6, faHy + Math.sin(a2) * 6, 0.85, OL); bar(faHx, faHy, faHx + Math.cos(a2) * 5.6, faHy + Math.sin(a2) * 5.6, 0.5, '#7a6a52'); blk(faHx + Math.cos(a2) * 5.6 - 0.3, faHy + Math.sin(a2) * 5.6 - 0.3, 0.9, 0.9, '#b8a884'); }
+  }
+
+  function drawQuad() {
+    const sm = cfg.small ? 0.78 : 1;
+    const gait = Math.sin(t * F), gait2 = Math.sin(t * F + Math.PI);
+    const bodyY = 3 * sm + Math.abs(Math.sin(t * F * 2)) * 0.3;
+    shadowOval(11 * sm);
+    // far legs
+    for (const [bx, g] of [[-3.5, gait2], [3.2, gait]]) { limb(bx * sm, bodyY, (bx + g * 2) * sm, 8 * sm, 0.85 * sm, cfg.bodySh); blk((bx + g * 2) * sm - 0.9, 7.4 * sm, 1.8 * sm, 1.2, OL); }
+    // tail
+    if (cfg.tail === 'long') { bar(-6 * sm, bodyY + 0.5, -10 * sm, bodyY - 1, 0.6, OL); bar(-6 * sm, bodyY + 0.5, -10 * sm, bodyY - 1, 0.4, cfg.bodySh); blk(-10.4 * sm, bodyY - 1.6, 1.0, 1.0, cfg.bodySh); }
+    else { bar(-6 * sm, bodyY, -8.5 * sm, bodyY - 2.5, 0.9, OL); bar(-6 * sm, bodyY, -8.5 * sm, bodyY - 2.5, 0.6, cfg.body); }
+    // body
+    limb(-6 * sm, bodyY, 4.5 * sm, bodyY - 1, 2.7 * sm, cfg.body);
+    blk(-6 * sm, bodyY + 1, 11 * sm, 1.0, cfg.bodySh, 0.55);
+    blk(-4 * sm, bodyY - 2.4 * sm, 8 * sm, 0.8, cfg.bodyLt, 0.4);
+    if (cfg.mane) { for (let i = 0; i < 6; i++) { const mx = (3.5 - i * 1.4) * sm; const fl = 1.4 + Math.sin(t * 9 + i) * 0.5; bar(mx, bodyY - 2 * sm, mx - 0.6, bodyY - 2 * sm - fl, 0.6, cfg.mane); blk(mx - 0.4, bodyY - 2 * sm - fl, 0.7, 0.7, '#ffdd55', 0.9); } }
+    if (cfg.fur) { for (let i = 0; i < 5; i++) bar((3 - i * 1.5) * sm, bodyY - 2.2 * sm, (2.6 - i * 1.5) * sm, bodyY - 3.4 * sm, 0.45, cfg.bodyLt); }
+    // near legs
+    for (const [bx, g] of [[-3.2, gait], [3.6, gait2]]) { limb(bx * sm, bodyY, (bx + g * 2) * sm, 8.4 * sm, 0.95 * sm, cfg.body); blk((bx + g * 2) * sm - 1.0, 7.9 * sm, 2.0 * sm, 1.3, OL); blk((bx + g * 2) * sm - 0.8, 8.0 * sm, 1.6 * sm, 0.9, cfg.body); }
+    // head
+    const hx = 5.5 * sm, hy = (bodyY - 1.5);
+    ball(hx, hy, 2.2 * sm, cfg.body);
+    blk(hx + 1.0 * sm, hy + 0.2, 2.4 * sm, 1.6, OL); blk(hx + 1.2 * sm, hy + 0.3, 2.0 * sm, 1.2, cfg.body); // snout
+    if (cfg.ear) { for (const ex of [4.6, 6.2]) { bar(ex * sm, hy - 1.8 * sm, (ex - 0.3) * sm, hy - 3.6 * sm, 0.7, OL); bar(ex * sm, hy - 1.8 * sm, (ex - 0.3) * sm, hy - 3.4 * sm, 0.45, cfg.ear); } }
+    else { for (const ex of [4.8, 6.4]) { bar(ex * sm, hy - 1.6 * sm, (ex - 0.3) * sm, hy - 3.2 * sm, 0.7, OL); bar(ex * sm, hy - 1.6 * sm, (ex - 0.3) * sm, hy - 3.0 * sm, 0.45, cfg.body); } }
+    blk(hx + 0.7 * sm, hy - 0.5, 1.0 * sm, 0.8, cfg.eye); blk(hx + 0.5 * sm, hy - 0.7, 1.4 * sm, 1.2, cfg.eye, 0.22);
+    blk(hx + 2.8 * sm, hy + 0.4, 0.6, 0.6, OL); // nose
+    if (cfg.fang) { blk(hx + 1.6 * sm, hy + 1.4, 0.4, 0.8, '#ffffff'); blk(hx + 2.4 * sm, hy + 1.4, 0.4, 0.8, '#ffffff'); }
+  }
+
+  function drawImp() {
+    const hover = Math.sin(t * 3) * 0.6, wing = Math.sin(t * F);
+    shadowOval(5);
+    // tail
+    bar(-2, 4, -5, 5 + hover, 0.6, OL); bar(-2, 4, -5, 5 + hover, 0.4, cfg.bodySh); blk(-5.6, 4.4 + hover, 1.4, 1.4, OL); bar(-5, 5 + hover, -6.2, 3.8 + hover, 0.4, cfg.accent || cfg.bodyLt);
+    // wings
+    for (const d2 of [-1, 1]) { const wy = -8 - Math.abs(wing) * 2 * (d2 > 0 ? 1 : 0.8); bar(d2 * 1, -3 + hover, d2 * 5, wy + hover, 1.0, OL); bar(d2 * 1, -3 + hover, d2 * 5, wy + hover, 0.7, cfg.bodySh); blk(d2 > 0 ? 3 : -6, wy + hover, 3, 3, cfg.bodySh, 0.8); }
+    // legs (short)
+    for (const side of [-1, 1]) { limb(side * 1.2, 3 + hover, side * 1.6, 7 + hover, 0.85, cfg.bodySh); blk(side * 1.6 - 0.9, 6.6 + hover, 1.8, 1.2, OL); }
+    // body
+    limb(0, 4 + hover, 0, -3 + hover, 2.4, cfg.body);
+    blk(-0.6, -2 + hover, 1.4, 6, cfg.bodyLt, 0.5);
+    // head
+    ball(0.4, -6 + hover, 2.2, cfg.body);
+    for (const d2 of [-1.3, 1.3]) { bar(d2, -7.4 + hover, d2 * 1.6, -9.6 + hover, 0.55, OL); bar(d2, -7.4 + hover, d2 * 1.6, -9.4 + hover, 0.35, cfg.bodySh); }
+    const ex = flip ? -0.7 : 0.0; blk(ex - 0.8, -6.2 + hover, 0.8, 0.8, cfg.eye); blk(ex + 0.6, -6.2 + hover, 0.8, 0.8, cfg.eye);
+    blk(-0.8, -4.6 + hover, 2.0, 0.5, OL, 0.7); // grin
+    // fire hand
+    if (cfg.fireHand) { const fx = 2.8, fy = 0 + hover; limb(1.2, -1 + hover, fx, fy, 1.0, cfg.bodyLt); const pulse = 0.7 + 0.3 * Math.sin(t * 10); disc(fx + 0.6, fy, 1.6 * pulse, '#ff7722', 0.85); disc(fx + 0.6, fy, 0.9, '#ffdd55'); disc(fx + 0.6, fy, 0.4, '#ffffff'); }
+    else limb(1.2, -1 + hover, 2.6, 1 + hover, 1.0, cfg.bodyLt);
+  }
+
+  function drawWraith() {
+    const hover = Math.sin(t * 3) * 0.7;
+    ctx.globalAlpha = 0.18 * baseA; ctx.fillStyle = '#000'; ctx.fillRect(Math.round(cx - 5 * s), Math.round(cy + 9 * s), 10 * s, Math.round(1.2 * s)); ctx.globalAlpha = 1;
+    // tattered lower wisps
+    for (let i = 0; i < 5; i++) { const wx = -3.2 + i * 1.6; const wl = 4 + Math.sin(t * 4 + i) * 1.6 + (i % 2) * 1.5; bar(wx, 2 + hover, wx + Math.sin(t * 3 + i) * 1.2, 2 + hover + wl, 1.0, OL); bar(wx, 2 + hover, wx + Math.sin(t * 3 + i) * 1.2, 2 + hover + wl, 0.7, cfg.bodySh); }
+    // cloak body
+    limb(0, 3 + hover, 0, -4 + hover, 3.0, cfg.body);
+    blk(-3.2, -4 + hover, 6.4, 7, cfg.body, 0.6);
+    blk(-2.6, -3 + hover, 1.0, 6, cfg.bodyLt, 0.4);
+    // hood
+    ball(0, -6 + hover, 2.9, cfg.body);
+    disc(0, -5.4 + hover, 2.3, OL, 0.85); // dark face void
+    const ex = flip ? -1.1 : 0.2; disc(ex, -6 + hover, 0.6, cfg.eye); disc(ex + 1.4, -6 + hover, 0.6, cfg.eye);
+    disc(ex, -6 + hover, 1.0, cfg.eye, 0.25); disc(ex + 1.4, -6 + hover, 1.0, cfg.eye, 0.25);
+    // claws
+    if (cfg.claws) for (const d2 of [-1, 1]) { const hx = d2 * 3.2, hy = 1 + hover; for (let k = -1; k <= 1; k++) bar(hx, hy, hx + d2 * 1.4, hy + 2 + k * 0.8, 0.4, cfg.bodyLt); }
+  }
+
+  function drawCaster() {
+    const hover = Math.sin(t * 2.6) * 0.6;
+    ctx.globalAlpha = 0.2 * baseA; ctx.fillStyle = '#000'; ctx.fillRect(Math.round(cx - 5 * s), Math.round(cy + 9 * s), 10 * s, Math.round(1.2 * s)); ctx.globalAlpha = 1;
+    // robe to floor (flared)
+    for (let yy = -2; yy <= 8; yy++) { const tt = (yy + 2) / 10; const hw = 1.8 + tt * 3.2; const off = Math.sin(t * 2 + tt * 3) * 0.6 * tt; blk(-hw - 0.4 + off, yy + hover * (1 - tt), hw * 2 + 0.8, 1.2, OL); }
+    for (let yy = -2; yy <= 8; yy++) { const tt = (yy + 2) / 10; const hw = 1.8 + tt * 3.2; const off = Math.sin(t * 2 + tt * 3) * 0.6 * tt; blk(-hw + off, yy + hover * (1 - tt), hw * 2, 1.1, cfg.body); blk(-0.7 + off, yy + hover * (1 - tt), 1.4, 1.1, cfg.bodyLt, 0.5); blk(-hw + off, yy + hover * (1 - tt), 1.0, 1.1, cfg.bodySh, 0.7); }
+    // hem fringe
+    for (let i = 0; i < 7; i++) blk(-5 + i * 1.5, 8.6, 1.0, 0.6 + (i % 2) * 0.8, cfg.body);
+    // hood
+    ball(0, -4 + hover, 2.8, cfg.body);
+    disc(0.3, -3.4 + hover, 2.2, OL, 0.8);
+    const ex = flip ? -1.0 : 0.4; disc(ex, -4 + hover, 0.55, cfg.eye); disc(ex + 1.2, -4 + hover, 0.55, cfg.eye); disc(ex + 0.6, -4 + hover, 1.4, cfg.eye, 0.2);
+    blk(-0.6, -1.4 + hover, 1.4, 1.0, cfg.bodyLt, 0.6); // chest rune
+    // orb in hand
+    const ox = 3.6, oy = -0.5 + hover, pulse = 0.6 + 0.4 * Math.sin(t * 5);
+    limb(1.4, -1 + hover, ox - 0.6, oy, 0.9, cfg.bodySh);
+    disc(ox, oy, 1.8 * pulse, cfg.orb, 0.5); disc(ox, oy, 1.1, cfg.orb); disc(ox, oy, 0.5, '#ffffff');
+  }
+}

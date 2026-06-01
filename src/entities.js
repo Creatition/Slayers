@@ -1039,6 +1039,7 @@ class Enemy {
     this.alive = true;
     this.bobPhase = Math.random() * Math.PI * 2;
     this.hitFlash = 0; this.isBoss = false;
+    this.faceFlip = false;
     this.fireTimer = 1 + Math.random() * 2;
     this.slowTimer = 0;
     this.slowFactor = 1.0;
@@ -1088,6 +1089,7 @@ class Enemy {
     const enraged = this.elite && this.hasMod('enraged') && this.hp < this.maxHp * 0.3;
     const effSpeed = (this.slowTimer > 0 ? this.speed * this.slowFactor : this.speed) * (enraged ? 1.8 : 1);
     if (d > 0.01) { this.x += (dx / d) * effSpeed * dt; this.y += (dy / d) * effSpeed * dt; }
+    this.faceFlip = dx < 0;
     const bobSpeed = (this.type === 'rat' || this.type === 'frostWolf') ? 14
                    : (this.type === 'zombie' || this.type === 'yeti') ? 5
                    : 8;
@@ -1236,24 +1238,20 @@ class Enemy {
     }
 
     // ── Sprite ───────────────────────────────────────────────
-    const sprite = (typeof ENEMY_SPRITES !== 'undefined') ? ENEMY_SPRITES[this.type] : null;
-    if (sprite && typeof drawSprite === 'function') {
-      if (this.type === 'shadow') {
-        ctx.globalAlpha = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
-      }
-      drawSprite(ctx, sprite, px, py, false, f, 2 * sc);
-      ctx.globalAlpha = 1;
-      if (this.type === 'voidCaster') {
-        const orbY = py + Math.sin(performance.now() * 0.005) * 2;
-        ctx.fillStyle = '#aa66ff';
-        ctx.fillRect(px + 10, Math.floor(orbY) - 2, 4, 4);
-        ctx.fillStyle = '#ff60ff';
-        ctx.fillRect(px + 11, Math.floor(orbY) - 1, 2, 2);
-      }
+    if (typeof drawEnemy === 'function' && typeof ENEMY_RIGS !== 'undefined' && ENEMY_RIGS[this.type]) {
+      const _et = performance.now() / 1000 + this.bobPhase;
+      drawEnemy(ctx, px, py, { type: this.type, t: _et, flip: !!this.faceFlip, flash: f, s: 2 * sc });
     } else {
-      ctx.fillStyle = f ? '#ffffff' : '#aa3030';
-      const fr = Math.round(this.r * sc);
-      ctx.fillRect(px - fr, py - fr, fr * 2, fr * 2);
+      const sprite = (typeof ENEMY_SPRITES !== 'undefined') ? ENEMY_SPRITES[this.type] : null;
+      if (sprite && typeof drawSprite === 'function') {
+        if (this.type === 'shadow') ctx.globalAlpha = 0.7 + 0.3 * Math.sin(performance.now() * 0.01 + this.bobPhase);
+        drawSprite(ctx, sprite, px, py, false, f, 2 * sc);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillStyle = f ? '#ffffff' : '#aa3030';
+        const fr = Math.round(this.r * sc);
+        ctx.fillRect(px - fr, py - fr, fr * 2, fr * 2);
+      }
     }
 
     // ── Shield bubble (drawn over sprite) ───────────────────
