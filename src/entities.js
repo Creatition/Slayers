@@ -561,7 +561,8 @@ class Player {
     this.gems = []; this.GEM_CAP = 50; // gem stash
     this.isMoving = false;
     this.animator = (this.class.id === 'berserker' && typeof BerserkerAnimator !== 'undefined')
-      ? new BerserkerAnimator() : null;
+      ? new BerserkerAnimator()
+      : (typeof CharAnimator !== 'undefined' ? new CharAnimator(this.class.id) : null);
   }
   onCrit() {
     if (this.class.critResourceGain) {
@@ -902,11 +903,18 @@ class Player {
       ctx.fillText(this.boneArmorCharges, px + 5, py - 8);
     }
     // Pick the right class sprite. facing===-1 mirrors horizontally.
+    // Druid: swap to Dragon or Panther sprite in Wild Shape form.
     // For the Berserker, try the PixelLab PNG animator first; fall back to ASCII sprite.
+    let _spriteKey = this.class.id;
+    if (_spriteKey === 'druid' && this.class.wildShape) {
+      const _ws = this.class.wildShape;
+      if (_ws === 'dragon' || _ws === 'hybrid') _spriteKey = 'druid_dragon';
+      else if (_ws === 'panther') _spriteKey = 'druid_panther';
+    }
     const sprite = (typeof PLAYER_SPRITES !== 'undefined')
-      ? PLAYER_SPRITES[this.class.id]
+      ? PLAYER_SPRITES[_spriteKey]
       : null;
-    const drewPng = this.animator ? this.animator.draw(ctx, px, py, flash) : false;
+    const drewPng = this.animator ? this.animator.draw(ctx, px, py, flash, _spriteKey) : false;
     if (!drewPng) {
       if (sprite && typeof drawSprite === 'function') {
         // Scale 3 for Berserker so the ASCII fallback matches the PNG size; 2 for all others

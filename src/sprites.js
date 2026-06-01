@@ -353,17 +353,79 @@ const SPRITE_AMAZONIAN = {
   ],
 };
 
+// ============================================================
+// DRUID DRAGON FORM — fiery orange scales, bone horns, yellow eyes, fire glow right side
+// 0=dark-outline 1=scale-shadow(dark-red) 2=scale-main(red-orange) 3=horn(bone-ivory)
+// 4=armor-dark 5=armor-main 6=belly-orange 7=fire-glow 8=eye-yellow 9=claw-ivory
+// ============================================================
+const SPRITE_DRUID_DRAGON = {
+  w: 10, h: 14,
+  palette: [
+    '#060200', '#5a1800', '#c84800', '#ead870',
+    '#1a0a00', '#7a2c10', '#ffa020', '#ff6600',
+    '#ffee00', '#f0e8b0',
+  ],
+  rows: [
+    '..03.30...',
+    '.0333330..',
+    '.0322230..',
+    '.0382280..',
+    '.0322220..',
+    '..00220...',
+    '.04444476.',
+    '0455554476',
+    '0455554477',
+    '0466554477',
+    '.04555477.',
+    '.04..4477.',
+    '.04..4477.',
+    '.04..40.7.',
+  ],
+};
+
+// ============================================================
+// DRUID PANTHER FORM — near-black fur, golden yellow eyes, ivory claws
+// 0=outline 1=fur-shadow 2=fur-main(deep black) 3=marking 4=body-dark
+// 5=body 6=belly(slightly lighter) 7=dark 8=eye(golden-yellow) 9=claw(light-tan)
+// ============================================================
+const SPRITE_DRUID_PANTHER = {
+  w: 10, h: 14,
+  palette: [
+    '#030203', '#0c0a0c', '#141214', '#1e1a1e',
+    '#0c0a0c', '#1e1a1e', '#2a2628', '#0c0a0c',
+    '#ffd000', '#c8b090',
+  ],
+  rows: [
+    '..03.30...',
+    '.0333330..',
+    '.0222230..',
+    '.0282280..',
+    '.0222220..',
+    '..00220...',
+    '.04444489.',
+    '0455554489',
+    '0455554499',
+    '0466554499',
+    '.04555499.',
+    '.04..4499.',
+    '.04..4499.',
+    '.04..40.9.',
+  ],
+};
+
 const PLAYER_SPRITES = {
-  ranger:      SPRITE_ARCHER,       // Archer sprite repurposed for Ranger
-  sorcerer:    SPRITE_WIZARD,       // Wizard sprite repurposed for Sorcerer
-  berserker:   SPRITE_WARRIOR,      // Warrior sprite repurposed for Berserker
-  assassin:    SPRITE_ROGUE,        // Rogue sprite repurposed for Assassin
-  templar:     SPRITE_MONK,         // Monk sprite repurposed for Templar
-  crusader:    SPRITE_PALADIN,      // Paladin sprite repurposed for Crusader
-  shaman:      SPRITE_WITCH_DOCTOR, // Witch Doctor sprite repurposed for Shaman
-  necromancer: SPRITE_NECROMANCER,
-  druid:       SPRITE_DRUID,        // unique Druid sprite
-  amazonian:   SPRITE_AMAZONIAN,    // unique Amazonian sprite
+  ranger:        SPRITE_ARCHER,       // Archer sprite repurposed for Ranger
+  sorcerer:      SPRITE_WIZARD,       // Wizard sprite repurposed for Sorcerer
+  berserker:     SPRITE_WARRIOR,      // Warrior sprite repurposed for Berserker
+  assassin:      SPRITE_ROGUE,        // Rogue sprite repurposed for Assassin
+  templar:       SPRITE_MONK,         // Monk sprite repurposed for Templar
+  crusader:      SPRITE_PALADIN,      // Paladin sprite repurposed for Crusader
+  shaman:        SPRITE_WITCH_DOCTOR, // Witch Doctor sprite repurposed for Shaman
+  necromancer:   SPRITE_NECROMANCER,
+  druid:         SPRITE_DRUID,        // Human form
+  druid_dragon:  SPRITE_DRUID_DRAGON, // Dragon Wild Shape form
+  druid_panther: SPRITE_DRUID_PANTHER,// Panther Wild Shape form
+  amazonian:     SPRITE_AMAZONIAN,    // unique Amazonian sprite
 };
 
 
@@ -1366,6 +1428,443 @@ class BerserkerAnimator {
       ctx.filter = 'none'; ctx.globalAlpha = 1;
     }
     ctx.restore();
+    return true;
+  }
+}
+
+// ============================================================
+// CHAR RIG — procedural animated pixel-art characters.
+// Code-driven skeleton: head/torso/arms/legs/weapon/accessories,
+// 4-directional (down/up/side), animated idle + run + attack.
+// Draws only with fillRect/fillStyle/globalAlpha so it runs in the
+// browser AND in the offline PNG preview harness unchanged.
+// API: drawCharacter(ctx, cx, cy, opts)
+// ============================================================
+
+const CLASS_RIGS = {
+  ranger: {
+    skin: '#c28030', skinSh: '#8a5a20', hair: '#3a2410',
+    body: '#1f5a26', bodyLt: '#2f7a34', bodySh: '#123a18',
+    belt: '#5a3a18', accent: '#ffd23f', boot: '#3a2a16',
+    headgear: 'hood', hoodCol: '#1f5a26', cape: null, back: 'quiver',
+    weapon: 'bow', wpnMain: '#7a5320', wpnLt: '#b88a3c', wpnAcc: '#ffd23f', wpnStyle: 'bow',
+  },
+  sorcerer: {
+    skin: '#d8c0a0', skinSh: '#a08868', hair: '#b8b8c8',
+    body: '#241356', bodyLt: '#3a1f82', bodySh: '#160a36', beard: '#c8c8d8',
+    belt: '#c09020', accent: '#aaccff', boot: '#160a36',
+    headgear: 'wizhat', hatCol: '#241356', cape: null, back: null,
+    weapon: 'staff', wpnMain: '#6a4a28', wpnLt: '#9a7038', wpnAcc: '#aaccff', wpnStyle: 'cast',
+  },
+  assassin: {
+    skin: '#c8a878', skinSh: '#90744a', hair: '#1a1024',
+    body: '#33254a', bodyLt: '#54407a', bodySh: '#1c1230',
+    belt: '#241830', accent: '#cc88ff', boot: '#1c1230',
+    headgear: 'hood', hoodCol: '#3a2a52', cape: null, back: null, mask: true,
+    weapon: 'dagger', wpnMain: '#cfcfe0', wpnLt: '#ffffff', wpnAcc: '#cc88ff', wpnStyle: 'dagger',
+  },
+  templar: {
+    skin: '#caa070', skinSh: '#946c40', hair: '#2a1a0e',
+    body: '#d8c89a', bodyLt: '#efe2b8', bodySh: '#a89860',
+    belt: '#b06028', accent: '#ffcc66', boot: '#8a5020', sash: '#c0402a',
+    headgear: 'bald', cape: null, back: null,
+    weapon: 'bostaff', wpnMain: '#7a5028', wpnLt: '#b88a4a', wpnAcc: '#ffcc66', wpnStyle: 'bostaff',
+  },
+  crusader: {
+    skin: '#d0a878', skinSh: '#9a7848', hair: '#5a3a18',
+    body: '#b9c0cc', bodyLt: '#e6ecf4', bodySh: '#7c8492',
+    belt: '#c8a020', accent: '#ffe866', boot: '#7c8492',
+    headgear: 'helm', helmCol: '#cdd4de', cape: '#b81e2a', back: 'cape',
+    weapon: 'sword', wpnMain: '#d8dde6', wpnLt: '#ffffff', wpnAcc: '#ffe866', wpnStyle: 'sword',
+  },
+  druid: {
+    skin: '#c89868', skinSh: '#947046', hair: '#4a6a2a',
+    body: '#4a6a32', bodyLt: '#6a8c46', bodySh: '#324a20',
+    belt: '#6a4a28', accent: '#aaee66', boot: '#5a3a1c',
+    headgear: 'antler', cape: '#3a5a24', back: null,
+    weapon: 'druidstaff', wpnMain: '#6a4a28', wpnLt: '#9a7038', wpnAcc: '#aaee66', wpnStyle: 'cast',
+  },
+  shaman: {
+    skin: '#7a4a2a', skinSh: '#552f18', hair: '#1a1208',
+    body: '#3a6a2a', bodyLt: '#56923e', bodySh: '#254a1c',
+    belt: '#caa84a', accent: '#aaff44', boot: '#3a2a16',
+    headgear: 'mask', maskCol: '#caa84a', cape: null, back: 'totem',
+    weapon: 'fetish', wpnMain: '#6a4a28', wpnLt: '#caa84a', wpnAcc: '#aaff44', wpnStyle: 'cast',
+  },
+  necromancer: {
+    skin: '#c8c4cc', skinSh: '#928e98', hair: '#1a1426',
+    body: '#2a1f3e', bodyLt: '#42325e', bodySh: '#180f28',
+    belt: '#7a6a9a', accent: '#ccbbee', boot: '#180f28',
+    headgear: 'hood', hoodCol: '#221830', cape: null, back: 'bonespikes',
+    weapon: 'scythe', wpnMain: '#5a4a6a', wpnLt: '#8a7aa0', wpnAcc: '#ccbbee', wpnStyle: 'scythe',
+  },
+  amazonian: {
+    skin: '#cc9460', skinSh: '#996840', hair: '#3a240e',
+    body: '#9a5a2a', bodyLt: '#c47e3e', bodySh: '#6e3e1c',
+    belt: '#caa84a', accent: '#ddaa33', boot: '#7a4a22',
+    headgear: 'ponytail', cape: null, back: null, shield: true,
+    weapon: 'spear', wpnMain: '#8a6028', wpnLt: '#caa84a', wpnAcc: '#ddaa33', wpnStyle: 'spear',
+  },
+  druid_dragon: { form: 'dragon', body: '#b8402a', bodyLt: '#e06840', bodySh: '#7e2818', belly: '#e8c060', accent: '#ffcc44', wing: '#8a2c1c' },
+  druid_panther:{ form: 'panther', body: '#1c1822', bodyLt: '#352e40', bodySh: '#0c0a12', eye: '#cc88ff', accent: '#cc88ff' },
+};
+
+function rigDir4(dir8) {
+  if (!dir8) return { dir: 'down', flip: false };
+  switch (dir8) {
+    case 'east':       return { dir: 'side', flip: false };
+    case 'west':       return { dir: 'side', flip: true };
+    case 'north':      return { dir: 'up',   flip: false };
+    case 'south':      return { dir: 'down', flip: false };
+    case 'north-east': return { dir: 'up',   flip: false };
+    case 'north-west': return { dir: 'up',   flip: true };
+    case 'south-east': return { dir: 'down', flip: false };
+    case 'south-west': return { dir: 'down', flip: true };
+    default:           return { dir: 'down', flip: false };
+  }
+}
+
+function drawCharacter(ctx, cx, cy, o) {
+  const rig = o.rig || CLASS_RIGS[o.classId];
+  if (!rig) return;
+  const s = o.s || 2;
+  const flip = !!o.flip;
+  const dir = o.dir || 'down';
+  const state = o.state || 'idle';
+  const t = o.t || 0;
+  const aT = (o.attackT === undefined) ? -1 : o.attackT;
+  const flash = !!o.flash;
+
+  function col(c) { return flash ? '#ffffff' : c; }
+  function blk(ax, ay, aw, ah, c, alpha) {
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    ctx.fillStyle = col(c);
+    const x = flip ? (cx - (ax + aw) * s) : (cx + ax * s);
+    ctx.fillRect(Math.round(x), Math.round(cy + ay * s), Math.max(1, Math.ceil(aw * s)), Math.max(1, Math.ceil(ah * s)));
+    if (alpha !== undefined) ctx.globalAlpha = 1;
+  }
+  function disc(ax, ay, ar, c, alpha) {
+    if (alpha !== undefined) ctx.globalAlpha = alpha;
+    ctx.fillStyle = col(c);
+    for (let dy = -Math.ceil(ar); dy <= Math.ceil(ar); dy++) {
+      const dx = Math.sqrt(Math.max(0, ar * ar - dy * dy));
+      if (dx <= 0) continue;
+      const x0 = ax - dx, w = 2 * dx;
+      const x = flip ? (cx - (x0 + w) * s) : (cx + x0 * s);
+      ctx.fillRect(Math.round(x), Math.round(cy + (ay + dy) * s), Math.max(1, Math.ceil(w * s)), Math.max(1, Math.ceil(s)));
+    }
+    if (alpha !== undefined) ctx.globalAlpha = 1;
+  }
+  function bar(x0, y0, x1, y1, th, c, alpha) {
+    const steps = Math.max(2, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    for (let i = 0; i <= steps; i++) { const u = i / steps; disc(x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, th, c, alpha); }
+  }
+
+  if (rig.form === 'dragon') { drawDragon(); return; }
+  if (rig.form === 'panther') { drawPanther(); return; }
+
+  const runF = 11;
+  let bob, legPh, armPh, lean;
+  if (state === 'run') {
+    bob = Math.abs(Math.sin(t * runF)) * 1.3;
+    legPh = Math.sin(t * runF);
+    armPh = Math.sin(t * runF + Math.PI);
+    lean = 1.4;
+  } else if (state === 'attack') {
+    bob = 0.3; legPh = 0; armPh = 0; lean = 1.0 + (aT >= 0 ? Math.sin(aT * Math.PI) * 1.2 : 0);
+  } else {
+    bob = Math.sin(t * 2.6) * 0.4 + 0.4; legPh = 0; armPh = Math.sin(t * 2.6) * 0.18; lean = 0;
+  }
+  const upY = -bob;
+
+  const footY = 13;
+  const hipY = 4 + upY * 0.3;
+  const shY = -5 + upY;
+  const headY = -11 + upY;
+
+  // SHADOW
+  ctx.globalAlpha = 0.28; ctx.fillStyle = '#000';
+  const shW = 7 * s;
+  ctx.fillRect(Math.round(cx - shW / 2), Math.round(cy + (footY + 0.5) * s), shW, Math.max(1, Math.round(1.2 * s)));
+  ctx.globalAlpha = 1;
+
+  // LEGS
+  function drawLeg(side, ph, shade) {
+    const hipX = side * 1.6;
+    let footX, fY;
+    if (dir === 'side') { footX = side * 1.2 + ph * 4; fY = footY - Math.max(0, ph * side) * 1.5; }
+    else { footX = side * 2.0; fY = footY - Math.abs(ph) * (side > 0 ? 1.6 : 0); }
+    const kneeX = (hipX + footX) / 2 + (dir === 'side' ? 0.6 : 0);
+    const kneeY = (hipY + fY) / 2 + 0.6;
+    bar(hipX, hipY, kneeX, kneeY, 1.5, shade);
+    bar(kneeX, kneeY, footX, fY, 1.4, shade);
+    blk(footX - 1.6, fY - 0.4, 3.2, 1.6, rig.boot);
+  }
+  if (dir === 'side') { drawLeg(-1, -legPh, rig.bodySh); drawLeg(1, legPh, rig.body); }
+  else { drawLeg(-1, legPh, rig.bodySh); drawLeg(1, -legPh, rig.body); }
+
+  // BACK ARM
+  function armPose(front, swing) {
+    const shX = front * (dir === 'side' ? 1.2 : 3.2) + lean * 0.3;
+    let hx, hy;
+    if (dir === 'side') {
+      if (front > 0 && state === 'attack' && aT >= 0) {
+        const sw = -0.9 + aT * 2.0;
+        hx = shX + Math.cos(sw) * 6.5; hy = shY + 2 + Math.sin(sw) * 6.5;
+      } else { hx = shX + 2.2 + swing * 1.6 + lean; hy = hipY + 1 + Math.abs(swing) * 0.5; }
+    } else {
+      hx = shX + front * 0.6; hy = hipY + 1 + swing * 1.2;
+      if (front > 0 && state === 'attack' && aT >= 0) { hx = shX + 1.5; hy = shY + 1 + (1 - aT) * 4; }
+    }
+    return { shX, shY, hx, hy };
+  }
+  const back = armPose(-1, armPh);
+  bar(back.shX, shY + 0.5, back.hx, back.hy, 1.3, rig.bodySh);
+
+  // TORSO
+  const topX = lean * 0.5;
+  bar(0, hipY, topX, shY + 0.5, 3.2, rig.body);
+  blk((flip ? 1.2 : -3.2), shY, 1.4, hipY - shY + 1, rig.bodySh, 0.9);
+  blk((flip ? -2.6 : 1.2), shY + 0.5, 1.4, hipY - shY, rig.bodyLt, 0.9);
+  blk(-3, hipY - 0.6, 6, 1.4, rig.belt);
+  blk(-0.7, hipY - 0.6, 1.4, 1.4, rig.accent);
+  if (rig.sash) blk(0.4, shY + 1, 1.2, hipY - shY, rig.sash, 0.95);
+  blk(-0.8, shY + 1.2, 1.6, 1.6, rig.accent, 0.85);
+
+  // CAPE
+  if (rig.cape && dir !== 'down') {
+    const flow = state === 'run' ? Math.sin(t * runF) * 1.4 : Math.sin(t * 2.2) * 0.5;
+    ctx.globalAlpha = 0.95;
+    bar(-1, shY + 0.5, -3 - flow, hipY + 3, 2.4, rig.cape);
+    bar(-3 - flow, hipY + 3, -2.5 - flow, footY - 1, 1.6, rig.cape);
+    ctx.globalAlpha = 1;
+  } else if (rig.cape && dir === 'down') {
+    ctx.globalAlpha = 0.9;
+    blk(-4.2, shY + 0.5, 1.2, footY - shY - 1, rig.cape);
+    blk(3.0, shY + 0.5, 1.2, footY - shY - 1, rig.cape);
+    ctx.globalAlpha = 1;
+  }
+
+  // BACK ACCESSORY
+  if (rig.back === 'quiver') { blk(-3.4, shY + 1, 1.6, 6, '#3a2412'); blk(-3.2, shY + 0.6, 1.2, 0.8, rig.accent); for (let i = 0; i < 3; i++) blk(-3.3 + i * 0.5, shY + 0.2, 0.4, 1.2, rig.accent); }
+  if (rig.back === 'bonespikes') { for (let i = 0; i < 4; i++) bar(-2.4, shY + i * 1.6, -4 - i * 0.3, shY - 1 + i * 1.6, 0.7, '#e6e0f0'); }
+  if (rig.back === 'totem') { blk(-3.6, shY - 1, 1.8, 8, '#6a4a28'); blk(-3.5, shY - 1, 1.6, 1.6, rig.accent); blk(-3.4, shY + 1.2, 1.4, 1.2, '#cc4422'); blk(-3.4, shY + 3, 1.4, 1.2, '#ffd23f'); }
+
+  // HEAD
+  const hx = topX * 0.7;
+  blk(hx - 0.7, shY - 1.4, 1.6, 1.6, rig.skinSh);
+  disc(hx, headY, 3.0, rig.skin);
+  disc(hx + (flip ? 1.0 : -1.0), headY + 0.6, 2.0, rig.skinSh, 0.5);
+  drawHead(hx, headY);
+
+  // FRONT ARM + WEAPON
+  const fr = armPose(1, -armPh);
+  bar(fr.shX, shY + 0.5, (fr.shX + fr.hx) / 2, (shY + fr.hy) / 2, 1.3, rig.bodyLt);
+  bar((fr.shX + fr.hx) / 2, (shY + fr.hy) / 2, fr.hx, fr.hy, 1.2, rig.skin);
+  drawWeapon(fr.hx, fr.hy);
+
+  function drawHead(hX, hY) {
+    const g = rig.headgear;
+    if (g === 'hood' || g === undefined) {
+      disc(hX, hY - 0.4, 3.3, rig.hoodCol || rig.body);
+      disc(hX + (flip ? -0.6 : 0.6), hY + 0.4, 2.7, rig.skin);
+      blk(hX - 3.2, hY - 0.5, 1.2, 3.2, rig.bodySh, 0.9);
+      blk(hX + 2.0, hY - 0.5, 1.2, 3.2, rig.bodySh, 0.9);
+    } else if (g === 'wizhat') {
+      for (let i = 0; i < 7; i++) blk(hX - (2.6 - i * 0.34), hY - 2.2 - i * 0.9, (2.6 - i * 0.34) * 2, 1.0, rig.hatCol);
+      blk(hX - 3.4, hY - 2.4, 6.8, 1.2, rig.bodyLt);
+      blk(hX + 1.4, hY - 7.4, 0.9, 0.9, rig.accent);
+      if (rig.beard) { blk(hX - 1.6, hY + 1.4, 3.2, 3.0, rig.beard); blk(hX - 1.0, hY + 3.8, 2.0, 1.4, rig.beard); }
+    } else if (g === 'helm') {
+      disc(hX, hY - 0.6, 3.3, rig.helmCol);
+      blk(hX - 3.2, hY - 0.2, 6.4, 1.2, rig.helmCol);
+      blk(hX - 0.5, hY - 3.8, 1.0, 1.6, rig.accent);
+      bar(hX, hY - 3.8, hX + (flip ? -2 : 2), hY - 5.6, 0.7, rig.cape || rig.accent);
+      blk(hX - 0.5, hY - 0.4, 1.0, 2.4, '#0a0c10');
+      blk(hX - 2.2, hY + 0.2, 4.4, 0.9, '#0a0c10');
+    } else if (g === 'mask') {
+      disc(hX, hY - 0.2, 3.1, rig.maskCol);
+      blk(hX - 2.0, hY - 0.4, 1.4, 1.0, '#1a0e08'); blk(hX + 0.6, hY - 0.4, 1.4, 1.0, '#1a0e08');
+      blk(hX - 0.5, hY + 1.0, 1.0, 1.8, '#1a0e08');
+      bar(hX - 1, hY - 3, hX - 3, hY - 5.5, 0.6, rig.accent); bar(hX + 1, hY - 3, hX + 3, hY - 5.5, 0.6, '#cc4422');
+    } else if (g === 'antler') {
+      disc(hX, hY, 3.0, rig.skin);
+      blk(hX - 2.6, hY - 2.2, 5.2, 1.2, rig.hair);
+      bar(hX - 1.6, hY - 2.2, hX - 3.2, hY - 5.4, 0.6, '#8a6a3a'); bar(hX - 3.2, hY - 4.2, hX - 4.2, hY - 5.0, 0.5, '#8a6a3a');
+      bar(hX + 1.6, hY - 2.2, hX + 3.2, hY - 5.4, 0.6, '#8a6a3a'); bar(hX + 3.2, hY - 4.2, hX + 4.2, hY - 5.0, 0.5, '#8a6a3a');
+      drawFace(hX, hY);
+    } else if (g === 'ponytail') {
+      disc(hX, hY, 3.0, rig.skin);
+      blk(hX - 3.0, hY - 2.6, 6.0, 1.6, rig.hair);
+      const sway = state === 'run' ? Math.sin(t * runF) * 1.2 : Math.sin(t * 2.4) * 0.5;
+      bar(hX - 2.6, hY - 1.5, hX - 4.2 - sway, hY + 2.5, 1.0, rig.hair);
+      blk(hX - 0.6, hY - 3.2, 2.0, 1.2, rig.accent, 0.8);
+      drawFace(hX, hY);
+    } else if (g === 'bald') {
+      disc(hX, hY, 3.0, rig.skin);
+      blk(hX - 1.4, hY - 3.0, 2.8, 1.0, rig.skinSh, 0.5);
+      blk(hX - 0.5, hY - 4.0, 1.0, 1.4, rig.hair);
+      drawFace(hX, hY);
+    } else {
+      disc(hX, hY, 3.0, rig.skin); drawFace(hX, hY);
+    }
+    if (rig.mask && g === 'hood') blk(hX - 1.8, hY + 0.8, 3.6, 1.8, rig.bodySh);
+    if ((g === 'hood' || g === 'wizhat') && dir !== 'up') drawFace(hX + (flip ? -0.4 : 0.4), hY + 0.4);
+  }
+  function drawFace(hX, hY) {
+    if (dir === 'up') return;
+    ctx.globalAlpha = 1;
+    if (dir === 'side') {
+      blk(hX + (flip ? -1.8 : 0.9), hY - 0.2, 0.9, 1.1, '#161018');
+      blk(hX + (flip ? -1.7 : 1.0), hY - 0.1, 0.5, 0.5, rig.accent, 0.95);
+    } else {
+      blk(hX - 1.4, hY - 0.2, 0.9, 1.1, '#161018');
+      blk(hX + 0.6, hY - 0.2, 0.9, 1.1, '#161018');
+      blk(hX - 1.3, hY - 0.1, 0.4, 0.4, rig.accent, 0.9);
+      blk(hX + 0.7, hY - 0.1, 0.4, 0.4, rig.accent, 0.9);
+    }
+  }
+
+  function drawWeapon(hX, hY) {
+    const st = o.wpnStyle || rig.wpnStyle;
+    let ang;
+    if (state === 'attack' && aT >= 0 && dir === 'side') ang = -0.9 + aT * 2.0;
+    else if (dir === 'side') ang = 0.1;
+    else ang = (dir === 'up') ? -1.3 : 1.0;
+    const ax = Math.cos(ang), ay = Math.sin(ang);
+    if (st === 'bow') {
+      bar(hX, hY - 4, hX + 1.4, hY, 0.7, rig.wpnMain);
+      bar(hX + 1.4, hY, hX, hY + 4, 0.7, rig.wpnMain);
+      blk(hX - 0.2, hY - 4.2, 0.7, 0.7, rig.wpnLt); blk(hX - 0.2, hY + 3.6, 0.7, 0.7, rig.wpnLt);
+      ctx.globalAlpha = 0.9; bar(hX - 0.2, hY - 4, hX - 0.2, hY + 4, 0.25, '#e8e8e8'); ctx.globalAlpha = 1;
+      if (state === 'attack') { const pull = aT < 0.5 ? aT : (1 - aT); bar(hX - pull * 3, hY, hX + 4, hY, 0.4, rig.wpnAcc); blk(hX + 4, hY - 0.3, 0.8, 0.8, '#ffffff'); }
+    } else if (st === 'cast') {
+      bar(hX, hY + 3, hX + (flip ? -0.6 : 0.6), hY - 6, 0.8, rig.wpnMain);
+      const gx = hX + (flip ? -0.6 : 0.6), gy = hY - 6.5;
+      const pulse = 0.7 + 0.3 * Math.sin(t * 6);
+      ctx.globalAlpha = 0.5 * pulse; disc(gx, gy, 2.4, rig.wpnAcc); ctx.globalAlpha = 1;
+      disc(gx, gy, 1.4, rig.wpnAcc); disc(gx, gy, 0.7, '#ffffff');
+      if (state === 'attack' && aT >= 0) { ctx.globalAlpha = 0.8; disc(gx, gy, 2.0 + aT * 2.5, rig.wpnAcc, 0.5 * (1 - aT)); ctx.globalAlpha = 1; }
+    } else if (st === 'bostaff') {
+      const spin = (state === 'attack' && aT >= 0) ? aT * 2.4 : 0.5;
+      const dx = Math.cos(spin), dy = Math.sin(spin);
+      bar(hX - dx * 5, hY - dy * 5, hX + dx * 5, hY + dy * 5, 0.7, rig.wpnMain);
+      blk(hX + dx * 5 - 0.4, hY + dy * 5 - 0.4, 0.9, 0.9, rig.wpnAcc); blk(hX - dx * 5 - 0.4, hY - dy * 5 - 0.4, 0.9, 0.9, rig.wpnAcc);
+    } else if (st === 'dagger') {
+      bar(hX, hY, hX + ax * 4, hY + ay * 4, 0.7, rig.wpnMain);
+      blk(hX + ax * 4 - 0.4, hY + ay * 4 - 0.4, 1.0, 1.0, rig.wpnLt);
+      blk(hX - 0.5, hY - 0.5, 1.2, 1.2, rig.wpnAcc, 0.8);
+    } else if (st === 'sword') {
+      bar(hX, hY, hX + ax * 7, hY + ay * 7, 0.8, rig.wpnMain);
+      blk(hX + ax * 7 - 0.4, hY + ay * 7 - 0.4, 1.0, 1.0, '#ffffff');
+      bar(hX - ax * 1.2 - ay * 1.6, hY - ay * 1.2 + ax * 1.6, hX - ax * 1.2 + ay * 1.6, hY - ay * 1.2 - ax * 1.6, 0.6, rig.wpnAcc);
+    } else if (st === 'scythe') {
+      bar(hX, hY + 5, hX, hY - 7, 0.8, rig.wpnMain);
+      bar(hX, hY - 7, hX + (flip ? -3.5 : 3.5), hY - 6, 0.7, rig.wpnLt);
+      bar(hX + (flip ? -3.5 : 3.5), hY - 6, hX + (flip ? -4 : 4), hY - 3.5, 0.6, rig.wpnLt);
+      if (state === 'attack' && aT >= 0) { ctx.globalAlpha = 0.6 * (1 - aT); bar(hX, hY - 6, hX + (flip ? -6 : 6), hY - 2, 0.5, rig.wpnAcc); ctx.globalAlpha = 1; }
+    } else if (st === 'spear') {
+      const L = state === 'attack' && aT >= 0 ? 8 + aT * 4 : 8;
+      bar(hX - ax * 3, hY - ay * 3, hX + ax * L, hY + ay * L, 0.6, rig.wpnMain);
+      blk(hX + ax * L - 0.5, hY + ay * L - 0.5, 1.2, 1.2, rig.wpnLt);
+      bar(hX + ax * (L - 1.4) - ay, hY + ay * (L - 1.4) + ax, hX + ax * (L - 1.4) + ay, hY + ay * (L - 1.4) - ax, 0.4, rig.wpnAcc);
+      if (rig.shield) blk(hX - 4, hY - 1.5, 1.4, 4, rig.accent, 0.9);
+    } else if (st === 'fetish') {
+      bar(hX, hY + 3, hX, hY - 5, 0.7, rig.wpnMain);
+      disc(hX, hY - 5.5, 1.6, '#caa84a');
+      blk(hX - 0.9, hY - 5.6, 0.6, 0.6, '#1a0e08'); blk(hX + 0.3, hY - 5.6, 0.6, 0.6, '#1a0e08');
+      blk(hX - 1.6, hY - 3.4, 0.6, 1.0, rig.wpnAcc); blk(hX + 1.0, hY - 3.4, 0.6, 1.0, '#cc4422');
+    } else if (st === 'druidstaff') {
+      bar(hX, hY + 3, hX, hY - 6, 0.8, rig.wpnMain);
+      disc(hX, hY - 6.5, 1.2, '#6a4a28');
+      blk(hX - 1.6, hY - 7.5, 1.2, 1.0, rig.accent); blk(hX + 0.6, hY - 7.2, 1.2, 1.0, rig.accent);
+    }
+  }
+
+  function drawDragon() {
+    const fly = Math.sin(t * (state === 'run' ? 10 : 4));
+    ctx.globalAlpha = 0.28; ctx.fillStyle = '#000'; ctx.fillRect(Math.round(cx - 8 * s), Math.round(cy + 13 * s), 16 * s, Math.round(1.4 * s)); ctx.globalAlpha = 1;
+    bar(-2, 6, -7, 4 + fly, 1.6, rig.bodySh); bar(-7, 4 + fly, -10, 6 + fly * 1.5, 1.0, rig.bodySh);
+    blk(-10.6, 5.5 + fly * 1.5, 1.4, 1.4, rig.accent);
+    ctx.globalAlpha = 0.96;
+    bar(-1, -3, -6, -8 - fly * 2, 1.2, rig.wing); bar(-6, -8 - fly * 2, -9, -3 - fly, 0.9, rig.wing);
+    blk(-9, -4 - fly, 4, 3, rig.wing, 0.8);
+    bar(1, -3, 4, -8 - fly * 2, 1.0, rig.wing, 0.85);
+    ctx.globalAlpha = 1;
+    bar(2, 6, 3.5, 12, 1.5, rig.bodySh); blk(3, 11.6, 2.4, 1.6, rig.bodySh);
+    bar(-1, 6, -1.5, 12, 1.4, rig.body); blk(-2.6, 11.6, 2.4, 1.6, rig.body);
+    bar(-2, 6, 2, -4, 3.2, rig.body); blk(0.5, -3, 2, 9, rig.belly, 0.9);
+    blk(-3, -4, 1.4, 9, rig.bodySh, 0.8);
+    for (let i = 0; i < 5; i++) bar(-1.5 + i * 0.7, -3 + i * 1.8, -2.5 + i * 0.7, -5 + i * 1.8, 0.6, rig.accent);
+    bar(1.5, -3, 3.5, -9, 2.0, rig.body);
+    disc(4.2, -10, 2.6, rig.body); blk(4.6, -10, 3.4, 2.2, rig.body);
+    blk(7.4, -9.6, 1.0, 1.4, rig.bodyLt);
+    blk(5.6, -11, 1.2, 1.0, rig.accent);
+    blk(5.8, -10.8, 0.6, 0.5, '#ffffff');
+    bar(3.6, -11.6, 2.4, -14, 0.7, '#e8d0a0'); bar(4.6, -11.8, 4.0, -14.4, 0.6, '#e8d0a0');
+    if (state === 'attack' && aT >= 0) {
+      ctx.globalAlpha = 0.85 * (1 - aT * 0.5);
+      disc(8.5 + aT * 3, -9, 1.4 + aT * 2, '#ffaa33'); disc(10 + aT * 4, -9, 1.0 + aT * 1.5, '#ff5522', 0.8); disc(8.5 + aT * 2, -9, 0.8, '#ffee88');
+      ctx.globalAlpha = 1;
+    }
+  }
+  function drawPanther() {
+    const run = state === 'run' ? Math.sin(t * 16) : 0;
+    const breathe = Math.sin(t * 3) * 0.3;
+    ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; ctx.fillRect(Math.round(cx - 9 * s), Math.round(cy + 8 * s), 18 * s, Math.round(1.4 * s)); ctx.globalAlpha = 1;
+    bar(-6, 3, -9, 0, 1.0, rig.bodySh); bar(-9, 0, -10, -3, 0.8, rig.bodySh); blk(-10.4, -3.6, 1.2, 1.2, rig.bodyLt);
+    bar(-4, 3, -4 + run * 2, 8, 1.0, rig.bodySh); blk(-5 + run * 2, 7.6, 2.2, 1.2, rig.bodySh);
+    bar(4, 3, 4 - run * 2, 8, 1.0, rig.bodySh); blk(3 - run * 2, 7.6, 2.2, 1.2, rig.bodySh);
+    bar(-6, 2 + breathe, 5, 1 + breathe, 3.0, rig.body);
+    blk(-6, 3, 11, 1.4, rig.bodySh, 0.6);
+    bar(-3.5, 3, -3.5 - run * 2, 8.4, 1.1, rig.body); blk(-4.6 - run * 2, 8, 2.4, 1.3, rig.body);
+    bar(4.2, 3, 4.2 + run * 2, 8.4, 1.1, rig.body); blk(3.2 + run * 2, 8, 2.4, 1.3, rig.body);
+    disc(-4.5, 1.5 + breathe, 2.6, rig.body); disc(4, 1 + breathe, 2.4, rig.bodyLt);
+    disc(6.5, 0 + breathe, 2.4, rig.body);
+    blk(7.6, 0.4 + breathe, 2.2, 1.8, rig.body);
+    bar(5.4, -2 + breathe, 4.8, -3.6 + breathe, 0.7, rig.body); bar(7.4, -2 + breathe, 8.0, -3.6 + breathe, 0.7, rig.body);
+    blk(7.0, -0.4 + breathe, 1.0, 0.8, rig.eye); blk(7.2, -0.3 + breathe, 0.5, 0.4, '#ffffff');
+    blk(8.4, 1.6 + breathe, 0.4, 0.8, '#ffffff'); blk(9.0, 1.6 + breathe, 0.4, 0.8, '#ffffff');
+    if (state === 'attack' && aT >= 0) {
+      for (let i = -1; i <= 1; i++) bar(9, -1 + i * 1.5, 9 + aT * 5, 1 + i * 1.8, 0.4, rig.accent, 0.9 * (1 - aT));
+    }
+  }
+}
+
+// ============================================================
+// CharAnimator — drives drawCharacter() for the 9 non-Berserker
+// classes. Same interface as BerserkerAnimator so Player.draw can
+// use either: update(dt,isMoving,isAttacking,vx,vy) + draw(ctx,cx,cy,flash,classKey).
+// ============================================================
+class CharAnimator {
+  constructor(classId) {
+    this.classId = classId;
+    this.t = 0;
+    this.dir8 = 'south';
+    this.state = 'idle';
+    this.attackT = -1;
+    this.attackDur = 0.30;
+    this._wasAttacking = false;
+  }
+  update(dt, isMoving, isAttacking, vx, vy) {
+    this.t += dt;
+    const nd = _velToDir8(vx || 0, vy || 0);
+    if (nd) this.dir8 = nd;
+    if (isAttacking && !this._wasAttacking && this.attackT < 0) this.attackT = 0;
+    this._wasAttacking = isAttacking;
+    if (this.attackT >= 0) {
+      this.attackT += dt / this.attackDur;
+      if (this.attackT >= 1) this.attackT = -1;
+    }
+    this.state = (this.attackT >= 0) ? 'attack' : (isMoving ? 'run' : 'idle');
+  }
+  draw(ctx, cx, cy, flash, classKey) {
+    if (typeof drawCharacter !== 'function') return false;
+    const d = rigDir4(this.dir8);
+    drawCharacter(ctx, cx, cy, {
+      classId: classKey || this.classId, dir: d.dir, flip: d.flip,
+      state: this.state, t: this.t, attackT: this.attackT, flash: !!flash, s: 2,
+    });
     return true;
   }
 }
